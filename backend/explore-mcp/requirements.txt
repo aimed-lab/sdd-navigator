@@ -1,0 +1,8 @@
+mcp
+pydantic
+httpx
+python-dotenv
+requests
+# LLM SDKs — only the one named by LLM_PROVIDER is imported at runtime (see llm.py)
+groq
+openai
