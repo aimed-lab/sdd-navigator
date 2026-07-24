@@ -1,0 +1,45 @@
+# Dependencies
+frontend/node_modules/
+
+# Python virtualenv
+venv/
+
+# Environment variables (never commit secrets)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+frontend/.env.local
+
+# Next.js build output
+.next/
+frontend/.next/
+frontend/out/
+
+# TypeScript / Next build artifacts (regenerated every build)
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+next-env.d.ts
+frontend/next-env.d.ts
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Backend pipeline output
+backend/output/
+
+# Local-only pages (never deploy)
+frontend/app/funnel/
+
+# Design files
+design/
+
+# Planning documents
+docs/
+
+# Editor / local AI context
+CLAUDE.md
