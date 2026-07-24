@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 import httpx
 
-from dedupe import dedupe_key
+from dedupe import dedupe_key, normalize_doi
 from models import Item
 
 from .base import get_json, to_iso
@@ -51,9 +51,10 @@ async def fetch_crossref(client: httpx.AsyncClient, term: str, cap: int) -> list
 
         title = titles[0]
         venue = (w.get("container-title") or [None])[0]
-        doi = w.get("DOI")
-        url_val = w.get("URL") or (f"https://doi.org/{doi}" if doi else "https://search.crossref.org")
-        external_id = (doi or "unknown").replace("/", "-")
+        doi_raw = w.get("DOI")
+        doi = normalize_doi(doi_raw)  # Crossref DOI is already the bare "10.x" form
+        url_val = w.get("URL") or (f"https://doi.org/{doi_raw}" if doi_raw else "https://search.crossref.org")
+        external_id = (doi_raw or "unknown").replace("/", "-")
 
         items.append(
             Item(
@@ -62,10 +63,11 @@ async def fetch_crossref(client: httpx.AsyncClient, term: str, cap: int) -> list
                 title=title,
                 summary=f"Published in {venue}." if venue else "Indexed in Crossref.",
                 url=url_val,
+                doi=doi,
                 source="crossref",
                 date_iso=iso_date,
                 signal=None,  # Crossref gives no ranking metric
-                dedupe_key=dedupe_key(url_val, title),
+                dedupe_key=dedupe_key(url_val, title, doi),
                 raw=w,
             )
         )

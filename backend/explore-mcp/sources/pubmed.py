@@ -12,10 +12,22 @@ from urllib.parse import quote
 
 import httpx
 
-from dedupe import dedupe_key
+from dedupe import dedupe_key, normalize_doi
 from models import Item
 
 from .base import get_json, to_iso
+
+
+def _extract_doi(rec: dict) -> str | None:
+    """PubMed esummary exposes the DOI in the `articleids` array (idtype 'doi'),
+    with `elocationid` as a fallback. Returns the normalized DOI, or None."""
+    for aid in rec.get("articleids") or []:
+        if (aid.get("idtype") or "").lower() == "doi":
+            doi = normalize_doi(aid.get("value"))
+            if doi and doi.startswith("10."):
+                return doi
+    doi = normalize_doi(rec.get("elocationid"))
+    return doi if doi and doi.startswith("10.") else None
 
 _ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 _ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
@@ -49,6 +61,7 @@ async def fetch_pubmed(client: httpx.AsyncClient, term: str, cap: int) -> list[I
 
         url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
         summary = f"Published in {rec.get('source') or 'Unknown Journal'}. {author_str}".strip()
+        doi = _extract_doi(rec)  # enables cross-source collapse with OpenAlex/Crossref
 
         items.append(
             Item(
@@ -57,10 +70,11 @@ async def fetch_pubmed(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 title=title,
                 summary=summary,
                 url=url,
+                doi=doi,
                 source="pubmed",
                 date_iso=iso_date,
                 signal=None,  # PubMed gives no ranking metric
-                dedupe_key=dedupe_key(url, title),
+                dedupe_key=dedupe_key(url, title, doi),
                 raw=rec,
             )
         )

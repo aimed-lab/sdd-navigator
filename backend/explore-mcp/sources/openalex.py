@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 import httpx
 
-from dedupe import dedupe_key
+from dedupe import dedupe_key, normalize_doi
 from models import Item, Signal
 
 from .base import get_json, now_iso, to_iso
@@ -50,6 +50,7 @@ async def fetch_openalex(client: httpx.AsyncClient, term: str, cap: int) -> list
 
         oa_id = w.get("id") or ""
         external_id = oa_id.split("/")[-1] if oa_id else "unknown"
+        doi = normalize_doi(w.get("doi"))  # OpenAlex doi is a full https://doi.org/... URL
         url_val = (
             w.get("doi")
             or (w.get("primary_location") or {}).get("landing_page_url")
@@ -72,10 +73,11 @@ async def fetch_openalex(client: httpx.AsyncClient, term: str, cap: int) -> list
                 title=title,
                 summary=summary,
                 url=url_val,
+                doi=doi,
                 source="openalex",
                 date_iso=iso_date,
                 signal=signal,
-                dedupe_key=dedupe_key(url_val, title),
+                dedupe_key=dedupe_key(url_val, title, doi),
                 # raw stores the whole work, so referenced_works travels with it for
                 # later citation-graph ranking.
                 raw=w,

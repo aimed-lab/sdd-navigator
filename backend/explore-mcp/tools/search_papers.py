@@ -3,8 +3,10 @@ tools/search_papers.py — one tool that searches the scientific literature.
 
 Fans out to PubMed + OpenAlex + Crossref IN PARALLEL over a single shared HTTP
 client (asyncio.gather with return_exceptions=True), so one source failing (or
-timing out) never sinks the others. The merged set is deduped (dedupe.py) and
-rank-interleaved (see `_rank_merge`): cited papers rank among themselves by
+timing out) never sinks the others. The merged set is collapsed DOI-aware across
+sources (dedupe.merge_items — a PubMed paper and its OpenAlex twin become one
+item, keeping the citations signal + referenced_works) and then rank-interleaved
+(see `_rank_merge`): cited papers rank among themselves by
 citations desc, uncited among themselves by date desc, and the two groups are
 merged by rank position so the top-cited and the newest both surface near the top.
 
@@ -18,7 +20,7 @@ import asyncio
 
 import httpx
 
-from dedupe import dedupe_items
+from dedupe import merge_items
 from models import Item
 from sources.crossref import fetch_crossref
 from sources.openalex import fetch_openalex
@@ -77,8 +79,8 @@ async def search_papers_async(query: str, limit: int = 20) -> list[Item]:
             continue  # per-source isolation — swallow this source, keep the rest
         merged.extend(result)
 
-    deduped = dedupe_items(merged)
-    ranked = _rank_merge(deduped)
+    collapsed = merge_items(merged)   # DOI-aware cross-source merge (not first-seen-drop)
+    ranked = _rank_merge(collapsed)
     return ranked[:limit]
 
 

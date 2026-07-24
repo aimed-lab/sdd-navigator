@@ -35,6 +35,7 @@ class Item(BaseModel):
     title: str
     summary: str | None = None
     url: str | None = None
+    doi: str | None = None           # normalized DOI key form ("10.xxxx/yyy"), or None
     source: str                      # pubmed|openalex|crossref|internal
     date_iso: str | None = None
     signal: Signal | None = None     # None unless the source reported a real metric

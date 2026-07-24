@@ -55,7 +55,7 @@ class _FakeClient:
 
 def test_pubmed_item_shape():
     client = _FakeClient({
-        "esearch": {"esearchresult": {"idlist": ["111", "222"]}},
+        "esearch": {"esearchresult": {"idlist": ["111", "222", "333"]}},
         "esummary": {"result": {
             "111": {
                 "title": "PHGDH in Alzheimer's",
@@ -64,13 +64,25 @@ def test_pubmed_item_shape():
                 "authors": [{"name": "Doe J"}, {"name": "Roe R"}, {"name": "Poe P"}],
             },
             "222": {"title": "   ", "source": "X", "pubdate": "2023", "authors": []},
+            "333": {
+                "title": "Serine metabolism review",
+                "source": "Cell",
+                "pubdate": "2024 Jan",
+                "authors": [{"name": "Ng L"}],
+                # DOI lives in the articleids array (idtype 'doi')
+                "articleids": [
+                    {"idtype": "pubmed", "value": "333"},
+                    {"idtype": "doi", "value": "10.1016/J.CELL.2024.001"},
+                ],
+            },
         }},
     })
     items = asyncio.run(fetch_pubmed(client, "PHGDH Alzheimer's", 10))
 
-    assert len(items) == 1  # blank-title record 222 dropped
-    it = items[0]
-    assert it.id == "pubmed:111"
+    assert len(items) == 2  # blank-title record 222 dropped; 111 + 333 survive
+    by_id = {it.id: it for it in items}
+
+    it = by_id["pubmed:111"]
     assert it.kind == "paper"
     assert it.source == "pubmed"
     assert it.title == "PHGDH in Alzheimer's"
@@ -78,8 +90,14 @@ def test_pubmed_item_shape():
     assert it.summary == "Published in Nature. Doe J, Roe R et al."
     assert it.date_iso == "2024-10-15T00:00:00.000Z"
     assert it.signal is None                      # PubMed has no metric
+    assert it.doi is None                          # no articleids -> falls back to URL key
     assert it.dedupe_key == "url:pubmed.ncbi.nlm.nih.gov/111/"
     assert it.raw["source"] == "Nature"
+
+    # 333 carries a DOI -> normalized, and the dedupe key is DOI-based (cross-source collapse)
+    d = by_id["pubmed:333"]
+    assert d.doi == "10.1016/j.cell.2024.001"
+    assert d.dedupe_key == "doi:10.1016/j.cell.2024.001"
 
 
 # ── OpenAlex ─────────────────────────────────────────────────────────────────
@@ -117,6 +135,7 @@ def test_openalex_item_shape_with_citation_signal():
     assert it.signal is not None
     assert it.signal.metric == "citations"
     assert it.signal.value == 42.0
+    assert it.doi == "10.1/abc"                      # normalized from https://doi.org/10.1/abc
     assert it.dedupe_key == "doi:10.1/abc"
     # referenced_works captured into raw for later citation-graph ranking
     assert it.raw["referenced_works"] == ["https://openalex.org/W1", "https://openalex.org/W2"]
@@ -149,6 +168,7 @@ def test_crossref_item_shape_and_type_guard():
     assert it.url == "https://doi.org/10.5/xyz"
     assert it.date_iso == "2024-03-07T00:00:00.000Z"
     assert it.signal is None                        # Crossref has no metric
+    assert it.doi == "10.5/xyz"
     assert it.dedupe_key == "doi:10.5/xyz"
 
 
