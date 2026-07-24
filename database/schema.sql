@@ -1,9 +1,18 @@
 -- =============================================================================
 -- SDD Navigator — Complete Database Schema
 -- =============================================================================
--- Run this in the Supabase SQL editor to recreate the database from scratch.
+-- Verified against live DB catalog 2026-07-24.
+--
+-- Run this in the Supabase SQL editor (or any empty Postgres) top-to-bottom to
+-- reproduce the live database exactly. Idempotent: CREATE ... IF NOT EXISTS and
+-- DROP POLICY IF EXISTS guards mean it can be re-run without error.
 -- Order matters: tables with foreign keys come after their dependencies.
 -- auth.users is managed by Supabase Auth and is not recreated here.
+--
+-- 12 tables: users, researcher_works, wiki_pages, nodes, edges, providers,
+--            comments, saved_items, projects, connection_requests,
+--            promote_captures, lab_resources.
+-- (The former discovery_items table has been dropped and is intentionally absent.)
 -- =============================================================================
 
 
@@ -18,7 +27,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid() on older PG ve
 -- TABLE: users
 -- =============================================================================
 -- One row per registered researcher.
--- id mirrors auth.users.id so we can JOIN on it from any table.
+-- id mirrors auth.users.id (FK to auth.users) so we can JOIN on it from any table.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.users (
@@ -37,6 +46,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     orcid_url      TEXT,                               -- ORCID profile
     github_url     TEXT,                               -- GitHub profile
     interests      TEXT[]      DEFAULT '{}',
+    expertise      TEXT[]      DEFAULT '{}',           -- expertise tags (live column)
     is_public      BOOLEAN     NOT NULL DEFAULT false,
     profile_slug   TEXT        UNIQUE,
     notify_weekly  BOOLEAN     NOT NULL DEFAULT false,    -- /settings → Notifications
@@ -46,19 +56,20 @@ CREATE TABLE IF NOT EXISTS public.users (
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 
--- Users can read and manage only their own profile row.
-CREATE POLICY "users_select_own"
-    ON public.users FOR SELECT
-    USING (auth.uid() = id);
-
-CREATE POLICY "users_insert_own"
-    ON public.users FOR INSERT
-    WITH CHECK (auth.uid() = id);
-
-CREATE POLICY "users_update_own"
-    ON public.users FOR UPDATE
+-- A user can read/insert/update/delete only their own profile row.
+DROP POLICY IF EXISTS "Users: own row" ON public.users;
+CREATE POLICY "Users: own row"
+    ON public.users FOR ALL
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
+
+-- Public read of PUBLIC profiles only — powers the public /researchers/[slug]
+-- pages, read with the anon key. (Was missing from the schema previously; without
+-- it a rebuild would break public profiles even though the live DB allows them.)
+DROP POLICY IF EXISTS "Users: public read for public profiles" ON public.users;
+CREATE POLICY "Users: public read for public profiles"
+    ON public.users FOR SELECT
+    USING (is_public = true);
 
 -- Auto-create the profile row when a new auth user is created.
 -- Email confirmation is ON, so signUp() creates the auth.users row WITHOUT a
@@ -97,6 +108,7 @@ CREATE TRIGGER on_auth_user_created
 -- Edited in /profile/setup (delete-and-reinsert of the caller's own rows) and
 -- shown on the public /researchers/[slug] page. One row per work; owner is
 -- stamped from the session (user_id), never the client payload.
+-- user_id FK -> public.users(id) (nullable; no cascade).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.researcher_works (
@@ -114,26 +126,19 @@ CREATE TABLE IF NOT EXISTS public.researcher_works (
 
 ALTER TABLE public.researcher_works ENABLE ROW LEVEL SECURITY;
 
--- Public read — works appear on public researcher profiles (read via the anon key).
-CREATE POLICY "researcher_works_select_public"
+DROP POLICY IF EXISTS "Works: public read" ON public.researcher_works;
+CREATE POLICY "Works: public read"
     ON public.researcher_works FOR SELECT
     USING (true);
 
--- Owners manage only their OWN works (insert / update / delete).
-CREATE POLICY "researcher_works_insert_own"
+DROP POLICY IF EXISTS "Works: own insert" ON public.researcher_works;
+CREATE POLICY "Works: own insert"
     ON public.researcher_works FOR INSERT
-    TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "researcher_works_update_own"
-    ON public.researcher_works FOR UPDATE
-    TO authenticated
-    USING (auth.uid() = user_id)
-    WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "researcher_works_delete_own"
+DROP POLICY IF EXISTS "Works: own delete" ON public.researcher_works;
+CREATE POLICY "Works: own delete"
     ON public.researcher_works FOR DELETE
-    TO authenticated
     USING (auth.uid() = user_id);
 
 
@@ -163,7 +168,8 @@ CREATE TABLE IF NOT EXISTS public.wiki_pages (
 ALTER TABLE public.wiki_pages ENABLE ROW LEVEL SECURITY;
 
 -- Public read access — episode wiki pages are open to everyone.
-CREATE POLICY "wiki_pages_select_public"
+DROP POLICY IF EXISTS "Wiki pages: public read" ON public.wiki_pages;
+CREATE POLICY "Wiki pages: public read"
     ON public.wiki_pages FOR SELECT
     USING (true);
 
@@ -177,21 +183,22 @@ CREATE POLICY "wiki_pages_select_public"
 -- =============================================================================
 -- Knowledge graph nodes built by graph_agent.py from wiki_pages data.
 -- Three types: episode, concept, resource (drug/protein/target/tool).
+-- NOTE: live table has NO created_at column.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.nodes (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    label       TEXT        NOT NULL UNIQUE,    -- display name; unique across all types
+    label       TEXT        NOT NULL,           -- display name (not unique live)
     type        TEXT        NOT NULL            -- 'episode' | 'concept' | 'resource'
                     CHECK (type IN ('episode', 'concept', 'resource')),
-    description TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    description TEXT
 );
 
 ALTER TABLE public.nodes ENABLE ROW LEVEL SECURITY;
 
 -- Public read — the knowledge graph is visible to all (incl. unauthenticated users).
-CREATE POLICY "nodes_select_public"
+DROP POLICY IF EXISTS "Nodes: public read" ON public.nodes;
+CREATE POLICY "Nodes: public read"
     ON public.nodes FOR SELECT
     USING (true);
 
@@ -203,20 +210,21 @@ CREATE POLICY "nodes_select_public"
 --   episode  → concept   (has_concept)
 --   concept  → concept   (shared_concept — co-occur in same episode)
 --   concept  → resource  (related_to)
+-- NOTE: live table has a COMPOSITE primary key (source_id, target_id, relationship)
+-- and NO surrogate id / created_at columns. FKs -> public.nodes(id).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.edges (
-    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id    UUID        NOT NULL REFERENCES public.nodes (id) ON DELETE CASCADE,
     target_id    UUID        NOT NULL REFERENCES public.nodes (id) ON DELETE CASCADE,
     relationship TEXT        NOT NULL,   -- 'has_concept' | 'shared_concept' | 'related_to'
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (source_id, target_id)        -- prevent duplicate edges
+    CONSTRAINT edges_pkey PRIMARY KEY (source_id, target_id, relationship)
 );
 
 ALTER TABLE public.edges ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "edges_select_public"
+DROP POLICY IF EXISTS "Edges: public read" ON public.edges;
+CREATE POLICY "Edges: public read"
     ON public.edges FOR SELECT
     USING (true);
 
@@ -238,6 +246,7 @@ CREATE POLICY "edges_select_public"
 CREATE TABLE IF NOT EXISTS public.providers (
     id                 UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     name               TEXT        NOT NULL,
+    country            TEXT,                                -- provider country (live column)
     type               TEXT        NOT NULL DEFAULT 'external'   -- 'internal' (SPARC) | 'external' (CRO)
                            CHECK (type IN ('internal', 'external')),
     speciality         TEXT,                                -- headline service area for this row
@@ -249,13 +258,15 @@ CREATE TABLE IF NOT EXISTS public.providers (
     verified           BOOLEAN     NOT NULL DEFAULT false,  -- confirmed real internal provider
     stage_tags         TEXT[],                              -- drug-discovery stage labels (nullable)
     contact            TEXT,                                -- website URL or email (read by the app)
+    contact_email      TEXT,                                -- provider contact email (live column)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE public.providers ENABLE ROW LEVEL SECURITY;
 
 -- Public read — provider directory is openly browsable.
-CREATE POLICY "providers_select_public"
+DROP POLICY IF EXISTS "Providers: public read" ON public.providers;
+CREATE POLICY "Providers: public read"
     ON public.providers FOR SELECT
     USING (true);
 
@@ -299,12 +310,13 @@ WHERE NOT EXISTS (
 -- Researcher discussion threads attached to individual wiki pages.
 -- name and affiliation are read at display time via JOIN to users —
 -- they are not stored in the comments row itself.
+-- NOTE: live user_id FK targets public.users(id) (NOT auth.users).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.comments (
     id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     wiki_id    UUID        NOT NULL REFERENCES public.wiki_pages (id) ON DELETE CASCADE,
-    user_id    UUID        NOT NULL REFERENCES auth.users (id)        ON DELETE CASCADE,
+    user_id    UUID        NOT NULL REFERENCES public.users (id)      ON DELETE CASCADE,
     content    TEXT        NOT NULL CHECK (char_length(content) > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -312,27 +324,21 @@ CREATE TABLE IF NOT EXISTS public.comments (
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 
 -- Anyone (including unauthenticated visitors) can read comments.
-CREATE POLICY "comments_select_public"
+DROP POLICY IF EXISTS "Comments: public read" ON public.comments;
+CREATE POLICY "Comments: public read"
     ON public.comments FOR SELECT
     USING (true);
 
 -- Authenticated users may insert comments attributed to themselves only.
-CREATE POLICY "comments_insert_own"
+DROP POLICY IF EXISTS "Comments: own insert" ON public.comments;
+CREATE POLICY "Comments: own insert"
     ON public.comments FOR INSERT
-    TO authenticated
-    WITH CHECK (auth.uid() = user_id);
-
--- Authors can edit their own comments.
-CREATE POLICY "comments_update_own"
-    ON public.comments FOR UPDATE
-    TO authenticated
-    USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
 -- Authors can delete their own comments.
-CREATE POLICY "comments_delete_own"
+DROP POLICY IF EXISTS "Comments: own delete" ON public.comments;
+CREATE POLICY "Comments: own delete"
     ON public.comments FOR DELETE
-    TO authenticated
     USING (auth.uid() = user_id);
 
 
@@ -343,6 +349,7 @@ CREATE POLICY "comments_delete_own"
 -- DiscoverItem payload as JSONB so the "Saved" view can re-render cards without
 -- re-fetching the live external sources. UNIQUE (user_id, item_id) prevents the
 -- same item being saved twice. Fully private — users only ever see their own.
+-- user_id FK -> auth.users(id).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.saved_items (
@@ -357,16 +364,19 @@ CREATE TABLE IF NOT EXISTS public.saved_items (
 ALTER TABLE public.saved_items ENABLE ROW LEVEL SECURITY;
 
 -- Users can read, insert, and delete only their OWN saved items.
+DROP POLICY IF EXISTS "saved_items_select_own" ON public.saved_items;
 CREATE POLICY "saved_items_select_own"
     ON public.saved_items FOR SELECT
     TO authenticated
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "saved_items_insert_own" ON public.saved_items;
 CREATE POLICY "saved_items_insert_own"
     ON public.saved_items FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "saved_items_delete_own" ON public.saved_items;
 CREATE POLICY "saved_items_delete_own"
     ON public.saved_items FOR DELETE
     TO authenticated
@@ -381,7 +391,7 @@ CREATE POLICY "saved_items_delete_own"
 -- LLM. input_data stores the full 7-field form input (for the recap block and a
 -- regenerate/edit flow); output_data stores the full generated phased-document
 -- output (rendered verbatim on reopen). Fully private — users only ever see
--- their own projects.
+-- their own projects. user_id FK -> auth.users(id).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.projects (
@@ -397,22 +407,26 @@ CREATE TABLE IF NOT EXISTS public.projects (
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
 
 -- Users can read, insert, update, and delete only their OWN projects.
+DROP POLICY IF EXISTS "projects_select_own" ON public.projects;
 CREATE POLICY "projects_select_own"
     ON public.projects FOR SELECT
     TO authenticated
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "projects_insert_own" ON public.projects;
 CREATE POLICY "projects_insert_own"
     ON public.projects FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "projects_update_own" ON public.projects;
 CREATE POLICY "projects_update_own"
     ON public.projects FOR UPDATE
     TO authenticated
     USING (auth.uid() = user_id)
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "projects_delete_own" ON public.projects;
 CREATE POLICY "projects_delete_own"
     ON public.projects FOR DELETE
     TO authenticated
@@ -429,6 +443,7 @@ CREATE POLICY "projects_delete_own"
 -- the validated session, never the body) and RLS-enforced. project_id is
 -- ON DELETE SET NULL so the attribution record survives a proposal deletion, and
 -- nullable because the proposal may be unsaved when Connect is clicked.
+-- user_id FK -> auth.users(id); project_id FK -> public.projects(id).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.connection_requests (
@@ -447,12 +462,14 @@ ALTER TABLE public.connection_requests ENABLE ROW LEVEL SECURITY;
 
 -- A user can read only their OWN requests. (SPARC-admin read is a later phase —
 -- intentionally NOT added here.)
+DROP POLICY IF EXISTS "connection_requests_select_own" ON public.connection_requests;
 CREATE POLICY "connection_requests_select_own"
     ON public.connection_requests FOR SELECT
     TO authenticated
     USING (auth.uid() = user_id);
 
 -- A user can insert requests attributed to themselves only.
+DROP POLICY IF EXISTS "connection_requests_insert_own" ON public.connection_requests;
 CREATE POLICY "connection_requests_insert_own"
     ON public.connection_requests FOR INSERT
     TO authenticated
@@ -468,7 +485,7 @@ CREATE POLICY "connection_requests_insert_own"
 -- auth.uid() = user_id ownership model used by users / researcher_works: anyone
 -- (including anonymous visitors) may INSERT a capture, and there is deliberately
 -- NO client-facing SELECT/UPDATE/DELETE policy — reads happen server-side with
--- the service-role key only. (Step 1 of the Promote feature: schema + fetch only.)
+-- the service-role key only.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.promote_captures (
@@ -487,6 +504,7 @@ ALTER TABLE public.promote_captures ENABLE ROW LEVEL SECURITY;
 -- Public insert only — this captures an external researcher's identity, not the
 -- logged-in caller's. No select/update/delete policy for the client; reads
 -- happen server-side/service-role only.
+DROP POLICY IF EXISTS "anyone can insert promote captures" ON public.promote_captures;
 CREATE POLICY "anyone can insert promote captures"
     ON public.promote_captures FOR INSERT
     WITH CHECK (true);
@@ -504,6 +522,7 @@ CREATE POLICY "anyone can insert promote captures"
 -- the owner explicitly chooses to show on Connect — NOT their account email, and
 -- never joined from public.users. It is returned by exactly one auth-gated route
 -- (/contact); the public browse read never selects it.
+-- owner_id FK -> public.users(id).
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.lab_resources (
@@ -522,20 +541,24 @@ ALTER TABLE public.lab_resources ENABLE ROW LEVEL SECURITY;
 -- Public read — the registry is openly browsable. Exposes every column at the DB
 -- level; the public browse API deliberately does NOT select contact_info (only
 -- the auth-gated /contact route returns it).
+DROP POLICY IF EXISTS "anyone can read lab resources" ON public.lab_resources;
 CREATE POLICY "anyone can read lab resources"
     ON public.lab_resources FOR SELECT
     USING (true);
 
 -- Authenticated users may insert resources they own only.
+DROP POLICY IF EXISTS "authenticated users can insert own resource" ON public.lab_resources;
 CREATE POLICY "authenticated users can insert own resource"
     ON public.lab_resources FOR INSERT
     WITH CHECK (auth.uid() = owner_id);
 
 -- Owners may update / delete only their own resources.
+DROP POLICY IF EXISTS "owner can update own resource" ON public.lab_resources;
 CREATE POLICY "owner can update own resource"
     ON public.lab_resources FOR UPDATE
     USING (auth.uid() = owner_id);
 
+DROP POLICY IF EXISTS "owner can delete own resource" ON public.lab_resources;
 CREATE POLICY "owner can delete own resource"
     ON public.lab_resources FOR DELETE
     USING (auth.uid() = owner_id);
@@ -561,5 +584,3 @@ CREATE INDEX IF NOT EXISTS idx_connection_requests_user   ON public.connection_r
 CREATE INDEX IF NOT EXISTS idx_connection_requests_status ON public.connection_requests (status);
 CREATE INDEX IF NOT EXISTS idx_lab_resources_category      ON public.lab_resources (category, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lab_resources_owner         ON public.lab_resources (owner_id);
-
-
