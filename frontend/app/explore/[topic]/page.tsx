@@ -1,13 +1,15 @@
 "use client";
 
-// Explore feed — the field-wide default landing feed from the real explore
-// backend. Layout follows design/stitch/smartdrugdiscovery_refined_explore_grid
-// (the GRID version). Nav/Footer come from the shared shell (in the root layout).
+// Search results page — /explore/<topic>. Same shell, grid, and category strip
+// as the Explore feed, but scoped to a query: it POSTs { input: topic } to the
+// explore backend and renders the routed sections. Selecting a category filters
+// to that section; an empty selected category shows the A+D invitation card.
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
-import CategoryStrip, { labelForKind } from "@/components/CategoryStrip";
+import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import CategoryEmptyCard from "@/components/CategoryEmptyCard";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -20,7 +22,6 @@ const SECTION_TITLE: Record<string, string> = {
   resource: "Lab Resources",
   person: "People",
 };
-
 const titleFor = (kind: string) =>
   SECTION_TITLE[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 
@@ -35,16 +36,24 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-export default function ExplorePage() {
+export default function SearchResultsPage() {
   const router = useRouter();
-  const [query, setQuery] = useState("");
+  const params = useParams<{ topic: string }>();
+  const topic = decodeURIComponent(
+    Array.isArray(params.topic) ? params.topic[0] : params.topic ?? ""
+  );
+
+  const [query, setQuery] = useState(topic); // search bar value (pre-filled)
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null); // category filter; null = All
+  const [selected, setSelected] = useState<string | null>(null);
 
+  // (Re)fetch whenever the routed topic changes.
   useEffect(() => {
     let cancelled = false;
+    setQuery(topic);
+    setSelected(null);
     (async () => {
       setLoading(true);
       setFailed(false);
@@ -52,7 +61,7 @@ export default function ExplorePage() {
         const res = await fetch("/api/explore", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: "" }), // empty -> backend default field-wide feed
+          body: JSON.stringify({ input: topic }),
         });
         const json = (await res.json()) as ExploreResponse;
         if (!cancelled) setData(json);
@@ -65,10 +74,9 @@ export default function ExplorePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [topic]);
 
-  // A+B empty rule: 3+ items -> full grid section; 1-2 items -> pooled into
-  // "Also Found"; 0 items -> hidden entirely.
+  // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
   const { fullSections, pooledItems } = useMemo(() => {
     const withItems = (data?.sections ?? []).filter((s) => s.items.length > 0);
     const full = withItems.filter((s) => s.items.length >= 3);
@@ -84,19 +92,19 @@ export default function ExplorePage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (q) router.push(`/explore/${encodeURIComponent(q)}`);
+    if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}`);
   };
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
-      {/* Search */}
-      <section className="max-w-3xl mx-auto mb-10">
+      {/* Search (pre-filled, editable) */}
+      <section className="max-w-3xl mx-auto mb-6">
         <form onSubmit={submit} className="relative">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             type="text"
-            placeholder="What are you working on? e.g. PHGDH in Alzheimer's, pancreatic cancer, CRISPR screening"
+            placeholder="Search papers, tools, trials, grants, podcast, people…"
             className="w-full h-16 px-6 pr-16 bg-white border border-outline-variant/40 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm text-body-lg font-body-lg placeholder:text-secondary/50 transition-all"
           />
           <button
@@ -109,14 +117,15 @@ export default function ExplorePage() {
         </form>
       </section>
 
-      {/* Stat strip */}
-      <div className="mb-6 py-3 border-y border-surface-variant/40 text-center">
-        <p className="text-primary font-label-md text-label-md tracking-wide">
-          Live across 6+ sources · 64 podcast episodes · papers, news, tools, trials, grants, people
+      {/* Query heading */}
+      <div className="mb-6 text-center">
+        <p className="text-secondary font-body-md">
+          Results for{" "}
+          <span className="text-on-background font-headline-md">&ldquo;{topic}&rdquo;</span>
         </p>
       </div>
 
-      {/* Category strip — shared switcher; horizontal scroll on mobile */}
+      {/* Category strip */}
       <CategoryStrip selected={selected} onSelect={setSelected} />
 
       {/* Loading */}
@@ -135,42 +144,42 @@ export default function ExplorePage() {
         </div>
       )}
 
-      {/* Error / empty */}
+      {/* Error / no results at all */}
       {!loading && showError && (
         <div className="max-w-md mx-auto text-center py-24">
-          <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
+          <span className="material-symbols-outlined text-5xl text-secondary/50">search_off</span>
           <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
-            Couldn&apos;t load the feed right now
+            No results for &ldquo;{topic}&rdquo;
           </h2>
           <p className="mt-2 text-secondary font-body-md">
-            The discovery backend didn&apos;t respond. Please try again in a moment.
+            Try a broader term, or browse the full feed.
           </p>
           <button
-            onClick={() => location.reload()}
+            onClick={() => router.push("/explore")}
             className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
           >
-            Retry
+            Browse the full feed
           </button>
         </div>
       )}
 
-      {/* Feed */}
+      {/* Results */}
       {!loading && !showError && (() => {
-        // "All" -> A+B feed (full sections + pooled). A specific category -> just
-        // that kind's section (regardless of item count, so a small section is
-        // still reachable via its chip).
         const activeSections =
           selected === null
             ? fullSections
             : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
         const showPooled = selected === null && pooledItems.length > 0;
-        const label = labelForKind(selected);
 
+        // Selected category with no results -> the A+D invitation card.
         if (selected !== null && activeSections.length === 0) {
           return (
-            <div className="text-center py-20 text-secondary font-body-md">
-              No {label.toLowerCase()} in this feed yet.
-            </div>
+            <CategoryEmptyCard
+              label={labelForKind(selected)}
+              kind={selected}
+              query={topic}
+              onBrowseAll={() => setSelected(null)}
+            />
           );
         }
 

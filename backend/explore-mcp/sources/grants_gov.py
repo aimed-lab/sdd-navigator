@@ -13,7 +13,7 @@ import httpx
 from dedupe import dedupe_key
 from models import Item
 
-from .base import drop_future_dated, post_json, to_iso
+from .base import filter_quality, post_json, to_iso
 
 _SEARCH2 = "https://api.grants.gov/v1/api/search2"
 
@@ -54,6 +54,7 @@ async def fetch_grants(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 raw=h,
             )
         )
-    # No-op for grants (drop_future_dated exempts kind="grant") — forecasted awards
-    # are legitimately future-dated; applied uniformly to document the exemption.
-    return drop_future_dated(items)
+    # filter_quality applies the off-domain guard; grants are exempt from the
+    # future-date drop (forecasted awards are legitimately future-dated) and from
+    # the biomed-anchor requirement (curated funding, not recency-sorted literature).
+    return filter_quality(items)

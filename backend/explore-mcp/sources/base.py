@@ -116,6 +116,76 @@ def drop_future_dated(items: list) -> list:
     ]
 
 
+# ── Off-domain relevance filter (port of discovery.ts passesQualityFilter #3) ──
+
+# Non-biomedical domain terms that show up in pure keyword-collision junk
+# (e.g. "inhibitor of coal oxidation", "anti-corrosion steel"). Kept narrow and
+# unambiguous so we never clip real biomedical work. Verbatim from discovery.ts.
+NON_BIOMED_TERMS = [
+    "coal", "corrosion", "anti-corrosion", "anticorrosion",
+    "steel", "alloy", "asphalt", "bitumen", "concrete", "masonry",
+    "petroleum", "crude oil", "gasoline", "diesel", "lubricant",
+    "hydrate agglomeration", "wax deposition", "scale inhibitor", "welding",
+    "galvaniz", "cathodic protection", "froth flotation",
+]
+
+# Biomedical anchors — presence of any overrides a non-biomed hit, so genuinely
+# biomedical work (e.g. "pulmonary surfactant") is never dropped. Verbatim from
+# discovery.ts. Also reused as the "is this biomedical at all?" gate below.
+BIOMED_TERMS = [
+    "cell", "protein", "gene", "genom", "enzyme", "cancer", "tumor", "tumour",
+    "disease", "patient", "clinical", "therap", "receptor", "molecular",
+    "biolog", "neuro", "brain", "alzheimer", "parkinson", "metaboli", "kinase",
+    "mutation", "pathway", "in vivo", "in vitro", "mouse", "mice", " rat ",
+    "human", "tissue", "blood", "immune", "antibody", "pharmac", "medic",
+    "health", "drug", "peptide", "antigen", "vaccine", "pathogen", "bacteri",
+    "virus", "viral", "biomarker", "physiolog", "clinic",
+]
+
+
+def has_biomed_anchor(text: str) -> bool:
+    """True if `text` contains any biomedical anchor keyword."""
+    return any(t in text for t in BIOMED_TERMS)
+
+
+def is_off_domain(text: str) -> bool:
+    """Port of discovery.ts isOffDomain: drop only when a non-biomed term is present
+    AND there is no biomedical anchor — i.e. a clear industrial keyword collision."""
+    if not any(t in text for t in NON_BIOMED_TERMS):
+        return False  # nothing suspicious — keep
+    return not has_biomed_anchor(text)  # drop only when clearly off-domain
+
+
+# Kinds whose results are recency-sorted broad literature searches (OpenAlex
+# `search=`), where off-topic-but-medical-adjacent items (weight-loss studies,
+# leadership papers, etc.) slip in. isOffDomain alone can't catch those (they carry
+# biomed anchors OR lack any non-biomed term), so for these kinds we additionally
+# REQUIRE a biomedical anchor to be present. Not applied to tools/grants/trials
+# (over-filtering risk; trials are already clinical, tools/grants are curated).
+_ANCHOR_REQUIRED_KINDS = {"paper", "news"}
+
+
+def filter_quality(items: list) -> list:
+    """Apply the discovery.ts-style quality gates in one pass, per source fetcher:
+      1. off-domain keyword-collision drop (all kinds)
+      2. future-date drop (all kinds except grant)
+      3. biomedical-anchor REQUIRED for recency-sorted literature (paper/news)
+    Item.summary stands in for the TS `description`."""
+    now = datetime.now(timezone.utc)
+    out = []
+    for it in items:
+        kind = getattr(it, "kind", None)
+        text = f"{getattr(it, 'title', '') or ''} {getattr(it, 'summary', '') or ''}".lower()
+        if is_off_domain(text):
+            continue
+        if kind != "grant" and is_future_dated(getattr(it, "date_iso", None), now=now):
+            continue
+        if kind in _ANCHOR_REQUIRED_KINDS and not has_biomed_anchor(text):
+            continue
+        out.append(it)
+    return out
+
+
 async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
     """GET `url` with the shared timeout and raise on non-2xx (mirrors the TS
     `if (!res.ok) throw`). Returns the parsed JSON body. Optional per-request

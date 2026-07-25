@@ -16,7 +16,7 @@ import httpx
 from dedupe import dedupe_key
 from models import Item, Signal
 
-from .base import drop_future_dated, get_json, now_iso, to_iso
+from .base import filter_quality, get_json, now_iso, to_iso
 
 
 async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
@@ -64,4 +64,4 @@ async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 raw=r,
             )
         )
-    return drop_future_dated(items)
+    return filter_quality(items)

@@ -147,7 +147,7 @@ def test_openalex_item_shape_with_citation_signal():
 def test_crossref_item_shape_and_type_guard():
     client = _FakeClient({"api.crossref.org": {"message": {"items": [
         {
-            "title": ["PHGDH review"],
+            "title": ["PHGDH in cancer metabolism"],
             "type": "journal-article",
             "DOI": "10.5/xyz",
             "URL": "https://doi.org/10.5/xyz",
@@ -163,7 +163,7 @@ def test_crossref_item_shape_and_type_guard():
     it = items[0]
     assert it.id == "crossref:10.5-xyz"
     assert it.source == "crossref"
-    assert it.title == "PHGDH review"
+    assert it.title == "PHGDH in cancer metabolism"
     assert it.summary == "Published in Journal of X."
     assert it.url == "https://doi.org/10.5/xyz"
     assert it.date_iso == "2024-03-07T00:00:00.000Z"

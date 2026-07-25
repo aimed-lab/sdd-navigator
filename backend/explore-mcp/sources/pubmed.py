@@ -15,7 +15,7 @@ import httpx
 from dedupe import dedupe_key, normalize_doi
 from models import Item
 
-from .base import drop_future_dated, get_json, to_iso
+from .base import filter_quality, get_json, to_iso
 
 
 def _extract_doi(rec: dict) -> str | None:
@@ -78,4 +78,4 @@ async def fetch_pubmed(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 raw=rec,
             )
         )
-    return drop_future_dated(items)
+    return filter_quality(items)

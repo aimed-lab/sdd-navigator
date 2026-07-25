@@ -64,7 +64,7 @@ def test_news_kind_and_signal_and_refs():
 
 def test_news_no_citation_is_none():
     client = _FakeClient({"results": [
-        {"id": "https://openalex.org/W200", "title": "Preprint", "publication_date": "2026-06-01"},
+        {"id": "https://openalex.org/W200", "title": "Drug candidate preprint", "publication_date": "2026-06-01"},
     ]})
     items = asyncio.run(fetch_openalex(client, "x", 10, kind="news"))
     assert items[0].kind == "news"

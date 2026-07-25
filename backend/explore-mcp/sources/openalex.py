@@ -17,7 +17,7 @@ import httpx
 from dedupe import dedupe_key, normalize_doi
 from models import Item, Signal
 
-from .base import drop_future_dated, get_json, now_iso, to_iso
+from .base import filter_quality, get_json, now_iso, to_iso
 
 
 async def fetch_openalex(
@@ -87,4 +87,4 @@ async def fetch_openalex(
                 raw=w,
             )
         )
-    return drop_future_dated(items)
+    return filter_quality(items)

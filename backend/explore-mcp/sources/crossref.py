@@ -16,7 +16,7 @@ import httpx
 from dedupe import dedupe_key, normalize_doi
 from models import Item
 
-from .base import drop_future_dated, get_json, to_iso
+from .base import filter_quality, get_json, to_iso
 
 # Crossref `type` values that aren't research articles — dropped at fetch time.
 _CROSSREF_NON_ARTICLE_TYPES = {
@@ -71,4 +71,4 @@ async def fetch_crossref(client: httpx.AsyncClient, term: str, cap: int) -> list
                 raw=w,
             )
         )
-    return drop_future_dated(items)
+    return filter_quality(items)
