@@ -4,10 +4,10 @@
 // backend. Layout follows design/stitch/smartdrugdiscovery_refined_explore_grid
 // (the GRID version). Nav/Footer come from the shared shell (in the root layout).
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
-import CategoryStrip, { labelForKind } from "@/components/CategoryStrip";
+import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -35,13 +35,18 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-export default function ExplorePage() {
+function ExploreFeed() {
   const router = useRouter();
+  // ?category=<kind> preselects a section — this is how the chips on pages
+  // without their own feed (e.g. /explore/podcast) route back in scoped.
+  const categoryParam = useSearchParams().get("category");
   const [query, setQuery] = useState("");
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null); // category filter; null = All
+  const [selected, setSelected] = useState<string | null>(
+    categoryParam && CATEGORIES.some((c) => c.kind === categoryParam) ? categoryParam : null
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -116,8 +121,9 @@ export default function ExplorePage() {
         </p>
       </div>
 
-      {/* Category strip — shared switcher; horizontal scroll on mobile */}
-      <CategoryStrip selected={selected} onSelect={setSelected} />
+      {/* Category strip — shared switcher; horizontal scroll on mobile. The
+          Podcast chip routes to /explore/podcast rather than filtering inline. */}
+      <CategoryStrip selected={selected} onSelect={setSelected} query={query} />
 
       {/* Loading */}
       {loading && (
@@ -201,5 +207,24 @@ export default function ExplorePage() {
         );
       })()}
     </div>
+  );
+}
+
+// useSearchParams() must sit inside a Suspense boundary (see CLAUDE.md).
+export default function ExplorePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
+          <div className={GRID}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <ExploreFeed />
+    </Suspense>
   );
 }

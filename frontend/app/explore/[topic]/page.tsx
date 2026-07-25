@@ -125,8 +125,9 @@ export default function SearchResultsPage() {
         </p>
       </div>
 
-      {/* Category strip */}
-      <CategoryStrip selected={selected} onSelect={setSelected} />
+      {/* Category strip — the Podcast chip routes to /explore/podcast, carrying
+          the routed topic so the episode grid opens scoped to the same search. */}
+      <CategoryStrip selected={selected} onSelect={setSelected} query={topic} />
 
       {/* Loading */}
       {loading && (

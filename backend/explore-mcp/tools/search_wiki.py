@@ -64,6 +64,23 @@ def _tokenize(query: str) -> list[str]:
     return [t for t in (query or "").lower().split() if t and t not in _STOPWORDS]
 
 
+def get_wiki_page(slug: str) -> dict | None:
+    """Fetch ONE episode's full wiki row by slug, INCLUDING the transcript.
+
+    Deliberately separate from search_wiki(): the search path must never carry a
+    transcript (far too large for a list of results), but the episode DETAIL page
+    needs it. This is the only place `transcript` is selected, and it is scoped to
+    a single row. Returns the raw row dict, or None when no such slug exists.
+    """
+    if not slug:
+        return None
+    rows = sb_get(
+        "wiki_pages",
+        {"select": f"{_SELECT},transcript", "slug": f"eq.{slug}", "limit": "1"},
+    )
+    return rows[0] if rows else None
+
+
 def search_wiki(query: str, limit: int = 20) -> list[Item]:
     """Search the internal wiki (podcast-derived episode pages) over title,
     description, concepts and tags. Tokenizes the query on whitespace (dropping

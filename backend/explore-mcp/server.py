@@ -46,6 +46,7 @@ from tools.search_papers import search_papers_async
 from tools.search_people import search_people as _search_people
 from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async
+from tools.search_wiki import get_wiki_page as _get_wiki_page
 from tools.search_wiki import search_wiki as _search_wiki
 
 load_dotenv()
@@ -249,6 +250,97 @@ async def explore_http(request):
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
             status_code=200,
         )
+
+
+@mcp.custom_route("/api/wiki", methods=["GET", "POST"])
+async def wiki_http(request):
+    """Plain-HTTP bridge to search_wiki() for the Next.js proxy.
+
+    Same pattern as /api/explore above: the `search_wiki` tool is only reachable
+    over MCP (/mcp), so this exposes the SAME _search_wiki() over plain HTTP for
+    the podcast grid page.
+
+      GET  /api/wiki?q=<query>&limit=<n>
+      POST /api/wiki  { "query": "<text>", "limit": <n> }
+
+    An empty query lists all episodes, newest first (search_wiki's own behaviour).
+    Returns { query, count, episodes: [Item, ...] } — transcript is never included
+    (search_wiki does not select it). Never 500s the caller: on failure it returns
+    the empty shape with HTTP 200 so the page can render a clean error state."""
+    query = ""
+    limit = 100
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if isinstance(body, dict):
+            query = body.get("query") or ""
+            limit = body.get("limit") or limit
+    else:
+        query = request.query_params.get("q", "")
+        limit = request.query_params.get("limit") or limit
+
+    try:
+        limit = max(1, min(int(limit), 500))
+    except (TypeError, ValueError):
+        limit = 100
+
+    try:
+        items = await asyncio.to_thread(_search_wiki, str(query), limit)
+        episodes = [item.model_dump() for item in items]
+        return JSONResponse({"query": query, "count": len(episodes), "episodes": episodes})
+    except Exception as exc:
+        return JSONResponse(
+            {"query": query, "count": 0, "episodes": [], "error": str(exc)},
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/wiki/episode", methods=["GET"])
+async def wiki_episode_http(request):
+    """Plain-HTTP bridge for ONE episode's full record, for the detail page.
+
+      GET /api/wiki/episode?slug=<slug>
+
+    Unlike /api/wiki (the search/list bridge, which never carries a transcript),
+    this returns the complete row for a single episode INCLUDING `transcript`,
+    plus concepts, summary, tags, episode_url and image_url.
+
+    404s when the slug doesn't exist; on an unexpected failure returns HTTP 200
+    with {episode: null, error} so the page can render an error state."""
+    slug = request.query_params.get("slug", "")
+    if not slug:
+        return JSONResponse({"episode": None, "error": "missing slug"}, status_code=400)
+    try:
+        row = await asyncio.to_thread(_get_wiki_page, slug)
+        if row is None:
+            return JSONResponse({"episode": None, "error": "not found"}, status_code=404)
+        return JSONResponse({"episode": row})
+    except Exception as exc:
+        return JSONResponse({"episode": None, "error": str(exc)}, status_code=200)
+
+
+@mcp.custom_route("/api/papers", methods=["GET"])
+async def papers_http(request):
+    """Plain-HTTP bridge to search_papers() for the Live Literature rail.
+
+      GET /api/papers?q=<query>&limit=<n>
+
+    Same live PubMed/OpenAlex/Crossref fan-out the MCP tool uses. Never 500s the
+    caller: on failure returns {items: [], error} with HTTP 200."""
+    query = request.query_params.get("q", "")
+    try:
+        limit = max(1, min(int(request.query_params.get("limit") or 8), 50))
+    except (TypeError, ValueError):
+        limit = 8
+    if not query.strip():
+        return JSONResponse({"query": query, "items": []})
+    try:
+        items = await search_papers_async(query, limit)
+        return JSONResponse({"query": query, "items": [i.model_dump() for i in items]})
+    except Exception as exc:
+        return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
 if __name__ == "__main__":
