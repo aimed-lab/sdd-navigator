@@ -32,6 +32,14 @@
     box-shadow: 0px 10px 30px rgba(15, 23, 42, 0.08);
   }
 
+  /* Same glass surface, no hover lift — for static content panels that aren't
+     clickable (the lift on .glass-card reads as "this is a link"). */
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(224, 227, 229, 0.5);
+  }
+
   /* Primary CTA — Research Green */
   .btn-primary {
     background-color: #22c55e;
