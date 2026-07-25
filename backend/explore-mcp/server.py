@@ -228,5 +228,28 @@ async def health(_request):
     return JSONResponse({"service": "explore-mcp", "status": "ok", "transport": "streamable-http"})
 
 
+@mcp.custom_route("/api/explore", methods=["POST"])
+async def explore_http(request):
+    """Plain-HTTP bridge to explore() for the Next.js proxy.
+
+    The `explore` tool above is only reachable over the MCP protocol (/mcp); the
+    web app speaks normal HTTP, so this route exposes the SAME explore_async()
+    over a plain POST { "input": "<free text>" } -> the full explore JSON
+    (input, scope, tools_called, reasoning, sections). Never 500s the caller:
+    on failure it returns the empty-sections shape with HTTP 200."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    input_text = body.get("input", "") if isinstance(body, dict) else ""
+    try:
+        return JSONResponse(await explore_async(input_text or ""))
+    except Exception as exc:
+        return JSONResponse(
+            {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
+            status_code=200,
+        )
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")

@@ -5,127 +5,52 @@
 @layer base {
   html {
     color-scheme: light;
-  }
-  body {
-    background-color: #f7faf6;
-    color: #181c1a;
-    overflow-x: hidden;
-    font-family: "Inter", sans-serif;
-    -webkit-font-smoothing: antialiased;
     scroll-behavior: smooth;
   }
-
-  /* Prevent horizontal overflow on all elements */
+  body {
+    background-color: #f7f9fb; /* surface / background */
+    color: #191c1e;           /* on-background */
+    -webkit-font-smoothing: antialiased;
+    font-family: "Inter", sans-serif;
+  }
   * {
-    max-width: 100%;
     box-sizing: border-box;
   }
-
-  /* Hide scrollbar for filter pills on mobile while keeping scroll */
-  .scrollbar-hide::-webkit-scrollbar { display: none; }
-  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
 @layer components {
-  /* Card with left green border — used on wiki key concepts (static, non-interactive) */
-  .green-border-card {
-    background: #ffffff;
-    border: 1px solid #e6e9e5;
-    border-left: 4px solid #00523c;
-    border-radius: 0.75rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-    cursor: default;
-    pointer-events: none;
+  /* Glassmorphism card — the core "airy" surface from DESIGN.md */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(224, 227, 229, 0.5);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-card:hover {
+    border-color: #22c55e; /* primary-container */
+    transform: translateY(-4px);
+    box-shadow: 0px 10px 30px rgba(15, 23, 42, 0.08);
   }
 
-  /* Episode card */
-  .episode-card {
-    background: #ffffff;
-    border: 1px solid #e6e9e5;
-    border-radius: 0.75rem;
-    overflow: hidden;
-    transition: box-shadow 0.3s ease;
+  /* Primary CTA — Research Green */
+  .btn-primary {
+    background-color: #22c55e;
+    color: #ffffff;
+    transition: all 0.2s ease;
   }
-  .episode-card:hover {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  }
-
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: #bfc9c2;
-    border-radius: 10px;
-  }
-}
-
-@layer utilities {
-  /* Pulsing live indicator dot */
-  .pulse-dot {
-    width: 8px;
-    height: 8px;
-    background-color: #00523c;
-    border-radius: 50%;
-    display: inline-block;
-    animation: pulse-anim 2s infinite;
-  }
-  @keyframes pulse-anim {
-    0% {
-      transform: scale(0.95);
-      box-shadow: 0 0 0 0 rgba(0, 82, 60, 0.7);
-    }
-    70% {
-      transform: scale(1);
-      box-shadow: 0 0 0 6px rgba(0, 82, 60, 0);
-    }
-    100% {
-      transform: scale(0.95);
-      box-shadow: 0 0 0 0 rgba(0, 82, 60, 0);
-    }
+  .btn-primary:hover {
+    opacity: 0.9;
+    transform: scale(0.98);
   }
 
-  /* Knowledge graph dark canvas */
-  .knowledge-graph-canvas {
-    background-color: #111111;
-    background-image: radial-gradient(circle at 2px 2px, #222 1px, transparent 0);
-    background-size: 40px 40px;
+  /* Secondary / outline button */
+  .btn-outline {
+    border: 1px solid #bccbb9; /* outline-variant */
+    color: #565e74;            /* secondary */
+    transition: all 0.2s ease;
   }
-
-  /* Node pulse for graph */
-  @keyframes node-pulse {
-    0%, 100% { transform: scale(1); opacity: 0.8; }
-    50% { transform: scale(1.1); opacity: 1; }
-  }
-
-  /* Navigator roadmap path animation */
-  .roadmap-path {
-    stroke-dasharray: 10;
-    animation: dash-move 20s linear infinite;
-  }
-  @keyframes dash-move {
-    to { stroke-dashoffset: -200; }
-  }
-
-  /* Navigator map dot grid */
-  .map-grid {
-    background-image: radial-gradient(#d1d5db 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-
-  /* Academic dot-grid pattern (used on auth pages) */
-  .academic-grid-pattern {
-    background-image: radial-gradient(#1d6a51 0.5px, transparent 0.5px);
-    background-size: 24px 24px;
-    background-color: #f7faf6;
-  }
-
-  /* Pin shadow on navigator map */
-  .pin-shadow {
-    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
+  .btn-outline:hover {
+    background-color: #f2f4f6; /* surface-container-low */
   }
 }
 
