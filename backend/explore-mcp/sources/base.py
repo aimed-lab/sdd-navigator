@@ -81,9 +81,25 @@ def now_iso() -> str:
     return _iso(datetime.now(timezone.utc))
 
 
-async def get_json(client: httpx.AsyncClient, url: str) -> Any:
+async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
     """GET `url` with the shared timeout and raise on non-2xx (mirrors the TS
-    `if (!res.ok) throw`). Returns the parsed JSON body."""
-    resp = await client.get(url, timeout=FETCH_TIMEOUT)
+    `if (!res.ok) throw`). Returns the parsed JSON body. Optional per-request
+    headers (only passed through when set, to stay compatible with simple fakes)."""
+    kwargs: dict[str, Any] = {"timeout": FETCH_TIMEOUT}
+    if headers:
+        kwargs["headers"] = headers
+    resp = await client.get(url, **kwargs)
+    resp.raise_for_status()
+    return resp.json()
+
+
+async def post_json(
+    client: httpx.AsyncClient, url: str, json_body: Any, headers: dict | None = None
+) -> Any:
+    """POST `json_body` to `url` with the shared timeout and raise on non-2xx."""
+    kwargs: dict[str, Any] = {"timeout": FETCH_TIMEOUT, "json": json_body}
+    if headers:
+        kwargs["headers"] = headers
+    resp = await client.post(url, **kwargs)
     resp.raise_for_status()
     return resp.json()

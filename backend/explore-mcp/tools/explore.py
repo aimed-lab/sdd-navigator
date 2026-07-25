@@ -1,20 +1,23 @@
 """
-tools/explore.py — the orchestration tool.
+tools/explore.py — the orchestration tool (7-tool JSON routing).
 
 Takes a scientist's free-text message and, in order:
-  1. extracts a structured SCOPE from it (topics/genes/diseases/assets/methods)
-     via the LLM — empty fields are expected and left empty, never invented;
-  2. lets the LLM CHOOSE which of the search tools fit the message (parallel tool
-     calls enabled) — it does NOT always call both;
-  3. builds each chosen tool's query from the RIGHT slice of scope — papers get
-     topics+diseases+genes; lab resources get methods+genes (a technique/model
-     search, NOT the disease name, which is useless as a resource query);
+  1. extracts a structured SCOPE (topics/genes/diseases/assets/methods) via the
+     LLM — empty fields are expected and left empty, never invented;
+  2. ROUTES to a subset of the 7 search tools via a JSON routing prompt (native
+     function-calling was unreliable for parallel calls on Groq, so the LLM
+     instead returns {"tools": [...], "reasoning": "..."} which we parse);
+  3. builds each chosen tool's query from the RIGHT slice of scope — grants /
+     trials / papers get the disease + topic; tools / resources get the method +
+     gene; people get disease + method; wiki gets the topic. The slices are NEVER
+     swapped (a grant search must not be run with a technique string, etc.);
   4. runs the chosen tools in parallel (failures isolated);
-  5. returns {scope, sections:[{kind, items}], tools_called}.
+  5. returns {scope, tools_called, reasoning, sections:[{kind, items}]}.
 
-The LLM only DECIDES which tools to run; the actual query strings are built
-deterministically here from scope, so the two tools never get the same string.
-No ranking is ever claimed that isn't backed by a real signal (see models.Signal).
+The LLM only DECIDES which tools to run; the query strings are built
+deterministically here from scope. No ranking is ever claimed that isn't backed
+by a real signal (see models.Signal). A deterministic heuristic is the fallback
+if the routing JSON can't be parsed.
 """
 
 from __future__ import annotations
@@ -24,13 +27,18 @@ import json
 import re
 
 import llm
+from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_papers import search_papers_async
+from tools.search_people import search_people
+from tools.search_tools import search_tools_async
+from tools.search_trials import search_trials_async
+from tools.search_wiki import search_wiki
 
 SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
 
-_PAPER_LIMIT = 10
-_RESOURCE_LIMIT = 20
+_NET_LIMIT = 10        # external-source tools (papers/trials/grants/tools)
+_INTERNAL_LIMIT = 20   # internal DB tools (lab_resources/people/wiki)
 
 # ── Step 1: scope extraction ─────────────────────────────────────────────────
 
@@ -83,110 +91,129 @@ def _extract_scope(input_text: str) -> dict:
     return _normalize_scope(_loads_lenient(resp.content))
 
 
-# ── Step 2: tool choice ──────────────────────────────────────────────────────
+# ── Step 2: JSON tool routing ────────────────────────────────────────────────
 
-_TOOL_CHOICE_SYSTEM = (
-    "You are Explore, a research assistant for drug-discovery scientists. You have two tools:\n"
-    "  • search_papers        — the live scientific literature (PubMed, OpenAlex, Crossref).\n"
-    "  • search_lab_resources — an INTERNAL registry of lab techniques, equipment, animal "
-    "models, cell lines, vectors, reagents, software, drugs, and PEOPLE available for "
-    "collaboration.\n"
-    "Decide which tool(s) fit the user's message and call them. Rules:\n"
-    "  • Call ONLY tools that fit. Calling one tool, or several, are both correct.\n"
-    "  • A message describing DATA or a METHOD the user already has (e.g. 'I have RNA-seq "
-    "datasets') should pull INTERNAL RESOURCES and PEOPLE (search_lab_resources) who can "
-    "help — not only papers.\n"
-    "  • A scientific target/topic/disease (e.g. 'PHGDH in Alzheimer's') should pull BOTH "
-    "papers AND internal resources.\n"
-    "  • Do NOT default to calling both tools every time — choose based on the message.\n"
+# One-line descriptions the router reasons over. Order defines a stable listing.
+_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "search_papers":        "live scientific literature — PubMed / OpenAlex / Crossref",
+    "search_trials":        "clinical trials — ClinicalTrials.gov",
+    "search_grants":        "federal funding opportunities — Grants.gov",
+    "search_tools":         "open-source software tools / repositories — GitHub",
+    "search_lab_resources": "INTERNAL lab registry — techniques, equipment, models, cell lines, reagents, software for collaboration",
+    "search_people":        "researchers — public platform profiles + internal collaborators",
+    "search_wiki":          "INTERNAL podcast-derived episode wiki pages",
+}
+_KNOWN_TOOLS = list(_TOOL_DESCRIPTIONS)
+
+_ROUTING_SYSTEM = (
+    "You are Explore, a research assistant for drug-discovery scientists. Given the "
+    "user's message and an extracted scope, choose which of the available tools should "
+    "run. Rules:\n"
+    "  • Choose ONLY tools that fit the message. One tool or several is fine; do not "
+    "call everything by default.\n"
+    "  • A scientific target/topic/disease (e.g. 'PHGDH in Alzheimer's') → papers, "
+    "internal resources, people, and the internal wiki.\n"
+    "  • A message about DATA or a METHOD the user has (e.g. 'I have RNA-seq datasets') "
+    "→ internal resources, software tools, and people who can help — not papers-first.\n"
+    "  • 'clinical trials for X' → trials (and papers).\n"
+    "  • 'funding for X' / a grant/screen to fund → grants (and relevant tools).\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
-    "You may call tools in parallel. The query arguments you pass are placeholders; the "
-    "system builds the real per-tool queries."
+    'Return ONLY a JSON object of the form '
+    '{"tools": ["search_papers", ...], "reasoning": "one sentence"}. '
+    "Use exact tool names from the list. No prose, no code fences."
 )
-
-_TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "search_papers",
-            "description": (
-                "Search the live scientific literature for papers relevant to a research "
-                "topic, target, gene, disease, or method."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "A topical query."}},
-                "required": ["query"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_lab_resources",
-            "description": (
-                "Search the INTERNAL lab-resource registry — techniques, equipment, models, "
-                "cell lines, reagents, software, and people available for collaboration. Use "
-                "this when the user has data/methods or needs a capability, technique, or "
-                "collaborator, not a disease name."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {"query": {"type": "string", "description": "A technique/method/capability query."}},
-                "required": ["query"],
-            },
-        },
-    },
-]
-
-_KNOWN_TOOLS = {"search_papers", "search_lab_resources"}
 
 
 def _heuristic_tools(scope: dict) -> list[str]:
-    """Deterministic scope-based tool choice — the fallback when the LLM's
-    tool-calling path is unavailable (e.g. a provider's function-call parser
-    rejects the model output). Mirrors the same intent as the system prompt:
-    a topical scope pulls papers; methods/genes pull internal resources."""
+    """Deterministic scope-based routing — the fallback used only when the routing
+    JSON can't be parsed. Mirrors the routing intent across the 7 tools."""
+    topical = bool(scope["topics"] or scope["diseases"] or scope["genes"] or scope["assets"])
+    methody = bool(scope["methods"] or scope["genes"])
     chosen: list[str] = []
-    if any(scope[k] for k in ("topics", "diseases", "genes", "assets")):
+    if topical:
         chosen.append("search_papers")
-    if any(scope[k] for k in ("methods", "genes")):
+    if scope["diseases"]:
+        chosen.append("search_trials")
+        chosen.append("search_grants")
+    if methody:
+        chosen.append("search_tools")
         chosen.append("search_lab_resources")
+    if scope["diseases"] or scope["methods"]:
+        chosen.append("search_people")
+    if topical:
+        chosen.append("search_wiki")
     return chosen
 
 
-def _choose_tools(input_text: str, scope: dict) -> list[str]:
-    """Ask the LLM which tools fit (primary), falling back to a deterministic
-    scope heuristic if the provider's tool-calling errors or returns nothing.
-
-    Only the CHOICE (tool names) is used — the model's query args are ignored;
-    the real per-tool queries are built from scope in step 3.
-    """
-    scope_hint = json.dumps(scope)
+def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
+    """Route via a JSON prompt (primary), falling back to the deterministic
+    heuristic if the JSON can't be parsed or names nothing valid. Returns
+    (chosen tool names in order, one-sentence reasoning or None)."""
+    tool_list = "\n".join(f"  - {name}: {desc}" for name, desc in _TOOL_DESCRIPTIONS.items())
+    user = (
+        f"Message: {input_text}\n"
+        f"Extracted scope: {json.dumps(scope)}\n\n"
+        f"Available tools:\n{tool_list}\n\n"
+        'Return ONLY the JSON object {"tools": [...], "reasoning": "..."}.'
+    )
     try:
         resp = llm.complete(
-            [
-                {"role": "system", "content": _TOOL_CHOICE_SYSTEM},
-                {"role": "user", "content": f"Message: {input_text}\nExtracted scope: {scope_hint}"},
-            ],
-            tools=_TOOL_SCHEMAS,
-            tool_choice="auto",   # parallel tool calls enabled by default
+            [{"role": "system", "content": _ROUTING_SYSTEM}, {"role": "user", "content": user}],
+            temperature=0,
         )
-        chosen: list[str] = []
-        for call in resp.tool_calls:
-            if call.name in _KNOWN_TOOLS and call.name not in chosen:
-                chosen.append(call.name)
-        if chosen:
-            return chosen
-        # Model replied without a usable tool call — fall through to the heuristic.
+        data = _loads_lenient(resp.content)
+        raw_tools = data.get("tools") if isinstance(data, dict) else None
+        if isinstance(raw_tools, list):
+            chosen: list[str] = []
+            for t in raw_tools:
+                name = str(t).strip()
+                if name in _KNOWN_TOOLS and name not in chosen:
+                    chosen.append(name)
+            if chosen:
+                reasoning = data.get("reasoning")
+                return chosen, (reasoning if isinstance(reasoning, str) else None)
+        # Parsed but no usable tools — fall through to the heuristic.
     except Exception:
-        # Provider tool-call parse/transport failure (e.g. groq tool_use_failed on
-        # a llama pythonic-format emission) — don't let it sink orchestration.
         pass
-    return _heuristic_tools(scope)
+    return _heuristic_tools(scope), "fallback: routing JSON unavailable; used scope heuristic"
 
 
 # ── Step 3: per-tool query construction ──────────────────────────────────────
+# The RIGHT scope slice per tool. Disease-facing searches (papers/trials/grants)
+# get the disease + topic; capability searches (tools/resources) get the method +
+# gene; people get disease + method; wiki gets the topic. Never swapped.
+#
+# search_papers intentionally gets the RICHEST slice (disease + topic + gene):
+# papers are the broadest result kind, so a gene target like PHGDH belongs in the
+# literature query even though trials/grants stay strictly disease + topic.
+_QUERY_SLICES: dict[str, tuple[str, ...]] = {
+    "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind
+    "search_trials":        ("diseases", "topics"),
+    "search_grants":        ("diseases", "topics"),
+    "search_tools":         ("methods", "genes"),
+    "search_lab_resources": ("methods", "genes"),
+    "search_people":        ("diseases", "methods"),
+    "search_wiki":          ("topics",),
+}
+
+# Fallback slice used ONLY when a tool's primary slice comes out empty, so a
+# chosen tool never runs with a blank query. e.g. "funding for a CRISPR screen"
+# has no disease/topic, so grants falls back to methods+topics ("CRISPR screen").
+# This fixes the query STRING only; it never changes which tools were chosen.
+_FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
+    "search_grants": ("methods", "topics"),
+    "search_trials": ("methods", "topics"),
+}
+
+_KINDS: dict[str, str] = {
+    "search_papers": "paper",
+    "search_trials": "trial",
+    "search_grants": "grant",
+    "search_tools": "tool",
+    "search_lab_resources": "resource",
+    "search_people": "person",
+    "search_wiki": "episode",
+}
 
 
 def _join_unique(*groups: list[str]) -> str:
@@ -203,33 +230,43 @@ def _join_unique(*groups: list[str]) -> str:
     return " ".join(out)
 
 
-def _paper_query(scope: dict) -> str:
-    # Papers get the full topical scope.
-    return _join_unique(scope["topics"], scope["diseases"], scope["genes"])
-
-
-def _resource_query(scope: dict) -> str:
-    # Lab resources get technique/model terms — NOT the disease name.
-    return _join_unique(scope["methods"], scope["genes"])
+def _query_for(name: str, scope: dict) -> str:
+    query = _join_unique(*[scope[k] for k in _QUERY_SLICES[name]])
+    if not query and name in _FALLBACK_SLICES:   # never let a chosen tool run blank
+        query = _join_unique(*[scope[k] for k in _FALLBACK_SLICES[name]])
+    return query
 
 
 # ── Steps 4–5: execute chosen tools in parallel and assemble the result ───────
 
 
-async def _execute(chosen: list[str], scope: dict) -> list[dict]:
-    paper_q = _paper_query(scope)
-    resource_q = _resource_query(scope)
+def _dispatch(name: str, query: str):
+    """Return an awaitable that runs `name` with `query`. Async source tools are
+    awaited directly; blocking DB tools run off the event loop via to_thread."""
+    if name == "search_papers":
+        return search_papers_async(query, _NET_LIMIT)
+    if name == "search_trials":
+        return search_trials_async(query, _NET_LIMIT)
+    if name == "search_grants":
+        return search_grants_async(query, _NET_LIMIT)
+    if name == "search_tools":
+        return search_tools_async(query, _NET_LIMIT)
+    if name == "search_lab_resources":
+        return asyncio.to_thread(search_lab_resources, query, None, _INTERNAL_LIMIT)
+    if name == "search_people":
+        return asyncio.to_thread(search_people, query, _INTERNAL_LIMIT)
+    if name == "search_wiki":
+        return asyncio.to_thread(search_wiki, query, _INTERNAL_LIMIT)
+    raise ValueError(f"unknown tool: {name}")
 
+
+async def _execute(chosen: list[str], scope: dict) -> list[dict]:
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, query)
     for name in chosen:
-        if name == "search_papers":
-            tasks.append(search_papers_async(paper_q, _PAPER_LIMIT))
-            specs.append(("search_papers", "paper", paper_q))
-        elif name == "search_lab_resources":
-            # search_lab_resources is blocking (requests) — run it off the loop.
-            tasks.append(asyncio.to_thread(search_lab_resources, resource_q, None, _RESOURCE_LIMIT))
-            specs.append(("search_lab_resources", "resource", resource_q))
+        query = _query_for(name, scope)
+        tasks.append(_dispatch(name, query))
+        specs.append((name, _KINDS[name], query))
 
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
@@ -250,12 +287,13 @@ async def explore_async(input_text: str) -> dict:
     """Async orchestration core (used by the MCP server). The blocking LLM calls
     run off the event loop so the tool fan-out stays concurrent."""
     scope = await asyncio.to_thread(_extract_scope, input_text)
-    chosen = await asyncio.to_thread(_choose_tools, input_text, scope)
+    chosen, reasoning = await asyncio.to_thread(_choose_tools, input_text, scope)
     sections = await _execute(chosen, scope)
     return {
         "input": input_text,
         "scope": scope,
         "tools_called": chosen,
+        "reasoning": reasoning,
         "sections": sections,
     }
 
@@ -263,8 +301,8 @@ async def explore_async(input_text: str) -> dict:
 def explore(input_text: str) -> dict:
     """Synchronous entry point (the registered tool signature).
 
-    Reason about a free-text research message, choose which search tools fit, run
-    them with the right per-tool query, and return results grouped by kind:
-    {scope, sections:[{kind, items}], tools_called}.
+    Reason about a free-text research message, route to the fitting search tools,
+    run them with the right per-tool query, and return results grouped by kind:
+    {scope, tools_called, reasoning, sections:[{kind, items}]}.
     """
     return asyncio.run(explore_async(input_text))
