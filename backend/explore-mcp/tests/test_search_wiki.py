@@ -96,6 +96,38 @@ def test_wiki_search_matches_concepts_and_tags():
     assert [it.id for it in by_tag] == ["internal:w2"]
 
 
+def test_wiki_multiword_query_matches_any_token_and_drops_stopwords():
+    # Multi-word query used to return 0 (whole-string substring). Now tokenized:
+    # "AI in drug discovery" -> tokens [ai, drug, discovery] ("in" is a stopword).
+    orig = _install(_ROWS)
+    try:
+        hits = sw.search_wiki("AI in drug discovery")
+    finally:
+        sw.sb_get = orig
+    # w1 matches on "drug"/"discovery"; w2 matches neither -> only w1.
+    assert [it.id for it in hits] == ["internal:w1"]
+
+
+def test_wiki_ranks_by_tokens_matched_desc():
+    # An episode matching MORE query tokens ranks ahead of one matching fewer,
+    # regardless of episode number.
+    rows = [
+        {"id": "a", "slug": "a", "title": "CRISPR knockout screen protocol",
+         "episode_number": 5, "description": "", "summary": [], "concepts": [],
+         "tags": ["crispr", "knockout"], "episode_url": None, "image_url": None},
+        {"id": "b", "slug": "b", "title": "CRISPR overview",
+         "episode_number": 99, "description": "", "summary": [], "concepts": [],
+         "tags": ["crispr"], "episode_url": None, "image_url": None},
+    ]
+    orig = _install(rows)
+    try:
+        hits = sw.search_wiki("crispr knockout")   # a matches 2 tokens, b matches 1
+    finally:
+        sw.sb_get = orig
+    # 'a' (2 tokens) ranks first even though 'b' has the higher episode number.
+    assert [it.id for it in hits] == ["internal:a", "internal:b"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failures = 0

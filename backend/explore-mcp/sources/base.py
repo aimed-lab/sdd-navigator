@@ -81,6 +81,41 @@ def now_iso() -> str:
     return _iso(datetime.now(timezone.utc))
 
 
+# ── Future-date quality filter (port of discovery.ts passesQualityFilter #2) ──
+
+FUTURE_DATE_TOLERANCE_DAYS = 60  # discovery.ts: FUTURE_DATE_TOLERANCE_MS = 60 * 86_400_000
+
+
+def is_future_dated(date_iso: str | None, *, now: datetime | None = None) -> bool:
+    """True iff `date_iso` is a VALID date more than 60 days ahead of now — a bogus
+    placeholder date. Missing or unparseable dates return False (a missing date is
+    not a future date), matching the TS `!isNaN(t) && t - Date.now() > tol` guard."""
+    if not date_iso:
+        return False
+    try:
+        d = datetime.fromisoformat(date_iso.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return False
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (d - now).total_seconds() > FUTURE_DATE_TOLERANCE_DAYS * 86_400
+
+
+def drop_future_dated(items: list) -> list:
+    """Drop Items whose date_iso is >60 days in the future (bogus placeholder dates
+    from the sources). GRANTS ARE EXEMPT — Grants.gov forecasted opportunities are
+    legitimately future-dated (discovery.ts exempts type "grant"). Items with no /
+    unparseable date pass through. Applied in every source fetcher's normalization
+    (a future date is wrong everywhere; it's just most visible in recency-sorted
+    news)."""
+    now = datetime.now(timezone.utc)
+    return [
+        it for it in items
+        if getattr(it, "kind", None) == "grant" or not is_future_dated(getattr(it, "date_iso", None), now=now)
+    ]
+
+
 async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
     """GET `url` with the shared timeout and raise on non-2xx (mirrors the TS
     `if (!res.ok) throw`). Returns the parsed JSON body. Optional per-request

@@ -29,6 +29,7 @@ import re
 import llm
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
+from tools.search_news import search_news_async
 from tools.search_papers import search_papers_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
@@ -39,6 +40,20 @@ SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
 
 _NET_LIMIT = 10        # external-source tools (papers/trials/grants/tools)
 _INTERNAL_LIMIT = 20   # internal DB tools (lab_resources/people/wiki)
+
+# Blank-input landing feed: a field-wide default scope + a fixed tool set (the
+# front page for an empty query). No LLM is called — we skip extraction/routing.
+_DEFAULT_SCOPE: dict[str, list[str]] = {
+    "topics": ["drug discovery", "AI in drug discovery"],
+    "genes": [],
+    "diseases": [],
+    "assets": [],
+    "methods": [],
+}
+_DEFAULT_TOOLS = [
+    "search_news", "search_papers", "search_tools",
+    "search_trials", "search_grants", "search_wiki",
+]
 
 # ── Step 1: scope extraction ─────────────────────────────────────────────────
 
@@ -96,6 +111,7 @@ def _extract_scope(input_text: str) -> dict:
 # One-line descriptions the router reasons over. Order defines a stable listing.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_papers":        "live scientific literature — PubMed / OpenAlex / Crossref",
+    "search_news":          "recency-first industry news for the drug-discovery field (newest work first)",
     "search_trials":        "clinical trials — ClinicalTrials.gov",
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
@@ -188,6 +204,7 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 # literature query even though trials/grants stay strictly disease + topic.
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind
+    "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
     "search_trials":        ("diseases", "topics"),
     "search_grants":        ("diseases", "topics"),
     "search_tools":         ("methods", "genes"),
@@ -203,10 +220,14 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
 _FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
     "search_grants": ("methods", "topics"),
     "search_trials": ("methods", "topics"),
+    # method-less scopes (e.g. the default landing feed) fall back to the topic so
+    # GitHub gets "drug discovery" instead of "" (which returns generic top repos).
+    "search_tools": ("topics",),
 }
 
 _KINDS: dict[str, str] = {
     "search_papers": "paper",
+    "search_news": "news",
     "search_trials": "trial",
     "search_grants": "grant",
     "search_tools": "tool",
@@ -234,6 +255,8 @@ def _query_for(name: str, scope: dict) -> str:
     query = _join_unique(*[scope[k] for k in _QUERY_SLICES[name]])
     if not query and name in _FALLBACK_SLICES:   # never let a chosen tool run blank
         query = _join_unique(*[scope[k] for k in _FALLBACK_SLICES[name]])
+    if not query:  # last resort: any scope term, so a chosen tool never runs blank
+        query = _join_unique(*[scope[k] for k in SCOPE_KEYS])
     return query
 
 
@@ -245,6 +268,8 @@ def _dispatch(name: str, query: str):
     awaited directly; blocking DB tools run off the event loop via to_thread."""
     if name == "search_papers":
         return search_papers_async(query, _NET_LIMIT)
+    if name == "search_news":
+        return search_news_async(query, _NET_LIMIT)
     if name == "search_trials":
         return search_trials_async(query, _NET_LIMIT)
     if name == "search_grants":
@@ -285,9 +310,20 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
 
 async def explore_async(input_text: str) -> dict:
     """Async orchestration core (used by the MCP server). The blocking LLM calls
-    run off the event loop so the tool fan-out stays concurrent."""
-    scope = await asyncio.to_thread(_extract_scope, input_text)
-    chosen, reasoning = await asyncio.to_thread(_choose_tools, input_text, scope)
+    run off the event loop so the tool fan-out stays concurrent.
+
+    Blank / whitespace-only input skips LLM extraction and routing entirely and
+    serves the field-wide landing feed: the default scope + default tool set, with
+    scope.is_default=true so the frontend knows this is the blank-state feed."""
+    if not (input_text or "").strip():
+        scope = {**_DEFAULT_SCOPE, "is_default": True}
+        chosen = list(_DEFAULT_TOOLS)
+        reasoning = "default landing feed (blank input): field-wide drug-discovery scope"
+    else:
+        scope = await asyncio.to_thread(_extract_scope, input_text)
+        scope["is_default"] = False
+        chosen, reasoning = await asyncio.to_thread(_choose_tools, input_text, scope)
+
     sections = await _execute(chosen, scope)
     return {
         "input": input_text,

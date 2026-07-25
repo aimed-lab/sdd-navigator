@@ -1,11 +1,12 @@
 """
 server.py — Explore MCP server (streamable-HTTP transport).
 
-Exposes 8 tools to other agents over MCP (external agents such as Pleaser call
-these directly to learn about papers, assays/trials, funding, datasets/tools,
-internal resources, people, and podcast episodes):
+Exposes 9 tools to other agents over MCP (external agents such as Pleaser call
+these directly to learn about papers, news, assays/trials, funding,
+datasets/tools, internal resources, people, and podcast episodes):
 
   • search_papers        — live scientific literature (PubMed/OpenAlex/Crossref)
+  • search_news          — recency-first industry news for the field (OpenAlex, newest first)
   • search_trials        — clinical trials (ClinicalTrials.gov)
   • search_grants        — federal funding opportunities (Grants.gov)
   • search_tools         — open-source software tools/repos (GitHub)
@@ -40,6 +41,7 @@ from starlette.responses import JSONResponse
 from tools.explore import explore_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
+from tools.search_news import search_news_async
 from tools.search_papers import search_papers_async
 from tools.search_people import search_people as _search_people
 from tools.search_tools import search_tools_async
@@ -73,6 +75,23 @@ async def search_papers(query: str, limit: int = 20) -> list[dict]:
         limit: Max items to return (default 20).
     """
     items = await search_papers_async(query, limit)
+    return [item.model_dump() for item in items]
+
+
+@mcp.tool()
+async def search_news(query: str, limit: int = 20) -> list[dict]:
+    """Recency-first industry news for the drug-discovery field.
+
+    Returns the most RECENT OpenAlex works matching `query`, newest first
+    (kind="news", source="openalex") — sorted by publication date, not relevance.
+    Use this for "what's new" / field-level updates rather than a targeted
+    literature search. Citations Signal is set where OpenAlex reports one, else null.
+
+    Args:
+        query: A field/topic query, e.g. "drug discovery" or "AI in drug discovery".
+        limit: Max items to return (default 20).
+    """
+    items = await search_news_async(query, limit)
     return [item.model_dump() for item in items]
 
 

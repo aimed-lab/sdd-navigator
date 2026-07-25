@@ -15,7 +15,7 @@ import httpx
 from dedupe import dedupe_key
 from models import Item
 
-from .base import get_json, to_iso
+from .base import drop_future_dated, get_json, to_iso
 
 
 async def fetch_trials(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
@@ -55,4 +55,4 @@ async def fetch_trials(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 raw=s,
             )
         )
-    return items
+    return drop_future_dated(items)

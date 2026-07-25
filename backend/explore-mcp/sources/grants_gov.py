@@ -13,7 +13,7 @@ import httpx
 from dedupe import dedupe_key
 from models import Item
 
-from .base import post_json, to_iso
+from .base import drop_future_dated, post_json, to_iso
 
 _SEARCH2 = "https://api.grants.gov/v1/api/search2"
 
@@ -54,4 +54,6 @@ async def fetch_grants(client: httpx.AsyncClient, term: str, cap: int) -> list[I
                 raw=h,
             )
         )
-    return items
+    # No-op for grants (drop_future_dated exempts kind="grant") — forecasted awards
+    # are legitimately future-dated; applied uniformly to document the exemption.
+    return drop_future_dated(items)

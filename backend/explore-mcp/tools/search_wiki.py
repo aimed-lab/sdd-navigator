@@ -54,13 +54,38 @@ def _to_item(row: dict) -> Item:
     )
 
 
+# Common words dropped from the query so "AI in drug discovery" doesn't match
+# every episode on the token "in".
+_STOPWORDS = {"in", "of", "the", "a", "and", "for"}
+
+
+def _tokenize(query: str) -> list[str]:
+    """Lowercase, split on whitespace, drop stopwords and empties."""
+    return [t for t in (query or "").lower().split() if t and t not in _STOPWORDS]
+
+
 def search_wiki(query: str, limit: int = 20) -> list[Item]:
     """Search the internal wiki (podcast-derived episode pages) over title,
-    description, concepts and tags. Returns up to `limit` Items (kind="episode"),
-    highest episode number first. Never returns the episode transcript."""
+    description, concepts and tags. Tokenizes the query on whitespace (dropping
+    stopwords) and matches an episode if ANY token appears in its searchable blob;
+    results are ranked by number of tokens matched (desc), then newest episode
+    first. Returns up to `limit` Items (kind="episode"). Never returns the
+    transcript."""
     rows = sb_get("wiki_pages", {"select": _SELECT})   # GET only — read-only
 
-    q = (query or "").strip().lower()
-    matches = [row for row in rows if not q or q in _search_blob(row)]
-    matches.sort(key=lambda r: r.get("episode_number") or 0, reverse=True)
-    return [_to_item(r) for r in matches[:limit]]
+    tokens = _tokenize(query)
+    if not tokens:
+        # Empty / stopword-only query -> list all, newest episode first.
+        matches = sorted(rows, key=lambda r: r.get("episode_number") or 0, reverse=True)
+        return [_to_item(r) for r in matches[:limit]]
+
+    scored: list[tuple[int, int, dict]] = []
+    for row in rows:
+        blob = _search_blob(row)
+        hits = sum(1 for t in tokens if t in blob)
+        if hits:
+            scored.append((hits, row.get("episode_number") or 0, row))
+
+    # rank by tokens-matched desc, then newest episode desc
+    scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
+    return [_to_item(row) for _, _, row in scored[:limit]]

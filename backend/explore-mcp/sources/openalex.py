@@ -17,10 +17,14 @@ import httpx
 from dedupe import dedupe_key, normalize_doi
 from models import Item, Signal
 
-from .base import get_json, now_iso, to_iso
+from .base import drop_future_dated, get_json, now_iso, to_iso
 
 
-async def fetch_openalex(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+async def fetch_openalex(
+    client: httpx.AsyncClient, term: str, cap: int, kind: str = "paper"
+) -> list[Item]:
+    """Fetch OpenAlex works (recency-sorted). `kind` tags the resulting Items —
+    default "paper"; search_news reuses this exact logic with kind="news"."""
     url = (
         f"https://api.openalex.org/works?search={quote(term)}"
         f"&per-page={cap}&sort=publication_date:desc"
@@ -69,7 +73,7 @@ async def fetch_openalex(client: httpx.AsyncClient, term: str, cap: int) -> list
         items.append(
             Item(
                 id=f"openalex:{external_id}",
-                kind="paper",
+                kind=kind,
                 title=title,
                 summary=summary,
                 url=url_val,
@@ -83,4 +87,4 @@ async def fetch_openalex(client: httpx.AsyncClient, term: str, cap: int) -> list
                 raw=w,
             )
         )
-    return items
+    return drop_future_dated(items)
