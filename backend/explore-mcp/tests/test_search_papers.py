@@ -38,7 +38,7 @@ def test_failing_source_does_not_sink_batch():
     async def ok_pubmed(client, q, limit):
         return [_item("pubmed", "1", date="2024-06-01T00:00:00.000Z")]
 
-    async def boom_openalex(client, q, limit):
+    async def boom_openalex(client, q, limit, **kw):
         raise RuntimeError("OpenAlex is down")
 
     async def ok_crossref(client, q, limit):
@@ -63,7 +63,7 @@ def test_rank_interleave_does_not_let_signal_dominate_source():
     # desc). Rank-interleaving must put rank-0 of each group at the very top, so
     # the newest uncited paper and the top-cited paper both appear near the top —
     # NOT all cited papers first.
-    async def ok_openalex(client, q, limit):
+    async def ok_openalex(client, q, limit, **kw):
         return [
             _item("openalex", "hi", signal=Signal(metric="citations", value=100.0,
                   as_of="2024-01-01T00:00:00.000Z"), date="2020-01-01T00:00:00.000Z"),
@@ -94,6 +94,35 @@ def test_rank_interleave_does_not_let_signal_dominate_source():
     # intra-group order preserved: top-cited before lesser-cited; newest before oldest.
     assert ids.index("openalex:hi") < ids.index("openalex:lo")
     assert ids.index("pubmed:new") < ids.index("pubmed:old")
+
+
+def test_search_papers_requests_the_relevance_sort():
+    """search_papers must ask OpenAlex for RELEVANCE, not recency — a
+    recency-sorted set has ~zero intra-set citations, so the WINNER graph comes
+    back empty and the ranking silently degrades to a no-op."""
+    from sources.openalex import SORT_RELEVANCE
+
+    captured = {}
+
+    async def none_pubmed(client, q, limit, **kw):
+        return []
+
+    async def spy_openalex(client, q, limit, **kw):
+        captured["sort"] = kw.get("sort", "NOT PASSED")
+        return []
+
+    async def none_crossref(client, q, limit, **kw):
+        return []
+
+    orig = (sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref)
+    sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = (
+        none_pubmed, spy_openalex, none_crossref)
+    try:
+        asyncio.run(sp.search_papers_async("EGFR glioblastoma", limit=5))
+    finally:
+        sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = orig
+
+    assert captured["sort"] is SORT_RELEVANCE
 
 
 if __name__ == "__main__":

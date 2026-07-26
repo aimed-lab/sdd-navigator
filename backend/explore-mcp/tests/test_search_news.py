@@ -75,7 +75,7 @@ def test_search_news_sorts_newest_first():
     # search_news must guarantee date_iso descending regardless of API order.
     from tools import search_news as sn
 
-    async def fake_fetch(client, term, cap, kind="paper"):
+    async def fake_fetch(client, term, cap, kind="paper", sort=None):
         from models import Item
         def mk(ext, date):
             return Item(id=f"openalex:{ext}", kind=kind, title=ext, source="openalex",
@@ -96,6 +96,30 @@ def test_search_news_sorts_newest_first():
     assert dates == sorted(dates, reverse=True)          # newest-first
     assert [it.id for it in items] == ["openalex:new", "openalex:mid", "openalex:old"]
     assert all(it.kind == "news" for it in items)
+
+
+def test_search_news_requests_the_recency_sort():
+    """search_news's contract is recency. If it ever silently switched to
+    relevance (e.g. by inheriting a changed default) this catches it."""
+    from tools import search_news as sn
+    from sources.openalex import SORT_RECENT
+
+    captured = {}
+
+    async def fake_fetch(client, term, cap, kind="paper", sort=None):
+        captured["sort"] = sort
+        captured["kind"] = kind
+        return []
+
+    orig = sn.fetch_openalex
+    sn.fetch_openalex = fake_fetch
+    try:
+        asyncio.run(sn.search_news_async("drug discovery", 5))
+    finally:
+        sn.fetch_openalex = orig
+
+    assert captured["sort"] == SORT_RECENT
+    assert captured["kind"] == "news"
 
 
 if __name__ == "__main__":

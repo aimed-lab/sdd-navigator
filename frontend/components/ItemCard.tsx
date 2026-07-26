@@ -6,7 +6,7 @@
 // vague label ("recommended" etc.) — no signal falls back to the date, or nothing.
 
 import { useState } from "react";
-import type { ExploreItem, Signal } from "@/types/explore";
+import type { ExploreItem } from "@/types/explore";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
 const ACCENT: Record<string, string> = {
@@ -25,15 +25,35 @@ function compact(n: number): string {
   return `${Math.round(n)}`;
 }
 
+function citationText(value: number): string | null {
+  const n = Math.round(value);
+  return n > 0 ? `${n.toLocaleString()} citation${n === 1 ? "" : "s"}` : null;
+}
+
+// The citation count the backend preserved when it replaced the signal with a
+// network_rank one (ranking.py stashes the displaced metric in raw.prior_signal).
+function priorCitations(item: ExploreItem): string | null {
+  const prior = item.raw?.prior_signal as { metric?: string; value?: number } | undefined;
+  if (!prior || prior.metric !== "citations" || typeof prior.value !== "number") return null;
+  return citationText(prior.value);
+}
+
 // A real, evidence-backed badge string, or null if the signal isn't meaningful.
 // citations only when > 0 (a page of 0-citation preprints shouldn't all read
 // "0 citations" — fall back to the date instead); stars always (GitHub filters >=5).
-function signalBadge(signal: Signal | null): string | null {
+function signalBadge(item: ExploreItem): string | null {
+  const signal = item.signal;
   if (!signal) return null;
-  if (signal.metric === "citations") {
-    const n = Math.round(signal.value);
-    return n > 0 ? `${n.toLocaleString()} citation${n === 1 ? "" : "s"}` : null;
+
+  // WINNER network centrality. The raw score is an internal graph quantity with
+  // no meaning to a reader ("3.00" says nothing), so it is NEVER shown — the
+  // label is qualitative and is backed by the real, preserved citation count.
+  if (signal.metric === "network_rank") {
+    const cites = priorCitations(item);
+    return cites ? `★ Key paper · ${cites}` : "★ Key paper";
   }
+
+  if (signal.metric === "citations") return citationText(signal.value);
   if (signal.metric === "stars") return `★ ${compact(signal.value)} stars`;
   return signal.value > 0 ? `${compact(signal.value)} ${signal.metric}` : null;
 }
@@ -48,7 +68,7 @@ function formatDate(iso: string | null): string | null {
 export default function ItemCard({ item }: { item: ExploreItem }) {
   const [saved, setSaved] = useState(false);
 
-  const badge = signalBadge(item.signal);
+  const badge = signalBadge(item);
   const date = badge ? null : formatDate(item.date_iso);
   const accent = ACCENT[item.kind] ?? "border-t-outline-variant";
   const imageUrl =

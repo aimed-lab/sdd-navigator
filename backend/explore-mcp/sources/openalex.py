@@ -20,15 +20,35 @@ from models import Item, Signal
 from .base import filter_quality, get_json, now_iso, to_iso
 
 
+# OpenAlex sort for recency-first callers (search_news). Kept as the DEFAULT so
+# this function's existing behaviour is unchanged for anyone not passing `sort`.
+SORT_RECENT = "publication_date:desc"
+
+# OpenAlex's own relevance ranking is what you get by OMITTING `sort` on a
+# `search=` query — there is no "sort=relevance" value. Passing None selects it.
+SORT_RELEVANCE = None
+
+
 async def fetch_openalex(
-    client: httpx.AsyncClient, term: str, cap: int, kind: str = "paper"
+    client: httpx.AsyncClient,
+    term: str,
+    cap: int,
+    kind: str = "paper",
+    sort: str | None = SORT_RECENT,
 ) -> list[Item]:
-    """Fetch OpenAlex works (recency-sorted). `kind` tags the resulting Items —
-    default "paper"; search_news reuses this exact logic with kind="news"."""
-    url = (
-        f"https://api.openalex.org/works?search={quote(term)}"
-        f"&per-page={cap}&sort=publication_date:desc"
-    )
+    """Fetch OpenAlex works. `kind` tags the resulting Items — default "paper";
+    search_news reuses this exact logic with kind="news".
+
+    `sort` selects the OpenAlex ordering:
+      * SORT_RECENT (default) — newest first. search_news's contract.
+      * SORT_RELEVANCE (None) — OpenAlex relevance; omits the sort param. Used by
+        search_papers, because relevance returns a topic's important papers, and
+        those actually cite ONE ANOTHER — a recency-sorted set has essentially no
+        intra-set citations, so the WINNER graph comes back empty.
+    """
+    url = f"https://api.openalex.org/works?search={quote(term)}&per-page={cap}"
+    if sort:
+        url += f"&sort={sort}"
     data = await get_json(client, url)
 
     items: list[Item] = []

@@ -15,7 +15,7 @@ import asyncio
 import httpx
 
 from models import Item
-from sources.openalex import fetch_openalex
+from sources.openalex import SORT_RECENT, fetch_openalex
 
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 
@@ -23,7 +23,12 @@ _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 async def search_news_async(query: str, limit: int = 20) -> list[Item]:
     try:
         async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
-            items = await fetch_openalex(client, query, limit, kind="news")
+            # Recency is this tool's contract — passed explicitly (rather than
+            # relying on the default) so a future default change can't silently
+            # turn news into a relevance feed.
+            items = await fetch_openalex(
+                client, query, limit, kind="news", sort=SORT_RECENT
+            )
     except Exception:
         return []   # per-source isolation
     # OpenAlex already returns publication_date desc; sort defensively to guarantee
