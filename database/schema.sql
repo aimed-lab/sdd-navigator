@@ -449,13 +449,17 @@ CREATE POLICY "projects_delete_own"
 CREATE TABLE IF NOT EXISTS public.connection_requests (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id       UUID        NOT NULL REFERENCES auth.users (id)  ON DELETE CASCADE,   -- the requester (from session)
-    provider_name TEXT        NOT NULL,                             -- e.g. "UAB SPARC"
+    provider_name TEXT,                                             -- e.g. "UAB SPARC" (NULL for board responses)
     capability    TEXT,                                             -- the specific capability/service clicked
     project_id    UUID        REFERENCES public.projects (id)      ON DELETE SET NULL,  -- proposal, if saved (nullable)
     message       TEXT        NOT NULL DEFAULT '',                  -- optional researcher note
+    -- post_id + interest_type (collab board responses) are added further down,
+    -- in the Collaborate section — collab_posts must exist first.
     status        TEXT        NOT NULL DEFAULT 'new'                -- lifecycle; admin flow lands later
                       CHECK (status IN ('new', 'seen', 'responded', 'closed')),
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    -- CHECK (provider_name IS NOT NULL OR post_id IS NOT NULL) is added in the
+    -- Collaborate section, once post_id exists.
 );
 
 ALTER TABLE public.connection_requests ENABLE ROW LEVEL SECURITY;
@@ -584,3 +588,181 @@ CREATE INDEX IF NOT EXISTS idx_connection_requests_user   ON public.connection_r
 CREATE INDEX IF NOT EXISTS idx_connection_requests_status ON public.connection_requests (status);
 CREATE INDEX IF NOT EXISTS idx_lab_resources_category      ON public.lab_resources (category, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_lab_resources_owner         ON public.lab_resources (owner_id);
+
+-- =============================================================================
+-- Collaborate board (see database/migrations/2026-07-26_collab_posts.sql)
+-- =============================================================================
+-- ── 1. collab_posts ──────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.collab_posts (
+    id             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id       UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    title          TEXT        NOT NULL,
+    description    TEXT        NOT NULL DEFAULT '',
+    research_areas TEXT[]      NOT NULL DEFAULT '{}',
+    haves          TEXT[]      NOT NULL DEFAULT '{}',   -- what this lab can offer
+    needs          TEXT[]      NOT NULL DEFAULT '{}',   -- what this lab is looking for
+    stage          TEXT        NOT NULL DEFAULT 'concept'
+                        CHECK (stage IN ('concept', 'early_data', 'validation',
+                                         'preclinical', 'seeking_team')),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.collab_posts ENABLE ROW LEVEL SECURITY;
+
+-- Anyone (signed in or not) can BROWSE the board. This is the point of the
+-- feature — discovery must not require an account.
+DROP POLICY IF EXISTS "collab_posts_public_select" ON public.collab_posts;
+CREATE POLICY "collab_posts_public_select"
+    ON public.collab_posts FOR SELECT
+    USING (true);
+
+-- Write is owner-only, in all three directions. owner_id is derived from the
+-- session in lib/server/collab.ts; these policies enforce it at the DB level so
+-- a forged owner_id in a request body is rejected by Postgres, not by app code.
+DROP POLICY IF EXISTS "collab_posts_insert_own" ON public.collab_posts;
+CREATE POLICY "collab_posts_insert_own"
+    ON public.collab_posts FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "collab_posts_update_own" ON public.collab_posts;
+CREATE POLICY "collab_posts_update_own"
+    ON public.collab_posts FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = owner_id)
+    WITH CHECK (auth.uid() = owner_id);
+
+DROP POLICY IF EXISTS "collab_posts_delete_own" ON public.collab_posts;
+CREATE POLICY "collab_posts_delete_own"
+    ON public.collab_posts FOR DELETE
+    TO authenticated
+    USING (auth.uid() = owner_id);
+
+-- Keep updated_at honest on edit.
+CREATE OR REPLACE FUNCTION public.touch_updated_at()
+RETURNS TRIGGER
+    LANGUAGE plpgsql
+AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS collab_posts_touch_updated_at ON public.collab_posts;
+CREATE TRIGGER collab_posts_touch_updated_at
+    BEFORE UPDATE ON public.collab_posts
+    FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
+
+
+-- ── 2. connection_requests: post responses ───────────────────────────────────
+-- Additive only. Both columns are nullable, so every existing insert path
+-- (provider cards) keeps working untouched.
+
+ALTER TABLE public.connection_requests
+    ADD COLUMN IF NOT EXISTS post_id UUID
+        REFERENCES public.collab_posts (id) ON DELETE CASCADE;
+
+ALTER TABLE public.connection_requests
+    ADD COLUMN IF NOT EXISTS interest_type TEXT;
+
+-- interest_type is constrained but NULLABLE — provider-card requests leave it
+-- unset, and the CHECK passes for NULL.
+ALTER TABLE public.connection_requests
+    DROP CONSTRAINT IF EXISTS connection_requests_interest_type_check;
+ALTER TABLE public.connection_requests
+    ADD CONSTRAINT connection_requests_interest_type_check
+        CHECK (interest_type IS NULL OR interest_type IN
+               ('can_provide', 'want_to_join', 'want_to_use', 'general'));
+
+-- A post response has no provider, so provider_name must be allowed to be NULL
+-- for that flow. Relax the NOT NULL and replace it with a rule that says a row
+-- must be ONE of the two kinds. Every existing row has provider_name set, so
+-- this validates cleanly.
+ALTER TABLE public.connection_requests
+    ALTER COLUMN provider_name DROP NOT NULL;
+
+ALTER TABLE public.connection_requests
+    DROP CONSTRAINT IF EXISTS connection_requests_target_check;
+ALTER TABLE public.connection_requests
+    ADD CONSTRAINT connection_requests_target_check
+        CHECK (provider_name IS NOT NULL OR post_id IS NOT NULL);
+
+
+-- ── 3. Public interest counts ────────────────────────────────────────────────
+-- The board shows "N interested" per post, but connection_requests SELECT is
+-- restricted to the requester's OWN rows — so nobody can count them directly,
+-- and that restriction should stay (the rows carry messages and identities).
+--
+-- This SECURITY DEFINER function exposes ONLY an aggregate count per post: no
+-- user ids, no messages, no interest types. Distinct user_id so one person
+-- responding twice counts once.
+
+CREATE OR REPLACE FUNCTION public.collab_post_interest_counts()
+RETURNS TABLE (post_id UUID, interested BIGINT)
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = public
+AS $$
+    SELECT cr.post_id, COUNT(DISTINCT cr.user_id)
+    FROM public.connection_requests cr
+    WHERE cr.post_id IS NOT NULL
+    GROUP BY cr.post_id;
+$$;
+
+REVOKE ALL ON FUNCTION public.collab_post_interest_counts() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.collab_post_interest_counts() TO anon, authenticated;
+
+
+-- ── 4. Indexes ───────────────────────────────────────────────────────────────
+
+CREATE INDEX IF NOT EXISTS idx_collab_posts_created ON public.collab_posts (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_collab_posts_owner   ON public.collab_posts (owner_id);
+CREATE INDEX IF NOT EXISTS idx_collab_posts_stage   ON public.collab_posts (stage);
+-- GIN indexes make the array filters (areas / haves / needs) cheap.
+CREATE INDEX IF NOT EXISTS idx_collab_posts_areas   ON public.collab_posts USING GIN (research_areas);
+CREATE INDEX IF NOT EXISTS idx_collab_posts_haves   ON public.collab_posts USING GIN (haves);
+CREATE INDEX IF NOT EXISTS idx_collab_posts_needs   ON public.collab_posts USING GIN (needs);
+CREATE INDEX IF NOT EXISTS idx_connection_requests_post ON public.connection_requests (post_id);
+
+-- ── 5. Public post-owner identity ────────────────────────────────────────────
+-- Posting to a public board identifies you BY NAME; it does not publish your
+-- profile. public.users RLS only exposes fully-public profiles, so without this
+-- a private-profile poster's card renders anonymous. Narrow SECURITY DEFINER
+-- read (see database/migrations/2026-07-26_collab_post_owners.sql).
+
+CREATE OR REPLACE FUNCTION public.collab_post_owners()
+RETURNS TABLE (
+    id           UUID,
+    name         TEXT,
+    affiliation  TEXT,
+    institution  TEXT,
+    profile_slug TEXT
+)
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = public
+AS $$
+    SELECT
+        u.id,
+        u.name,
+        u.affiliation,
+        u.institution,
+        -- Only a PUBLIC profile gets a linkable slug; a private one is
+        -- identified by name only.
+        CASE WHEN u.is_public THEN u.profile_slug ELSE NULL END AS profile_slug
+    FROM public.users u
+    WHERE EXISTS (
+        SELECT 1 FROM public.collab_posts p WHERE p.owner_id = u.id
+    );
+$$;
+
+-- Only these five columns, only for users who have actually posted.
+REVOKE ALL ON FUNCTION public.collab_post_owners() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.collab_post_owners() TO anon, authenticated;
+
+
