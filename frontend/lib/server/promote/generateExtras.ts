@@ -18,6 +18,7 @@ import type { PaperMetadata } from "@/lib/server/promote/fetchPaper";
 // paths feed Groq the identical cleaned abstract. Imported (not duplicated) so
 // generatePosts.ts stays untouched.
 import { stripAbstractScaffolding } from "@/lib/server/promote/generatePosts";
+import { groqComplete } from "./groqCall";
 import { ServerConfigError } from "@/lib/server/supabaseServer";
 
 export type ExtraOutputsResult = {
@@ -138,40 +139,14 @@ export async function generateExtraOutputs(paper: PaperMetadata): Promise<ExtraO
     throw new Error("A paper title is required to generate outputs.");
   }
 
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) {
-    throw new ServerConfigError("GROQ_API_KEY not configured");
-  }
-
-  const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${groqKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserMessage(paper) },
-      ],
-      temperature: 0.7,
-      max_tokens: 2048,
-      // Both outputs are prose paragraphs; JSON mode forces the model to escape
-      // the inner newlines as \n so JSON.parse never rejects the response (same
-      // reasoning as generatePosts.ts).
-      response_format: { type: "json_object" },
-    }),
+  // One call, with a single retry on rate limiting (see groqCall.ts).
+  const content = await groqComplete({
+    system: SYSTEM_PROMPT,
+    user: buildUserMessage(paper),
+    maxTokens: 2048,
+    label: "generate-extras",
   });
 
-  if (!groqRes.ok) {
-    const detail = await groqRes.text();
-    console.error("Groq API error (generate-extras):", groqRes.status, detail);
-    throw new Error("AI service unavailable. Please try again.");
-  }
-
-  const groqData = await groqRes.json();
-  const content: string = groqData.choices?.[0]?.message?.content ?? "";
   const parsed = parseJson(content);
 
   // Collapse any repeated sourceUrl down to a single occurrence in code, so the

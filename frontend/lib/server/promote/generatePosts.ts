@@ -11,6 +11,7 @@
 // upstream/parse failure → Error) so the thin route can map it via errorResponse.
 
 import type { PaperMetadata } from "@/lib/server/promote/fetchPaper";
+import { groqComplete } from "./groqCall";
 import { ServerConfigError } from "@/lib/server/supabaseServer";
 
 export type PromoVariant = {
@@ -190,42 +191,14 @@ export async function generatePromoPosts(paper: PaperMetadata): Promise<PromoVar
     throw new Error("A paper title is required to generate posts.");
   }
 
-  const groqKey = process.env.GROQ_API_KEY;
-  if (!groqKey) {
-    throw new ServerConfigError("GROQ_API_KEY not configured");
-  }
-
-  const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${groqKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserMessage(paper) },
-      ],
-      temperature: 0.7,
-      max_tokens: 4096,
-      // LinkedIn bodies are inherently multi-line (paragraphs/bullets). Without
-      // this the model emits literal newlines INSIDE the JSON string values,
-      // which is invalid JSON that JSON.parse rejects. JSON mode forces the model
-      // to emit syntactically valid JSON (newlines escaped as \n, no ``` fences).
-      // The prompt already says "JSON" throughout, which JSON mode requires.
-      response_format: { type: "json_object" },
-    }),
+  // One call, with a single retry on rate limiting (see groqCall.ts).
+  const content = await groqComplete({
+    system: SYSTEM_PROMPT,
+    user: buildUserMessage(paper),
+    maxTokens: 4096,
+    label: "generate-posts",
   });
 
-  if (!groqRes.ok) {
-    const detail = await groqRes.text();
-    console.error("Groq API error (generate-posts):", groqRes.status, detail);
-    throw new Error("AI service unavailable. Please try again.");
-  }
-
-  const groqData = await groqRes.json();
-  const content: string = groqData.choices?.[0]?.message?.content ?? "";
   const parsed = parseJson(content);
 
   const rawVariants =
