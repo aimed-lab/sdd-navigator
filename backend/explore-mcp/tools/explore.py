@@ -27,6 +27,16 @@ import json
 import re
 
 import llm
+from cache import (
+    STALE_DEFAULT_FEED,
+    STALE_LLM,
+    STALE_TOPIC,
+    TTL_DEFAULT_FEED,
+    TTL_LLM,
+    TTL_TOPIC,
+    cache,
+    normalize_key,
+)
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
@@ -308,21 +318,28 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
     return sections
 
 
-async def explore_async(input_text: str) -> dict:
-    """Async orchestration core (used by the MCP server). The blocking LLM calls
-    run off the event loop so the tool fan-out stays concurrent.
-
-    Blank / whitespace-only input skips LLM extraction and routing entirely and
-    serves the field-wide landing feed: the default scope + default tool set, with
-    scope.is_default=true so the frontend knows this is the blank-state feed."""
+async def _explore_uncached(input_text: str) -> dict:
+    """The real orchestration: extract scope, route, fan out, assemble."""
     if not (input_text or "").strip():
         scope = {**_DEFAULT_SCOPE, "is_default": True}
         chosen = list(_DEFAULT_TOOLS)
         reasoning = "default landing feed (blank input): field-wide drug-discovery scope"
     else:
-        scope = await asyncio.to_thread(_extract_scope, input_text)
-        scope["is_default"] = False
-        chosen, reasoning = await asyncio.to_thread(_choose_tools, input_text, scope)
+        # Groq calls are cached on the input string: extraction and routing run at
+        # temperature 0, so they're deterministic for a given input and an
+        # identical search should never re-hit the LLM.
+        scope = await cache.get_or_compute(
+            normalize_key("scope", input_text),
+            lambda: asyncio.to_thread(_extract_scope, input_text),
+            TTL_LLM, STALE_LLM,
+        )
+        scope = {**scope, "is_default": False}
+        chosen, reasoning = await cache.get_or_compute(
+            normalize_key("route", input_text),
+            lambda: asyncio.to_thread(_choose_tools, input_text, scope),
+            TTL_LLM, STALE_LLM,
+        )
+        chosen = list(chosen)
 
     sections = await _execute(chosen, scope)
     return {
@@ -332,6 +349,32 @@ async def explore_async(input_text: str) -> dict:
         "reasoning": reasoning,
         "sections": sections,
     }
+
+
+async def explore_async(input_text: str) -> dict:
+    """Async orchestration core (used by the MCP server), cached end-to-end.
+
+    Blank / whitespace-only input skips LLM extraction and routing entirely and
+    serves the field-wide landing feed: the default scope + default tool set, with
+    scope.is_default=true so the frontend knows this is the blank-state feed.
+
+    Caching is applied at THIS level as well as per-tool, deliberately:
+      * the whole-response entry makes a repeat visit a single dict lookup, with
+        no per-tool cache probing and no re-assembly;
+      * the per-tool entries still pay off when two DIFFERENT explore inputs
+        route to the same underlying query.
+    The blank landing feed — which every visitor hits — gets the shorter fresh
+    window (10 min) since it is the front page; a specific topic gets an hour.
+    """
+    blank = not (input_text or "").strip()
+    ttl, stale = (
+        (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
+    )
+    return await cache.get_or_compute(
+        normalize_key("explore", input_text),
+        lambda: _explore_uncached(input_text),
+        ttl, stale,
+    )
 
 
 def explore(input_text: str) -> dict:

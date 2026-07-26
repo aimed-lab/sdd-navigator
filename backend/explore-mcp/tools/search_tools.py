@@ -12,18 +12,34 @@ import asyncio
 
 import httpx
 
+from cache import STALE_TOOLS, TTL_TOOLS, cache, normalize_key
 from models import Item
 from sources.github import fetch_github
 
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 
 
-async def search_tools_async(query: str, limit: int = 20) -> list[Item]:
+async def _fetch(query: str, limit: int) -> list[Item]:
     try:
         async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
             return await fetch_github(client, query, limit)
     except Exception:
         return []   # per-source isolation
+
+
+async def search_tools_async(query: str, limit: int = 20) -> list[Item]:
+    """Cached + single-flighted.
+
+    GitHub's SEARCH bucket is 30 requests per MINUTE authenticated — a tight
+    burst ceiling, not a generous hourly one. So this tool gets the LONGEST
+    fresh window of any source (star counts barely move hour to hour), and
+    single-flight is what keeps a cold-cache burst from eating the minute's
+    budget on one repeated query.
+    """
+    key = normalize_key(f"tools:{limit}", query)
+    return await cache.get_or_compute(
+        key, lambda: _fetch(query, limit), TTL_TOOLS, STALE_TOOLS
+    )
 
 
 def search_tools(query: str, limit: int = 20) -> list[Item]:

@@ -25,6 +25,7 @@ import asyncio
 
 import httpx
 
+from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from dedupe import merge_items
 from models import Item
 from ranking import rank_papers_winner, relevance_seed_ids
@@ -70,6 +71,14 @@ def _rank_merge(items: list[Item]) -> list[Item]:
 
 
 async def search_papers_async(query: str, limit: int = 20) -> list[Item]:
+    """Cached + single-flighted wrapper around the fan-out (see _fetch)."""
+    key = normalize_key(f"papers:{limit}", query)
+    return await cache.get_or_compute(
+        key, lambda: _fetch(query, limit), TTL_SOURCE, STALE_SOURCE
+    )
+
+
+async def _fetch(query: str, limit: int) -> list[Item]:
     """Async core: fan out, isolate failures, merge, dedupe, sort, cap."""
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
         results = await asyncio.gather(

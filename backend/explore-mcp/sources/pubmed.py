@@ -4,10 +4,15 @@ sources/pubmed.py — PubMed E-utilities fetcher.
 Port of _reference/ts-sources/sources/pubmed.ts. Two-step: esearch for the id
 list, then esummary for metadata. Same URLs, same field mapping, same blank-title
 drop. PubMed exposes no ranking metric, so every Item's `signal` stays None.
+
+Auth: NCBI_API_KEY (optional) is appended as `api_key` to both E-utilities
+calls, raising the shared rate limit from 3 req/sec to 10 req/sec. Unset ->
+unauthenticated requests, which still work (at the lower limit).
 """
 
 from __future__ import annotations
 
+import os
 from urllib.parse import quote
 
 import httpx
@@ -33,14 +38,28 @@ _ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 _ESUMMARY = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 
 
+def _api_key_param() -> str:
+    """`&api_key=…` when NCBI_API_KEY is set, else "".
+
+    Read at CALL time, not import time: server.py imports the tools before it
+    calls load_dotenv(), so a module-level read would miss the .env values.
+    """
+    key = (os.environ.get("NCBI_API_KEY") or "").strip()
+    return f"&api_key={quote(key)}" if key else ""
+
+
 async def fetch_pubmed(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
-    search_url = f"{_ESEARCH}?db=pubmed&term={quote(term)}&retmax={cap}&sort=date&retmode=json"
+    auth = _api_key_param()   # applies to BOTH E-utilities calls below
+
+    search_url = (
+        f"{_ESEARCH}?db=pubmed&term={quote(term)}&retmax={cap}&sort=date&retmode=json{auth}"
+    )
     search_data = await get_json(client, search_url)
     ids = ((search_data or {}).get("esearchresult") or {}).get("idlist") or []
     if not ids:
         return []
 
-    summary_url = f"{_ESUMMARY}?db=pubmed&id={','.join(ids)}&retmode=json"
+    summary_url = f"{_ESUMMARY}?db=pubmed&id={','.join(ids)}&retmode=json{auth}"
     summary_data = await get_json(client, summary_url)
     result = (summary_data or {}).get("result") or {}
 

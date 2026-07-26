@@ -10,6 +10,7 @@ same blank-title drop. Two Explore-specific additions per spec:
 
 from __future__ import annotations
 
+import os
 from urllib.parse import quote
 
 import httpx
@@ -18,6 +19,20 @@ from dedupe import dedupe_key, normalize_doi
 from models import Item, Signal
 
 from .base import filter_quality, get_json, now_iso, to_iso
+
+
+def _mailto_param() -> str:
+    """`&mailto=…` when OPENALEX_EMAIL is set, else "".
+
+    This is OpenAlex's "polite pool": identified traffic gets faster, more
+    consistent service and is far less likely to be throttled. Unset -> the
+    common pool, which still works.
+
+    Read at CALL time, not import time: server.py imports the tools before it
+    calls load_dotenv(), so a module-level read would miss the .env values.
+    """
+    email = (os.environ.get("OPENALEX_EMAIL") or "").strip()
+    return f"&mailto={quote(email)}" if email else ""
 
 
 # OpenAlex sort for recency-first callers (search_news). Kept as the DEFAULT so
@@ -49,6 +64,7 @@ async def fetch_openalex(
     url = f"https://api.openalex.org/works?search={quote(term)}&per-page={cap}"
     if sort:
         url += f"&sort={sort}"
+    url += _mailto_param()
     data = await get_json(client, url)
 
     items: list[Item] = []

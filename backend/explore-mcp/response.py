@@ -1,0 +1,90 @@
+"""
+response.py — trim Item payloads at the HTTP egress boundary.
+
+WHY
+───
+`raw` carries each source's full record. For OpenAlex that is the entire work
+object, including a `referenced_works` array of 150+ ids per paper. WINNER needs
+those ids SERVER-SIDE to build the citation graph (ranking.py), but the browser
+never reads them: a measured /api/explore response was 0.85 MB, of which 99% was
+untrimmed `raw`.
+
+So `raw` stays intact all the way through fetching, dedupe/merge and the WINNER
+ranking step — and is trimmed only here, on the way out of the HTTP routes.
+
+WHERE THIS SITS
+───────────────
+Egress only. The CACHE stores untrimmed items on purpose: a cached entry must
+still be re-rankable server-side, and trimming is cheap (a dict comprehension)
+compared with the serialization it saves.
+
+WHAT SURVIVES
+─────────────
+Two different rules, because `raw` means two different things:
+
+  * INTERNAL items (wiki episodes, lab resources, people) — `raw` IS the
+    payload. The podcast pages read slug / episode_number / description /
+    summary / concepts / tags / episode_url / image_url straight out of it.
+    These pass through UNTOUCHED.
+
+  * EXTERNAL items (openalex / pubmed / crossref / github / …) — the UI reads
+    only two things from `raw`: `prior_signal` (the citation count preserved
+    when WINNER replaces the signal — ItemCard renders "★ Key paper · N
+    citations" from it) and `sources` (the contributing sources recorded by
+    dedupe). Everything else is dropped. All the fields a card actually shows —
+    title, summary, url, doi, date_iso, signal — are top-level Item fields and
+    are never touched by any of this.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+# Sources whose `raw` is first-party content the UI renders directly.
+_INTERNAL_SOURCES = {"internal"}
+
+# For external items, the ONLY raw keys the frontend reads.
+#   prior_signal -> components/ItemCard.tsx priorCitations()
+#   sources      -> dedupe.merge_items(), shown as provenance
+_EXTERNAL_RAW_KEEP = frozenset({"prior_signal", "sources"})
+
+
+def trim_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return `item` with a client-sized `raw`. Never mutates the input — the
+    cache holds these dicts' source objects and must keep them intact."""
+    if not isinstance(item, dict):
+        return item
+
+    raw = item.get("raw")
+    if not isinstance(raw, dict) or not raw:
+        return item
+
+    # First-party payloads pass through — the UI reads them field by field.
+    if item.get("source") in _INTERNAL_SOURCES:
+        return item
+
+    kept = {k: v for k, v in raw.items() if k in _EXTERNAL_RAW_KEEP}
+    return {**item, "raw": kept}
+
+
+def trim_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [trim_item(i) for i in items]
+
+
+def trim_sections(sections: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Trim every item inside an explore() `sections` list."""
+    out: list[dict[str, Any]] = []
+    for section in sections:
+        if isinstance(section, dict) and isinstance(section.get("items"), list):
+            out.append({**section, "items": trim_items(section["items"])})
+        else:
+            out.append(section)
+    return out
+
+
+def trim_explore_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Trim an explore() response. Returns a new dict; the cached original is
+    left untouched."""
+    if not isinstance(result, dict) or not isinstance(result.get("sections"), list):
+        return result
+    return {**result, "sections": trim_sections(result["sections"])}

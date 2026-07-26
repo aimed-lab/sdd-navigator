@@ -4,6 +4,19 @@ sources/github.py — GitHub repository search fetcher.
 Port of _reference/ts-sources/sources/github.ts. Same URL, same `stars:>=5`
 filter, same field mapping, same blank-title drop (repos with no full_name).
 GitHub reports a real popularity metric, so each Item carries a stars Signal.
+
+Auth: GITHUB_TOKEN (optional) is sent as an `Authorization: Bearer` header.
+Unset -> unauthenticated requests, which still work (at the lower limit). Read at
+CALL time, not import time, because server.py imports the tools before
+load_dotenv().
+
+RATE LIMIT — this endpoint is /search/repositories, which draws on GitHub's
+SEARCH bucket, not the core one. Measured against the live API:
+    search:  10 req/MINUTE anonymous -> 30 req/MINUTE authenticated
+    core:  5000 req/hour authenticated  (the widely-quoted 60 -> 5000 figure —
+           it does NOT apply here)
+So the ceiling that matters for search_tools is per-minute and small even when
+authenticated: 30/min. Cache accordingly.
 """
 
 from __future__ import annotations

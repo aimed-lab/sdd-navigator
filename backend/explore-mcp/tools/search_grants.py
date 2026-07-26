@@ -12,6 +12,7 @@ import asyncio
 
 import httpx
 
+from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from models import Item
 from sources.grants_gov import fetch_grants
 
@@ -19,6 +20,14 @@ _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 
 
 async def search_grants_async(query: str, limit: int = 20) -> list[Item]:
+    """Cached + single-flighted (see _fetch)."""
+    key = normalize_key(f"grants:{limit}", query)
+    return await cache.get_or_compute(
+        key, lambda: _fetch(query, limit), TTL_SOURCE, STALE_SOURCE
+    )
+
+
+async def _fetch(query: str, limit: int) -> list[Item]:
     try:
         async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
             return await fetch_grants(client, query, limit)

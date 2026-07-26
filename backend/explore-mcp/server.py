@@ -38,6 +38,9 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from starlette.responses import JSONResponse
 
+import prewarm
+from cache import cache as _cache
+from response import trim_explore_result, trim_items
 from tools.explore import explore_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
@@ -229,6 +232,20 @@ async def health(_request):
     return JSONResponse({"service": "explore-mcp", "status": "ok", "transport": "streamable-http"})
 
 
+@mcp.custom_route("/cache/stats", methods=["GET"])
+async def cache_stats(_request):
+    """Cache counters — hits / stale_hits / misses / coalesced / refreshes, plus
+    `upstream_calls` (misses + refreshes). Operational visibility, and how the
+    'a cache hit made no upstream calls' claim is actually verified."""
+    return JSONResponse({"entries": len(_cache), **_cache.stats.as_dict()})
+
+
+@mcp.custom_route("/cache/prewarm", methods=["GET"])
+async def prewarm_status(_request):
+    """Landing-feed pre-warm status: enabled, interval, run/failure counts."""
+    return JSONResponse(prewarm.status())
+
+
 @mcp.custom_route("/api/explore", methods=["POST"])
 async def explore_http(request):
     """Plain-HTTP bridge to explore() for the Next.js proxy.
@@ -244,7 +261,9 @@ async def explore_http(request):
         body = {}
     input_text = body.get("input", "") if isinstance(body, dict) else ""
     try:
-        return JSONResponse(await explore_async(input_text or ""))
+        # trim_* only on egress — the cached copy keeps its full `raw` so the
+        # citation graph stays rebuildable server-side (see response.py).
+        return JSONResponse(trim_explore_result(await explore_async(input_text or "")))
     except Exception as exc:
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
@@ -338,10 +357,46 @@ async def papers_http(request):
         return JSONResponse({"query": query, "items": []})
     try:
         items = await search_papers_async(query, limit)
-        return JSONResponse({"query": query, "items": [i.model_dump() for i in items]})
+        return JSONResponse(
+            {"query": query, "items": trim_items([i.model_dump() for i in items])}
+        )
     except Exception as exc:
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
+def _serve() -> None:
+    """Serve the streamable-HTTP app with the landing-feed pre-warm attached.
+
+    Mirrors FastMCP.run_streamable_http_async(), with one addition: the app's
+    lifespan is WRAPPED so prewarm.start() runs on the server's own event loop
+    at startup. That matters twice over —
+      * Starlette ignores router.on_startup once a lifespan is set, and
+        streamable_http_app() sets one (the MCP session manager), so wrapping is
+        the only correct hook;
+      * the cache's per-key asyncio.Locks bind to the loop that creates them, so
+        pre-warming from another thread/loop would silently break single-flight.
+    """
+    import uvicorn
+    from contextlib import asynccontextmanager
+
+    app = mcp.streamable_http_app()
+    session_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(scope_app):
+        async with session_lifespan(scope_app):      # MCP session manager
+            await prewarm.start()                    # first warm is awaited
+            try:
+                yield
+            finally:
+                await prewarm.stop()
+
+    app.router.lifespan_context = lifespan
+
+    uvicorn.Server(
+        uvicorn.Config(app, host=HOST, port=PORT, log_level=mcp.settings.log_level.lower())
+    ).run()
+
+
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    _serve()
