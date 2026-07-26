@@ -63,6 +63,24 @@ CREATE POLICY "Users: own row"
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 
+-- Explicit self-insert permission.
+--
+-- NOTE: this is REDUNDANT with "Users: own row" above, which is FOR ALL and so
+-- already covers INSERT with the identical WITH CHECK. Postgres OR-combines
+-- permissive policies, so adding this grants nothing new. It is kept because it
+-- states the intent at the point of use, and because a future narrowing of the
+-- FOR ALL policy would otherwise silently remove signup's ability to write.
+--
+-- It does NOT create the profile row, and it cannot help at signup time: with
+-- email confirmation ON, signUp() returns no session, so auth.uid() is NULL and
+-- any insert from the app is refused by BOTH policies. Row creation is the
+-- on_auth_user_created trigger's job (below) precisely because SECURITY DEFINER
+-- runs without a session.
+DROP POLICY IF EXISTS "Users: insert own row" ON public.users;
+CREATE POLICY "Users: insert own row"
+    ON public.users FOR INSERT
+    WITH CHECK (auth.uid() = id);
+
 -- Public read of PUBLIC profiles only — powers the public /researchers/[slug]
 -- pages, read with the anon key. (Was missing from the schema previously; without
 -- it a rebuild would break public profiles even though the live DB allows them.)
