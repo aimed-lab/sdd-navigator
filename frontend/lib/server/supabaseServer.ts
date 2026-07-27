@@ -26,6 +26,24 @@ import { getRouteClient } from "@/lib/supabaseRoute";
 // existing route-handler client — one source of truth for "act as this user".
 export const getSessionClient = getRouteClient;
 
+// SERVICE-ROLE client — BYPASSES RLS ENTIRELY. Third trust level, deliberately
+// not mentioned in the two-client summary above because it is not a general
+// tool: it exists for one operation, account deletion, which must remove rows
+// the departing user can no longer be scoped to.
+//
+// Rules: server-only (the key is read from process.env and must never reach the
+// browser), and the ONLY caller is lib/auth.ts's deleteAccount(). If a second
+// caller ever appears, that is the signal something is being done with the wrong
+// trust level. Returns null when unconfigured so the caller answers 500.
+export function getServiceRoleClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
 // Anon server client for PUBLIC reads only. No persisted session; relies on
 // public-read RLS. Do not use for user-owned data.
 export function getAnonServerClient() {

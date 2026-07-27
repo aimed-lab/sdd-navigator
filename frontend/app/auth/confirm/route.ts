@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { confirmEmailLink } from "@/lib/auth";
 import { safeCallback } from "@/lib/safeRedirect";
 
-// GET /auth/confirm — where the emailed confirmation link lands.
+// GET /auth/confirm — PASSWORD-RECOVERY callback.
 //
-// Email confirmation is ON for this Supabase project (mailer_autoconfirm =
-// false), so signUp() creates the auth user WITHOUT a session and the account is
-// inert until this route runs. That makes this route load-bearing, not
-// decorative: without it a new user can never reach a signed-in state.
+// SIGNUP NO LONGER USES THIS ROUTE. Email confirmation was removed from the
+// signup flow: signUp() returns a session directly and the page redirects
+// itself, so nothing in registration sends a link here. The route is kept
+// because password reset still needs it — requestPasswordResetAction points
+// Supabase's recovery email at /auth/confirm?next=/reset-password/update, and
+// this is what exchanges that link for the session the update page requires.
 //
 // The link may arrive in either of two shapes depending on the project's email
 // template, so lib/auth.ts handles both:

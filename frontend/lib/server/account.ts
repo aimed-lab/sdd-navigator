@@ -5,10 +5,14 @@
 // and RLS scopes every op to the caller — a user can only ever read/write their
 // own row. Same table/columns/filters as before.
 //
-// The auth.* calls (updateUser email/password, signOut) STAY client-side and are
-// deliberately NOT represented here — they operate on the caller's own auth user
-// and Supabase already enforces that. delete-account is a separate flow (its own
-// /api/delete-account route) and is untouched.
+// Auth operations (sign in/up/out, password, deletion) are NOT here — they live
+// behind the seam in lib/auth.ts.
+//
+// NOTIFICATIONS REMOVED: this module used to expose toggleNotification() for the
+// notify_weekly / notify_daily columns. The platform sends no email digests, so
+// the toggles were a control that did nothing, and they were dropped along with
+// the settings panel. The COLUMNS still exist in the users table — restoring the
+// feature means re-adding a writer here, not a migration.
 
 import { requireUser } from "./supabaseServer";
 
@@ -17,8 +21,6 @@ export type AccountSettings = {
   affiliation: string | null;
   institution: string | null;
   country: string | null;
-  notify_weekly: boolean;
-  notify_daily: boolean;
   is_public: boolean;
   profile_slug: string | null;
 };
@@ -34,7 +36,7 @@ export async function getAccountSettings(): Promise<AccountSettings | null> {
   const { supabase, user } = await requireUser();
   const { data, error } = await supabase
     .from("users")
-    .select("name, affiliation, institution, country, notify_weekly, notify_daily, is_public, profile_slug")
+    .select("name, affiliation, institution, country, is_public, profile_slug")
     .eq("id", user.id)
     .maybeSingle();
   if (error) throw error;
@@ -44,17 +46,5 @@ export async function getAccountSettings(): Promise<AccountSettings | null> {
 export async function updateProfileFields(patch: ProfileFieldPatch): Promise<void> {
   const { supabase, user } = await requireUser();
   const { error } = await supabase.from("users").update(patch).eq("id", user.id);
-  if (error) throw error;
-}
-
-export async function toggleNotification(
-  field: "notify_weekly" | "notify_daily",
-  value: boolean,
-): Promise<void> {
-  const { supabase, user } = await requireUser();
-  const { error } = await supabase
-    .from("users")
-    .update({ [field]: value })
-    .eq("id", user.id);
   if (error) throw error;
 }

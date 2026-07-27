@@ -38,6 +38,7 @@
 import {
   ServerConfigError,
   UnauthorizedError,
+  getServiceRoleClient,
   getSessionClient,
   requireUser,
 } from "@/lib/server/supabaseServer";
@@ -51,16 +52,13 @@ export type AuthUser = {
   email: string | null;
 };
 
-/** Result of a sign-in / sign-up attempt.
+/** Result of an auth operation. `ok: true` always means "done, and the session
+ *  cookies now reflect it" — there is no intermediate "pending confirmation"
+ *  state for a caller to handle.
  *
- *  `needsEmailConfirmation` is the branch the UI renders on: true means the
- *  account exists but has no session yet, so the caller must show "check your
- *  email" instead of redirecting. Under SSO this is always false — the IdP owns
- *  verification — which is exactly why it's a field and not a caller-side guess
- *  about Supabase's configuration. */
-export type AuthOutcome =
-  | { ok: true; needsEmailConfirmation: boolean }
-  | { ok: false; error: string };
+ *  (This previously carried a `needsEmailConfirmation` flag. Email confirmation
+ *  was removed from signup, so every success is now immediate.) */
+export type AuthOutcome = { ok: true } | { ok: false; error: string };
 
 /** Supabase's raw auth errors are either too technical or too revealing to show
  *  a user verbatim. This is the ONE place that translation happens, so swapping
@@ -159,52 +157,60 @@ export async function signInWithEmail(
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { ok: false, error: friendlyAuthError(error.message) };
 
-  return { ok: true, needsEmailConfirmation: false };
+  return { ok: true };
 }
 
 /**
- * Register a new account.
+ * Register a new account and sign the user straight in.
  *
- * The public.users profile row is NOT written here. The `on_auth_user_created`
+ * ONE STEP, NO EMAIL. Email confirmation is disabled for this project, so
+ * signUp() returns a session immediately and the cookies are set here. There is
+ * no confirmation link, no "check your email" screen, and the caller redirects
+ * as soon as this resolves.
+ *
+ * The public.users profile row is NOT written here — the `on_auth_user_created`
  * trigger (database/schema.sql) mirrors the new auth user into public.users with
- * SECURITY DEFINER rights. That is load-bearing while email confirmation is ON:
- * signUp() returns no session, so an insert from here would have no identity and
- * would be refused by the users-table RLS policy.
- *
- * @param emailRedirectTo Absolute URL Supabase sends the confirmation link to.
- *        Must be on the Supabase project's redirect allowlist.
+ * SECURITY DEFINER rights. That stays the right place for it: the trigger runs
+ * inside the same insert regardless of whether a session exists, so profile
+ * creation never depends on the confirmation setting.
  */
-export async function signUp(
-  email: string,
-  password: string,
-  emailRedirectTo?: string
-): Promise<AuthOutcome> {
+export async function signUp(email: string, password: string): Promise<AuthOutcome> {
   const supabase = await getSessionClient();
   if (!supabase) throw new ServerConfigError();
 
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: {
-      // Read by handle_new_user() to seed users.name without a second write.
-      data: { name: email.split("@")[0] },
-      ...(emailRedirectTo ? { emailRedirectTo } : {}),
-    },
+    // Read by handle_new_user() to seed users.name without a second write.
+    options: { data: { name: email.split("@")[0] } },
   });
 
   if (error) return { ok: false, error: friendlyAuthError(error.message) };
 
   // Supabase does not error on a duplicate signup — it returns a decoy user with
   // an EMPTY identities array so an attacker can't enumerate registered emails.
-  // We keep that property: the message below is the same one a genuinely new
-  // user would see, so the response doesn't reveal whether the email exists.
+  // With confirmation off there is no email to swallow the ambiguity, so say
+  // plainly that the address is taken; the alternative is a "success" that
+  // silently fails to sign anyone in.
   if (data.user && (data.user.identities?.length ?? 0) === 0) {
-    return { ok: true, needsEmailConfirmation: true };
+    return { ok: false, error: "An account with that email already exists. Try logging in." };
   }
 
-  // A session here means confirmation is OFF in this project and the user is
-  // already signed in; no session means the confirmation email is on its way.
-  return { ok: true, needsEmailConfirmation: !data.session };
+  // No session means the project's "Confirm email" setting is back ON. Rather
+  // than redirect to a page that will bounce the user straight back to /login,
+  // fail loudly — this is a configuration problem, not a user error.
+  if (!data.session) {
+    console.error(
+      "signUp returned no session — Supabase 'Confirm email' appears to be enabled. " +
+        "Disable it (Authentication → Providers → Email) or restore the confirmation flow."
+    );
+    return {
+      ok: false,
+      error: "Account creation isn't fully configured on this server. Please contact support.",
+    };
+  }
+
+  return { ok: true };
 }
 
 /** Sign out and clear the session cookies. */
@@ -229,19 +235,151 @@ export async function confirmEmailLink(params: {
   if (params.code) {
     const { error } = await supabase.auth.exchangeCodeForSession(params.code);
     if (error) return { ok: false, error: friendlyAuthError(error.message) };
-    return { ok: true, needsEmailConfirmation: false };
+    return { ok: true };
   }
 
   if (params.tokenHash) {
     const { error } = await supabase.auth.verifyOtp({
       token_hash: params.tokenHash,
-      type: (params.type as "signup" | "email") ?? "signup",
+      // "recovery" is the password-reset link; "signup"/"email" are confirmations.
+      type: (params.type as "signup" | "email" | "recovery") ?? "signup",
     });
     if (error) return { ok: false, error: friendlyAuthError(error.message) };
-    return { ok: true, needsEmailConfirmation: false };
+    return { ok: true };
   }
 
   return { ok: false, error: "That confirmation link is incomplete." };
+}
+
+// ── password reset ───────────────────────────────────────────────────────────
+//
+// SSO NOTE: both of these disappear under Oracle/UAB SSO — an institutional IdP
+// owns credentials, and "forgot password" becomes a link out to the IdP's own
+// reset page. They live here so that removal is a change to this file plus the
+// deletion of two routes, not an audit of every page.
+
+/** Send a password-reset email. Always reports success, even for an unknown
+ *  address: telling a caller "no account with that email" turns this endpoint
+ *  into a free user-enumeration oracle. */
+export async function requestPasswordReset(
+  email: string,
+  redirectTo?: string
+): Promise<AuthOutcome> {
+  const supabase = await getSessionClient();
+  if (!supabase) throw new ServerConfigError();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    email,
+    redirectTo ? { redirectTo } : undefined
+  );
+
+  // Rate limiting is the one failure worth surfacing — the user can act on it
+  // ("wait and retry") and it does not reveal whether the account exists.
+  if (error && /rate limit|too many/i.test(error.message)) {
+    return { ok: false, error: friendlyAuthError(error.message) };
+  }
+  if (error) console.error("requestPasswordReset failed", error.message);
+
+  return { ok: true };
+}
+
+/** Set a new password for the CURRENT session. Requires the recovery session
+ *  established by the emailed link (or a normal signed-in session). */
+export async function updatePassword(newPassword: string): Promise<AuthOutcome> {
+  const supabase = await getSessionClient();
+  if (!supabase) throw new ServerConfigError();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new UnauthorizedError();
+
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return { ok: false, error: friendlyAuthError(error.message) };
+  return { ok: true };
+}
+
+// ── account deletion ─────────────────────────────────────────────────────────
+
+/**
+ * Permanently delete the caller's account and everything they own.
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ MIGRATION POINT — this function is the most Supabase-specific code in   │
+ * │ the app and WILL need rewriting for Oracle.                             │
+ * │                                                                         │
+ * │ Two parts have to change together:                                      │
+ * │   1. The identity delete (auth.admin.deleteUser) has no Oracle analogue.│
+ * │      Under UAB SSO the institution owns the account — we will almost    │
+ * │      certainly not be allowed to delete it at all, and this becomes     │
+ * │      "delete the user's DATA and detach the identity" instead.          │
+ * │   2. The row cascade below relies on Postgres FKs declared              │
+ * │      ON DELETE CASCADE from auth.users. A different identity store      │
+ * │      means those FKs no longer point anywhere, so the explicit deletes  │
+ * │      here become the ONLY cleanup and must be exhaustive.               │
+ * │                                                                         │
+ * │ Everything is here on purpose. No page, action or route contains any    │
+ * │ part of this cascade.                                                   │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * Confirmation is by typed email rather than password. That is deliberate:
+ * under SSO there is no local password to re-verify, so a password prompt would
+ * be one more thing to tear out. The typed value is compared to the SESSION's
+ * email, server-side — a caller cannot nominate someone else's account.
+ */
+export async function deleteAccount(confirmEmail: string): Promise<AuthOutcome> {
+  const { supabase: sessionDb, user } = await requireUser();
+
+  const typed = confirmEmail.trim().toLowerCase();
+  const actual = (user.email ?? "").trim().toLowerCase();
+  if (!actual || typed !== actual) {
+    return { ok: false, error: "That doesn't match the email on this account." };
+  }
+
+  const admin = getServiceRoleClient();
+  if (!admin) throw new ServerConfigError("Account deletion is not configured.");
+
+  const userId = user.id;
+
+  // Explicit cascade. Most of these FKs are already ON DELETE CASCADE from
+  // auth.users, so deleteUser alone would clear them — they are listed anyway so
+  // the full blast radius is readable in one place, and so the cleanup still
+  // works if a cascade is ever dropped or the identity store changes (see the
+  // migration box above). Order: children before parents.
+  const owned: Array<[table: string, column: string]> = [
+    ["comments", "user_id"],
+    ["researcher_works", "user_id"],
+    ["saved_items", "user_id"],
+    ["connection_requests", "user_id"],
+    ["projects", "user_id"],
+    ["collab_posts", "owner_id"],
+    ["promote_showcase", "owner_id"],
+    ["lab_resources", "owner_id"],
+    ["users", "id"],
+  ];
+
+  try {
+    for (const [table, column] of owned) {
+      const { error } = await admin.from(table).delete().eq(column, userId);
+      if (error) throw new Error(`${table}: ${error.message}`);
+    }
+
+    const { error: authErr } = await admin.auth.admin.deleteUser(userId);
+    if (authErr) throw new Error(`auth user: ${authErr.message}`);
+  } catch (e) {
+    // Never leak raw Postgres/Supabase detail to the client.
+    console.error("deleteAccount failed", e);
+    return {
+      ok: false,
+      error: "Something went wrong deleting your account. Please contact support.",
+    };
+  }
+
+  // Clear the now-orphaned session cookies so the browser isn't left holding a
+  // token for a user that no longer exists.
+  await sessionDb.auth.signOut().catch(() => {});
+
+  return { ok: true };
 }
 
 /** A request-scoped DB client carrying the caller's identity (so RLS applies).

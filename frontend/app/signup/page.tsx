@@ -14,11 +14,12 @@
 // AUTH: no Supabase here. signupAction → lib/auth.ts. The public.users row is
 // created by the on_auth_user_created trigger, never by this page.
 //
-// EMAIL CONFIRMATION IS ON in this Supabase project (mailer_autoconfirm =
-// false), so a successful signup has NO session and we render the "check your
-// email" state. The code still handles confirmation being OFF — signupAction
-// reports which happened via needsEmailConfirmation, so flipping the Supabase
-// setting changes behaviour with no code change here.
+// ONE STEP, NO EMAIL. Email confirmation is disabled for this project, so a
+// successful signup already carries a session: we redirect straight to the
+// callback (onboarding by default). There is deliberately no "check your email"
+// screen and no confirmation link — if signUp ever comes back without a
+// session, lib/auth.ts fails loudly rather than sending the user somewhere that
+// would bounce them back to /login.
 
 import Link from "next/link";
 import { Suspense, useState } from "react";
@@ -44,14 +45,17 @@ const STRENGTH_BAR = ["", "bg-error", "bg-tertiary", "bg-secondary", "bg-primary
 
 function SignupForm() {
   const searchParams = useSearchParams();
-  const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
+  // New accounts land on profile setup unless they were sent here from
+  // somewhere specific (e.g. a "sign in to post" gate), in which case finishing
+  // signup should return them to what they were trying to do. Onboarding stays
+  // reachable from Settings either way, and is always skippable.
+  const callbackUrl = safeCallback(searchParams.get("callbackUrl"), "/onboarding");
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [sentTo, setSentTo] = useState<string | null>(null);
 
   const strength = passwordStrength(password);
   const mismatch = confirmPassword.length > 0 && password !== confirmPassword;
@@ -68,9 +72,7 @@ function SignupForm() {
     setError("");
     setSubmitting(true);
 
-    const form = new FormData(e.currentTarget);
-    const email = String(form.get("email") ?? "");
-    const result = await signupAction(form);
+    const result = await signupAction(new FormData(e.currentTarget));
 
     if (!result.ok) {
       setError(result.error);
@@ -78,48 +80,11 @@ function SignupForm() {
       return;
     }
 
-    if (result.needsEmailConfirmation) {
-      setSentTo(email); // confirmation ON — nothing to redirect to yet
-      setSubmitting(false);
-      return;
-    }
-
-    // Confirmation OFF: signUp returned a session, so we're already in.
+    // Signed in already — full navigation so AuthProvider remounts and reads the
+    // session cookies the action just wrote.
     window.location.assign(callbackUrl);
   }
 
-  // ── "check your email" ─────────────────────────────────────────────────────
-  if (sentTo) {
-    return (
-      <div className="max-w-md mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24">
-        <div className="glass-panel rounded-2xl p-10 text-center">
-          <span className="material-symbols-outlined text-5xl text-primary">
-            mark_email_unread
-          </span>
-          <h1 className="mt-4 font-headline-md text-headline-md text-on-background">
-            Check your email
-          </h1>
-          <p className="mt-3 font-body-md text-body-md text-secondary">
-            We sent a confirmation link to{" "}
-            <span className="font-semibold text-on-background break-all">{sentTo}</span>. Open
-            it to activate your account — you&apos;ll be signed in automatically.
-          </p>
-          <p className="mt-4 font-body-sm text-body-sm text-secondary">
-            The link opens in this browser. Nothing else is needed until you click
-            it.
-          </p>
-          <Link
-            href="/login"
-            className="btn-outline inline-block mt-7 px-6 py-3 rounded-lg font-label-md text-label-md"
-          >
-            Back to log in
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  // ── the form ───────────────────────────────────────────────────────────────
   return (
     <div className="max-w-md mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-24">
       <header className="text-center">
@@ -144,9 +109,9 @@ function SignupForm() {
         )}
 
         <form className="space-y-6" onSubmit={handleSubmit}>
-          {/* Carried through so the confirmation link returns them here */}
-          <input type="hidden" name="callbackUrl" value={callbackUrl} />
-
+          {/* No hidden callbackUrl: the action no longer needs it (there is no
+              confirmation link to point back here). The redirect happens on the
+              client once signupAction resolves. */}
           <div className="space-y-2">
             <label htmlFor="email" className="block font-label-sm text-label-sm text-on-surface">
               Email address
