@@ -25,6 +25,7 @@ import {
 // server-only module — and its `next/headers` dependency — into the client
 // bundle. Re-exported here so server callers have one import.
 import {
+  CONTACT_MAX,
   INTEREST_TYPES,
   STAGES,
   type CollabOwner,
@@ -235,11 +236,19 @@ export async function createCollabPost(input: CreateCollabPostInput): Promise<st
 /** Respond to a post. Recorded in connection_requests with post_id +
  *  interest_type — the same table the provider-card flow uses, so responses live
  *  in one inbox. provider_name stays NULL for this kind of row (the
- *  connection_requests_target_check constraint allows exactly that). */
+ *  connection_requests_target_check constraint allows exactly that).
+ *
+ *  CONTACT is whatever the responder TYPED ("How can they reach you?") — an
+ *  email, a handle, a phone, or nothing. It is stored verbatim (trimmed and
+ *  length-capped) and is the ONLY contact route the inbox ever shows. Nothing
+ *  reads the responder's account email: sharing a way to be reached is the
+ *  responder's decision to make per response, not a property of having an
+ *  account. See database/migrations/2026-07-27_collab_inbox.sql. */
 export async function respondToCollabPost(input: {
   post_id: string;
   interest_type: InterestType;
   message?: string | null;
+  contact?: string | null;
 }): Promise<string> {
   const { user, db } = await requireCurrentUser();
 
@@ -256,6 +265,8 @@ export async function respondToCollabPost(input: {
       post_id: input.post_id,
       interest_type: interest,
       message: input.message?.trim() || "",
+      // Capped server-side: the client's maxLength is a hint, not a guarantee.
+      contact: (input.contact ?? "").trim().slice(0, CONTACT_MAX),
       // provider_name intentionally omitted — this is a board response.
     })
     .select("id")

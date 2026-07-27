@@ -17,6 +17,37 @@ const PILLARS = [
   { label: "Promote", href: "/promote" },
 ] as const;
 
+// Unseen count for the inbox badge. Refetched on every navigation so that
+// opening /inbox (which marks things seen) is reflected when you leave it.
+//
+// Signed out we don't call at all and hold 0 — the badge simply isn't rendered,
+// and there's no reason to ask the server about an inbox that can't exist.
+function useUnseenInbox(signedIn: boolean, pathname: string) {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!signedIn) {
+      setCount(0);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/inbox/count", { cache: "no-store" });
+        const json = await res.json();
+        if (!cancelled) setCount(typeof json?.count === "number" ? json.count : 0);
+      } catch {
+        // A badge is not worth surfacing an error for; leave it at its last value.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn, pathname]);
+
+  return count;
+}
+
 function useTheme() {
   const [dark, setDark] = useState(false);
   useEffect(() => {
@@ -40,6 +71,7 @@ export default function Nav() {
   const pathname = usePathname();
   const { user, displayName, signOut } = useAuth();
   const { dark, toggle } = useTheme();
+  const unseen = useUnseenInbox(!!user, pathname);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -94,6 +126,23 @@ export default function Nav() {
                   Sign up
                 </Link>
               </>
+            )}
+            {user && (
+              <Link
+                href="/inbox"
+                aria-label={unseen > 0 ? `Inbox, ${unseen} unread` : "Inbox"}
+                className={
+                  "relative p-2 rounded-full transition-all hover:bg-surface-container-low " +
+                  (isActive("/inbox") ? "text-primary" : "text-secondary")
+                }
+              >
+                <span className="material-symbols-outlined">inbox</span>
+                {unseen > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-primary text-on-primary font-label-sm text-[11px] leading-none">
+                    {unseen > 99 ? "99+" : unseen}
+                  </span>
+                )}
+              </Link>
             )}
             {user && (
               <div className="relative">
@@ -172,6 +221,18 @@ export default function Nav() {
           )}
           {user && (
             <>
+              <Link
+                href="/inbox"
+                onClick={() => setMobileOpen(false)}
+                className="flex items-center gap-2 font-label-md text-label-md text-on-background"
+              >
+                Inbox
+                {unseen > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-primary text-on-primary text-[11px] leading-none">
+                    {unseen > 99 ? "99+" : unseen}
+                  </span>
+                )}
+              </Link>
               <Link href="/settings" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 Settings
               </Link>

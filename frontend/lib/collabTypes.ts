@@ -26,6 +26,21 @@ export const INTEREST_TYPES = [
 ] as const;
 export type InterestType = (typeof INTEREST_TYPES)[number];
 
+/** Short labels for the four interest types, phrased from the POST OWNER's side
+ *  — this is what the inbox shows, so "I can provide…" becomes "Can provide".
+ *  The modal keeps its own first-person wording. */
+export const INTEREST_LABELS: Record<InterestType, string> = {
+  can_provide: "Can provide something you need",
+  want_to_join: "Wants to join the project",
+  want_to_use: "Wants to use what you offer",
+  general: "General interest",
+};
+
+/** How long a self-provided contact string may be. Generous enough for an email,
+ *  a handle, or a short sentence ("email me via the lab office"), short enough
+ *  that the field can't be used as free storage. */
+export const CONTACT_MAX = 200;
+
 export type BoardFilter = "all" | "offering" | "seeking_team" | "seeking_resources";
 
 export type CollabOwner = {

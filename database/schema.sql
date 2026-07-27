@@ -925,3 +925,110 @@ CREATE POLICY "showcase_images_own_delete"
         bucket_id = 'showcase-images'
         AND (storage.foldername(name))[1] = auth.uid()::text
     );
+
+
+-- =============================================================================
+-- Collaborate inbox (see database/migrations/2026-07-27_collab_inbox.sql)
+-- =============================================================================
+-- Lets a post owner READ the responses aimed at their posts. connection_requests
+-- RLS is "select own" as the REQUESTER, which is the opposite of an inbox, so
+-- the reverse direction is exposed through narrow SECURITY DEFINER functions
+-- scoped to post ownership rather than by widening the table's policies.
+--
+-- CONTACT IS SELF-PROVIDED: `contact` is text the RESPONDER typed. No email is
+-- ever read from auth.users or public.users here. See the migration header
+-- before changing that.
+
+ALTER TABLE public.connection_requests
+    ADD COLUMN IF NOT EXISTS contact TEXT NOT NULL DEFAULT '';
+
+CREATE OR REPLACE FUNCTION public.inbox_requests()
+RETURNS TABLE (
+    request_id             UUID,
+    post_id                UUID,
+    post_title             TEXT,
+    interest_type          TEXT,
+    message                TEXT,
+    contact                TEXT,
+    status                 TEXT,
+    created_at             TIMESTAMPTZ,
+    responder_id           UUID,
+    responder_name         TEXT,
+    responder_affiliation  TEXT,
+    responder_institution  TEXT,
+    responder_profile_slug TEXT
+)
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = public
+AS $$
+    SELECT
+        cr.id, cr.post_id, p.title, cr.interest_type, cr.message,
+        cr.contact, cr.status, cr.created_at, cr.user_id,
+        u.name, u.affiliation, u.institution,
+        CASE WHEN u.is_public THEN u.profile_slug ELSE NULL END
+    FROM public.connection_requests cr
+    JOIN public.collab_posts p ON p.id = cr.post_id
+    LEFT JOIN public.users u   ON u.id = cr.user_id
+    WHERE cr.post_id IS NOT NULL
+      AND p.owner_id = auth.uid()          -- only posts the caller owns
+    ORDER BY cr.created_at DESC;
+$$;
+
+REVOKE ALL ON FUNCTION public.inbox_requests() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.inbox_requests() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.inbox_unseen_count()
+RETURNS BIGINT
+    LANGUAGE sql
+    STABLE
+    SECURITY DEFINER
+    SET search_path = public
+AS $$
+    SELECT COUNT(*)
+    FROM public.connection_requests cr
+    JOIN public.collab_posts p ON p.id = cr.post_id
+    WHERE cr.post_id IS NOT NULL
+      AND p.owner_id = auth.uid()
+      AND cr.status = 'new';
+$$;
+
+REVOKE ALL ON FUNCTION public.inbox_unseen_count() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.inbox_unseen_count() TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.mark_inbox_seen(request_ids UUID[] DEFAULT NULL)
+RETURNS BIGINT
+    LANGUAGE plpgsql
+    VOLATILE
+    SECURITY DEFINER
+    SET search_path = public
+AS $$
+DECLARE
+    updated BIGINT;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    UPDATE public.connection_requests cr
+       SET status = 'seen'
+     WHERE cr.status = 'new'                -- never walk 'responded'/'closed' back
+       AND cr.post_id IS NOT NULL
+       AND (request_ids IS NULL OR cr.id = ANY (request_ids))
+       AND EXISTS (
+           SELECT 1 FROM public.collab_posts p
+           WHERE p.id = cr.post_id AND p.owner_id = auth.uid()
+       );
+
+    GET DIAGNOSTICS updated = ROW_COUNT;
+    RETURN updated;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mark_inbox_seen(UUID[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.mark_inbox_seen(UUID[]) TO authenticated;
+
+CREATE INDEX IF NOT EXISTS idx_connection_requests_unseen
+    ON public.connection_requests (post_id)
+    WHERE status = 'new' AND post_id IS NOT NULL;

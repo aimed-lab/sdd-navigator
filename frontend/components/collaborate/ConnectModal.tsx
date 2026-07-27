@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { respondAction } from "@/app/collaborate/actions";
-import type { InterestType } from "@/lib/collabTypes";
+import { CONTACT_MAX, type InterestType } from "@/lib/collabTypes";
 
 // The four schema values, with wording a researcher would actually recognise.
 // The design showed three; want_to_use is the fourth the data model defines.
@@ -57,6 +57,9 @@ export default function ConnectModal({
   const pathname = usePathname();
   const [choice, setChoice] = useState<InterestType>("general");
   const [message, setMessage] = useState("");
+  // Self-provided contact. Deliberately NOT prefilled from the account email:
+  // the whole point is that the responder chooses what to share, per response.
+  const [contact, setContact] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -82,6 +85,7 @@ export default function ConnectModal({
       post_id: postId,
       interest_type: choice,
       message: message.trim(),
+      contact: contact.trim(),
     });
 
     if (res.ok) setSent(true);
@@ -219,6 +223,32 @@ export default function ConnectModal({
                 placeholder="Briefly say what you'd bring or what you're after…"
                 className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
+            </div>
+
+            {/* Self-provided contact. The post owner sees exactly this string and
+                nothing else — no account email is ever shared for them. */}
+            <div>
+              <label
+                htmlFor="connect-contact"
+                className="block font-label-md text-label-md text-on-background mb-2"
+              >
+                How can they reach you?{" "}
+                <span className="text-secondary font-body-sm">(optional)</span>
+              </label>
+              <input
+                id="connect-contact"
+                type="text"
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+                maxLength={CONTACT_MAX}
+                placeholder="e.g. j.smith@uab.edu, or a lab phone, or @handle"
+                className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+              />
+              <p className="mt-2 font-body-sm text-body-sm text-secondary">
+                Shared only with this post&apos;s owner. We never share your
+                account email — if you leave this blank, they&apos;ll see your name
+                but have no way to reply.
+              </p>
             </div>
 
             {error && (

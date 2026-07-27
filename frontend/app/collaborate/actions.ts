@@ -43,11 +43,14 @@ export async function createPostAction(input: unknown): Promise<ActionResult> {
   }
 }
 
-/** Record interest in a post. */
+/** Record interest in a post. `contact` is the responder's own free-text answer
+ *  to "How can they reach you?" — the only contact route the owner's inbox will
+ *  show, and never their account email. */
 export async function respondAction(input: {
   post_id: string;
   interest_type: InterestType;
   message?: string;
+  contact?: string;
 }): Promise<ActionResult> {
   if (!input?.post_id) return { ok: false, error: "Missing post." };
 
@@ -56,6 +59,7 @@ export async function respondAction(input: {
       post_id: input.post_id,
       interest_type: input.interest_type,
       message: input.message ?? "",
+      contact: input.contact ?? "",
     });
     revalidatePath("/collaborate");
     return { ok: true, id };
