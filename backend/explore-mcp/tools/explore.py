@@ -53,17 +53,44 @@ _INTERNAL_LIMIT = 20   # internal DB tools (lab_resources/people/wiki)
 
 # Blank-input landing feed: a field-wide default scope + a fixed tool set (the
 # front page for an empty query). No LLM is called — we skip extraction/routing.
+_EMPTY_SCOPE: dict[str, list[str]] = {key: [] for key in SCOPE_KEYS}
 _DEFAULT_SCOPE: dict[str, list[str]] = {
+    **_EMPTY_SCOPE,
     "topics": ["drug discovery", "AI in drug discovery"],
-    "genes": [],
-    "diseases": [],
-    "assets": [],
-    "methods": [],
 }
 _DEFAULT_TOOLS = [
     "search_news", "search_papers", "search_tools",
     "search_trials", "search_grants", "search_wiki",
 ]
+
+# PERSONALIZED landing feed: the same blank-input feed, but scoped to terms the
+# caller supplies (the signed-in user's saved interests — see the frontend's
+# lib/server/interests.ts). They become the scope's `topics` verbatim: no LLM
+# runs, exactly as for the generic default feed, so the personalized front page
+# is just as cheap. Bounds mirror the interests column's own caps (20 × 60) so a
+# tampered payload can't turn the feed into an unbounded fan-out.
+_MAX_SCOPE_TERMS = 20
+_MAX_TERM_CHARS = 60
+
+
+def _clean_terms(terms) -> list[str]:
+    """Normalize caller-supplied scope terms: whitespace-collapsed, length- and
+    count-capped, de-duplicated case-insensitively, order preserved."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for term in terms or []:
+        # Non-strings are dropped, not coerced: str(None) is the string "None",
+        # which would search for it.
+        if not isinstance(term, str):
+            continue
+        text = " ".join(term.split())[:_MAX_TERM_CHARS].strip()
+        if not text or text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        out.append(text)
+        if len(out) >= _MAX_SCOPE_TERMS:
+            break
+    return out
 
 # ── Step 1: scope extraction ─────────────────────────────────────────────────
 
@@ -318,12 +345,20 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
     return sections
 
 
-async def _explore_uncached(input_text: str) -> dict:
+async def _explore_uncached(input_text: str, scope_terms: list[str] | None = None) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
     if not (input_text or "").strip():
-        scope = {**_DEFAULT_SCOPE, "is_default": True}
         chosen = list(_DEFAULT_TOOLS)
-        reasoning = "default landing feed (blank input): field-wide drug-discovery scope"
+        if scope_terms:
+            # Personalized landing feed — the caller's terms ARE the scope. Still
+            # no LLM: they are already the structured answer extraction would be
+            # asked for, so routing stays the fixed default tool set.
+            scope = {**_EMPTY_SCOPE, "topics": list(scope_terms),
+                     "is_default": True, "is_personalized": True}
+            reasoning = "personalized landing feed (blank input): scope from the caller's saved interests"
+        else:
+            scope = {**_DEFAULT_SCOPE, "is_default": True, "is_personalized": False}
+            reasoning = "default landing feed (blank input): field-wide drug-discovery scope"
     else:
         # Groq calls are cached on the input string: extraction and routing run at
         # temperature 0, so they're deterministic for a given input and an
@@ -333,7 +368,7 @@ async def _explore_uncached(input_text: str) -> dict:
             lambda: asyncio.to_thread(_extract_scope, input_text),
             TTL_LLM, STALE_LLM,
         )
-        scope = {**scope, "is_default": False}
+        scope = {**scope, "is_default": False, "is_personalized": False}
         chosen, reasoning = await cache.get_or_compute(
             normalize_key("route", input_text),
             lambda: asyncio.to_thread(_choose_tools, input_text, scope),
@@ -351,12 +386,16 @@ async def _explore_uncached(input_text: str) -> dict:
     }
 
 
-async def explore_async(input_text: str) -> dict:
+async def explore_async(input_text: str, scope_terms: list[str] | None = None) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
 
     Blank / whitespace-only input skips LLM extraction and routing entirely and
-    serves the field-wide landing feed: the default scope + default tool set, with
-    scope.is_default=true so the frontend knows this is the blank-state feed.
+    serves the landing feed: a fixed tool set, with scope.is_default=true so the
+    frontend knows this is the blank-state feed. `scope_terms` personalizes THAT
+    feed — pass the signed-in user's saved interests and they become the scope
+    instead of the field-wide default (scope.is_personalized=true). They apply
+    only to the blank feed: a real search's own text always wins, so a query can
+    never be silently widened by whoever is logged in.
 
     Caching is applied at THIS level as well as per-tool, deliberately:
       * the whole-response entry makes a repeat visit a single dict lookup, with
@@ -365,23 +404,36 @@ async def explore_async(input_text: str) -> dict:
         route to the same underlying query.
     The blank landing feed — which every visitor hits — gets the shorter fresh
     window (10 min) since it is the front page; a specific topic gets an hour.
+
+    CACHE KEYS. A personalized feed is keyed by its normalized TERMS under its
+    own namespace, never by the caller — three consequences, all wanted:
+      * it can't land in (or be served from) the shared blank-input entry, so
+        one user's interests never leak into another's feed or into the
+        signed-out default;
+      * two users with the same interest set share one entry — the input is
+        identical, so the answer is, and nothing user-specific is in it;
+      * "cancer PHGDH" typed as a SEARCH stays a separate entry from the same
+        two words as interests, because the two produce different feeds.
     """
     blank = not (input_text or "").strip()
+    terms = _clean_terms(scope_terms) if blank else []
+
+    key = normalize_key("explore:interests", terms) if terms else normalize_key("explore", input_text)
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
     return await cache.get_or_compute(
-        normalize_key("explore", input_text),
-        lambda: _explore_uncached(input_text),
+        key,
+        lambda: _explore_uncached(input_text, terms),
         ttl, stale,
     )
 
 
-def explore(input_text: str) -> dict:
+def explore(input_text: str, scope_terms: list[str] | None = None) -> dict:
     """Synchronous entry point (the registered tool signature).
 
     Reason about a free-text research message, route to the fitting search tools,
     run them with the right per-tool query, and return results grouped by kind:
     {scope, tools_called, reasoning, sections:[{kind, items}]}.
     """
-    return asyncio.run(explore_async(input_text))
+    return asyncio.run(explore_async(input_text, scope_terms))

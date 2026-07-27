@@ -28,9 +28,19 @@ export type ExploreSection = {
   error?: string;
 };
 
+/** The structured scope the backend either extracted from a search or used for
+ *  the landing feed. `is_personalized` marks the one case the UI acts on: a
+ *  blank-input feed scoped to the signed-in user's saved interests, which sit in
+ *  `topics` (see backend/explore-mcp/tools/explore.py). */
+export type ExploreScope = Record<string, unknown> & {
+  topics?: string[];
+  is_default?: boolean;
+  is_personalized?: boolean;
+};
+
 export type ExploreResponse = {
   input?: string;
-  scope?: Record<string, unknown> & { is_default?: boolean };
+  scope?: ExploreScope;
   tools_called?: string[];
   reasoning?: string | null;
   sections: ExploreSection[];

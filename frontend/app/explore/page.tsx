@@ -1,13 +1,21 @@
 "use client";
 
-// Explore feed — the field-wide default landing feed from the real explore
-// backend. Layout follows design/stitch/smartdrugdiscovery_refined_explore_grid
-// (the GRID version). Nav/Footer come from the shared shell (in the root layout).
+// Explore feed — the default landing feed from the real explore backend. Layout
+// follows design/stitch/smartdrugdiscovery_refined_explore_grid (the GRID
+// version). Nav/Footer come from the shared shell (in the root layout).
+//
+// The feed is PERSONALIZED for a signed-in user with saved interests: the same
+// blank-input request, which /api/explore scopes to those interests server-side
+// (the browser is never told whose feed this is, and never asks for a scope).
+// The response says which it got via scope.is_personalized, and the chips below
+// the search bar show the terms it used. Signed out, or with no interests, this
+// is exactly the generic field-wide feed it always was.
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import ScopeChips from "@/components/ScopeChips";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -37,9 +45,13 @@ function SectionHeader({ title }: { title: string }) {
 
 function ExploreFeed() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   // ?category=<kind> preselects a section — this is how the chips on pages
   // without their own feed (e.g. /explore/podcast) route back in scoped.
-  const categoryParam = useSearchParams().get("category");
+  const categoryParam = searchParams.get("category");
+  // ?scope=off — set when the user clears the last interest chip. The generic
+  // feed is then what they asked for, so don't re-personalize it under them.
+  const personalize = searchParams.get("scope") !== "off";
   const [query, setQuery] = useState("");
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +69,9 @@ function ExploreFeed() {
         const res = await fetch("/api/explore", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: "" }), // empty -> backend default field-wide feed
+          // empty input -> the landing feed; the route scopes it to the signed-in
+          // user's interests unless personalization was explicitly turned off.
+          body: JSON.stringify({ input: "", personalize }),
         });
         const json = (await res.json()) as ExploreResponse;
         if (!cancelled) setData(json);
@@ -70,7 +84,25 @@ function ExploreFeed() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [personalize]);
+
+  // The interests the feed was actually built from, straight from the response —
+  // present only when the backend personalized it.
+  const scopeTerms = useMemo(() => {
+    if (data?.scope?.is_personalized !== true) return [];
+    const topics = data.scope.topics;
+    return Array.isArray(topics) ? topics.filter((t): t is string => typeof t === "string") : [];
+  }, [data]);
+
+  // Editing a chip leaves the personalized feed: what's left becomes an ordinary
+  // search, and clearing the last one asks for the generic feed instead.
+  const editScope = (remaining: string[]) => {
+    router.push(
+      remaining.length > 0
+        ? `/explore/${encodeURIComponent(remaining.join(" "))}`
+        : "/explore?scope=off"
+    );
+  };
 
   // A+B empty rule: 3+ items -> full grid section; 1-2 items -> pooled into
   // "Also Found"; 0 items -> hidden entirely.
@@ -113,6 +145,9 @@ function ExploreFeed() {
           </button>
         </form>
       </section>
+
+      {/* Scope chips — the interests this feed was built from (personalized only) */}
+      <ScopeChips terms={scopeTerms} onEdit={editScope} />
 
       {/* Stat strip */}
       <div className="mb-6 py-3 border-y border-surface-variant/40 text-center">

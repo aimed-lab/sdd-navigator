@@ -254,16 +254,26 @@ async def explore_http(request):
     web app speaks normal HTTP, so this route exposes the SAME explore_async()
     over a plain POST { "input": "<free text>" } -> the full explore JSON
     (input, scope, tools_called, reasoning, sections). Never 500s the caller:
-    on failure it returns the empty-sections shape with HTTP 200."""
+    on failure it returns the empty-sections shape with HTTP 200.
+
+    Optional `scope`: a list of terms that PERSONALIZES the blank-input landing
+    feed (the Next proxy fills it from the signed-in user's saved interests —
+    this service never sees a user id, and the terms are only ever a scope, so
+    they are cached by their own normalized value). Ignored when `input` is a
+    real search."""
     try:
         body = await request.json()
     except Exception:
         body = {}
     input_text = body.get("input", "") if isinstance(body, dict) else ""
+    raw_scope = body.get("scope") if isinstance(body, dict) else None
+    scope_terms = raw_scope if isinstance(raw_scope, list) else None
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
-        return JSONResponse(trim_explore_result(await explore_async(input_text or "")))
+        return JSONResponse(
+            trim_explore_result(await explore_async(input_text or "", scope_terms))
+        )
     except Exception as exc:
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
