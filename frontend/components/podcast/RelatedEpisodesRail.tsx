@@ -1,38 +1,42 @@
 "use client";
 
-// "Related Episodes" — search_wiki over this episode's own concepts/tags, so the
-// suggestions are topical rather than just "the newest episodes". Loads
+// "Related Episodes" — scored by overlap of concept titles + tags against the
+// episode being viewed (see getRelatedEpisodes in lib/server/wiki.ts, called
+// here via the related-actions.ts Server Action), so the suggestions are
+// genuinely topical rather than just "the newest episodes". Loads
 // independently of the page, like the literature rail.
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Episode, PodcastResponse } from "@/types/podcast";
+import { fetchRelatedEpisodes } from "@/app/explore/podcast/[slug]/related-actions";
+import type { Concept, RelatedEpisode } from "@/lib/server/wiki";
 
 export default function RelatedEpisodesRail({
-  query,
-  excludeSlug,
+  slug,
+  concepts,
+  tags,
   limit = 4,
 }: {
-  query: string;
   /** The episode being viewed — never suggest it back to itself. */
-  excludeSlug: string;
+  slug: string;
+  concepts: Concept[];
+  tags: string[];
   limit?: number;
 }) {
-  const [episodes, setEpisodes] = useState<Episode[] | null>(null);
+  const [episodes, setEpisodes] = useState<RelatedEpisode[] | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/podcast?q=${encodeURIComponent(query)}`);
-        const json = (await res.json()) as PodcastResponse;
+        const result = await fetchRelatedEpisodes(slug, concepts, tags, limit);
         if (cancelled) return;
-        if (json.error) {
+        if (result.status === "error") {
           setFailed(true);
           return;
         }
-        setEpisodes(json.episodes.filter((e) => e.slug !== excludeSlug).slice(0, limit));
+        setEpisodes(result.episodes);
       } catch {
         if (!cancelled) setFailed(true);
       }
@@ -40,7 +44,7 @@ export default function RelatedEpisodesRail({
     return () => {
       cancelled = true;
     };
-  }, [query, excludeSlug, limit]);
+  }, [slug, concepts, tags, limit]);
 
   return (
     <div className="glass-panel rounded-xl p-6">
