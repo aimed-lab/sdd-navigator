@@ -9,11 +9,15 @@ FETCH_TIMEOUT is 8 (seconds) — the TS used AbortSignal.timeout(8000).
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 FETCH_TIMEOUT = 8  # seconds — matches the TS FETCH_TIMEOUT_MS = 8000
 
@@ -186,6 +190,54 @@ def filter_quality(items: list) -> list:
     return out
 
 
+def _redact_url(url: str) -> str:
+    """Scheme+host+path only — NEVER the query string.
+
+    Query params are where secrets/PII ride on these requests: NCBI_API_KEY
+    (pubmed.py), OPENALEX_EMAIL (openalex.py). Headers (e.g. GITHUB_TOKEN) are
+    never logged here either — only this redacted URL is."""
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _log_non_2xx(resp: httpx.Response, url: str) -> None:
+    """Surface upstream failures that raise_for_status() would otherwise only
+    report as an opaque exception higher up the stack.
+
+    `status_code` is read directly, not via getattr with a default. A getattr
+    fallback here previously made every fake-response test double that didn't
+    implement `status_code` silently report 200 — which made the 429/non-2xx
+    branches below untestable (and untested) without anyone noticing. Real
+    httpx.Response always has `status_code`; any double standing in for one
+    must too, or this raises AttributeError loudly instead of lying."""
+    status = resp.status_code
+    if status == 429:
+        logger.warning("upstream 429 (rate limited): %s", _redact_url(url))
+    elif not (200 <= status < 300):
+        logger.warning("upstream non-2xx (status=%s): %s", status, _redact_url(url))
+
+
+def _raise_for_status_redacted(resp: httpx.Response, url: str) -> None:
+    """Like resp.raise_for_status(), but the raised exception's message never
+    carries the query string.
+
+    httpx.HTTPStatusError's default __str__ embeds the FULL request URL
+    (`"... for url 'https://.../esearch.fcgi?...&api_key=SECRET'"`), which is
+    exactly the kind of string a bare `except Exception: logger.exception(...)`
+    upstream would happily put in the logs, traceback and all. Re-raise the
+    same exception TYPE with a redacted message and `from None` so no
+    downstream logger.exception() call — however far up the stack — can ever
+    emit the original, secret-bearing message via its traceback."""
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise httpx.HTTPStatusError(
+            f"{exc.response.status_code} error for {_redact_url(url)}",
+            request=exc.request,
+            response=exc.response,
+        ) from None
+
+
 async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
     """GET `url` with the shared timeout and raise on non-2xx (mirrors the TS
     `if (!res.ok) throw`). Returns the parsed JSON body. Optional per-request
@@ -194,7 +246,8 @@ async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = N
     if headers:
         kwargs["headers"] = headers
     resp = await client.get(url, **kwargs)
-    resp.raise_for_status()
+    _log_non_2xx(resp, url)
+    _raise_for_status_redacted(resp, url)
     return resp.json()
 
 
@@ -206,5 +259,6 @@ async def post_json(
     if headers:
         kwargs["headers"] = headers
     resp = await client.post(url, **kwargs)
-    resp.raise_for_status()
+    _log_non_2xx(resp, url)
+    _raise_for_status_redacted(resp, url)
     return resp.json()

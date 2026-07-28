@@ -9,12 +9,15 @@ to an empty list rather than raising.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
 from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from models import Item
 from sources.clinical_trials import fetch_trials
+
+logger = logging.getLogger(__name__)
 
 # NOTE: ClinicalTrials.gov's CDN 403s a custom User-Agent (and even a browser-like
 # one), but allows httpx's default UA. So we do NOT override User-Agent here; we
@@ -35,6 +38,7 @@ async def _fetch(query: str, limit: int) -> list[Item]:
         async with httpx.AsyncClient(headers=_HEADERS) as client:
             return await fetch_trials(client, query, limit)
     except Exception:
+        logger.exception("search_trials: clinicaltrials.gov fetch failed for query=%r", query)
         return []   # per-source isolation
 
 

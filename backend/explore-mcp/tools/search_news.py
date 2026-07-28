@@ -11,12 +11,15 @@ The source call is isolated — a failure degrades to an empty list.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
 from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from models import Item
 from sources.openalex import SORT_RECENT, fetch_openalex
+
+logger = logging.getLogger(__name__)
 
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 
@@ -39,6 +42,7 @@ async def _fetch(query: str, limit: int) -> list[Item]:
                 client, query, limit, kind="news", sort=SORT_RECENT
             )
     except Exception:
+        logger.exception("search_news: openalex fetch failed for query=%r", query)
         return []   # per-source isolation
     # OpenAlex already returns publication_date desc; sort defensively to guarantee
     # newest-first regardless of API ordering.

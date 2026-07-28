@@ -1,0 +1,34 @@
+# Secrets — never enter the build context, not even to be ignored by a later
+# COPY. python-dotenv only reads .env if it's present; keeping it out of the
+# image means secrets can ONLY arrive via the runtime environment (see check
+# 11 in the Docker task — verified empirically, not just via this file).
+.env
+.env.*
+!.env.example
+
+# Local virtualenv — irrelevant to the image (a fresh one is built for 3.12)
+# and huge; shipping it would also silently reintroduce the 3.14-only
+# artifacts this Dockerfile deliberately avoids.
+venv/
+.venv/
+
+# Python cruft
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Logs / local scratch
+*.log
+.cache/
+scratch/
+
+# VCS metadata — git itself is needed at build time to pip-install winner-net
+# from GitHub, but the repo's OWN .git history has no business inside the
+# image or even the build context.
+.git/
+.gitignore
+
+# Editor/OS cruft
+.DS_Store
+.idea/
+.vscode/

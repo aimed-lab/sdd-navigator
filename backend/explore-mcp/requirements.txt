@@ -1,8 +1,13 @@
-mcp
-pydantic
-httpx
-python-dotenv
-requests
+mcp==1.28.1
+pydantic==2.13.4
+httpx==0.28.1
+python-dotenv==1.2.2
+requests==2.34.2
+starlette==1.3.1
+uvicorn==0.51.0
 # LLM SDKs — only the one named by LLM_PROVIDER is imported at runtime (see llm.py)
-groq
-openai
+groq==1.6.0
+openai==2.48.0
+# Ranking (ranking.py) — WINNER network-biology ranking; import-guarded, degrades to plain sort if unavailable
+pandas==3.0.5
+winner-net @ git+https://github.com/aimed-lab/WINNER.git@8365f7192e190c378199adf3ec7a49caf66bd37c#subdirectory=python

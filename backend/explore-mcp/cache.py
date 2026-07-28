@@ -37,10 +37,13 @@ one instance, the asyncio lock is exactly right.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Iterable
+
+logger = logging.getLogger(__name__)
 
 
 # ── key normalization ─────────────────────────────────────────────────────────
@@ -161,11 +164,13 @@ class Cache(ABC):
         # FRESH — no upstream call.
         if entry is not None and entry.is_fresh(now):
             self.stats.hits += 1
+            logger.debug("cache hit (fresh): key=%r", key)
             return entry.value
 
         # STALE — serve immediately, revalidate in the background.
         if entry is not None and entry.is_usable(now):
             self.stats.stale_hits += 1
+            logger.debug("cache hit (stale, revalidating): key=%r", key)
             self._schedule_refresh(key, compute_fn, ttl_seconds, stale_ttl)
             return entry.value
 
@@ -174,6 +179,7 @@ class Cache(ABC):
         lock = self._lock_for(key)
         if lock.locked():
             self.stats.coalesced += 1
+            logger.debug("cache miss, coalescing onto in-flight compute: key=%r", key)
 
         async with lock:
             # Re-check under the lock: whoever held it before us may have just
@@ -184,12 +190,14 @@ class Cache(ABC):
                 return entry.value
 
             self.stats.misses += 1
+            logger.debug("cache miss, computing: key=%r", key)
             try:
                 value = await compute_fn()
             except Exception:
                 self.stats.errors += 1
                 # A failed compute must not poison the key. If we still hold a
                 # stale value, serve it rather than propagating the failure.
+                logger.exception("cache compute_fn failed: key=%r", key)
                 if entry is not None:
                     return entry.value
                 raise
@@ -230,6 +238,7 @@ class Cache(ABC):
                         # Keep serving the stale value; it stays usable until
                         # stale_ttl, and the next request retries.
                         self.stats.errors += 1
+                        logger.exception("background cache refresh failed: key=%r", key)
                         return
                     await self._store(
                         key, _Entry(value=value, stored_at=time.monotonic(),

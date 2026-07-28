@@ -76,9 +76,22 @@ def test_disabled_start_is_a_no_op(monkeypatch):
     assert calls == 0
 
 
-def test_start_awaits_the_first_warm(monkeypatch):
-    """Startup must BLOCK on the first warm — otherwise the very first request
-    can still race ahead of it and pay the cold path."""
+def test_disabled_start_marks_ready_immediately(monkeypatch):
+    """PREWARM_ENABLED=false: nothing to wait for, so readiness is immediate."""
+    monkeypatch.setenv("PREWARM_ENABLED", "0")
+
+    async def body():
+        await prewarm.start()
+
+    asyncio.run(body())
+    assert prewarm.is_ready() is True
+    assert prewarm.ready_info()["ready"] is True
+
+
+def test_start_does_not_block_on_the_first_warm(monkeypatch):
+    """Startup must NOT block on the first warm — liveness has to be reachable
+    immediately regardless of upstream warm state. Readiness (is_ready())
+    tracks the warm separately and flips True once it finishes."""
     order: list[str] = []
 
     async def fake_warm():
@@ -91,10 +104,52 @@ def test_start_awaits_the_first_warm(monkeypatch):
     async def body():
         await prewarm.start()
         order.append("start returned")
+        assert prewarm.is_ready() is False   # warm hasn't finished yet
+        await asyncio.sleep(0.05)            # let the background warm finish
+        assert prewarm.is_ready() is True
         await prewarm.stop()
 
     asyncio.run(body())
-    assert order == ["warmed", "start returned"]
+    assert order == ["start returned", "warmed"]
+
+
+def test_ready_flips_true_even_when_the_warm_fails(monkeypatch):
+    """Availability beats warmth: readiness must not stay stuck False forever
+    just because the first warm failed."""
+    async def boom():
+        raise RuntimeError("upstream down")
+
+    monkeypatch.setattr(prewarm, "_warm_once", boom)
+    monkeypatch.setenv("PREWARM_INTERVAL_SEC", "3600")
+
+    async def body():
+        await prewarm.start()
+        assert prewarm.is_ready() is False
+        await asyncio.sleep(0.02)
+        assert prewarm.is_ready() is True
+        await prewarm.stop()
+
+    asyncio.run(body())
+
+
+def test_ready_flips_true_when_the_warm_times_out(monkeypatch):
+    """A hung (not erroring, just never-returning) warm must not block
+    readiness forever either — PREWARM_TIMEOUT_SEC bounds it."""
+    async def hangs_forever():
+        await asyncio.sleep(999)
+
+    monkeypatch.setattr(prewarm, "_warm_once", hangs_forever)
+    monkeypatch.setenv("PREWARM_INTERVAL_SEC", "3600")
+    monkeypatch.setenv("PREWARM_TIMEOUT_SEC", "0.05")
+
+    async def body():
+        await prewarm.start()
+        await asyncio.sleep(0.15)
+        assert prewarm.is_ready() is True
+        assert prewarm.status()["timeouts"] >= 1
+        await prewarm.stop()
+
+    asyncio.run(body())
 
 
 def test_warm_failure_is_recorded_and_does_not_raise(monkeypatch):

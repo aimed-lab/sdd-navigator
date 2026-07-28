@@ -22,6 +22,7 @@ carries a Signal only when its source (OpenAlex) actually reported one.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
@@ -33,7 +34,10 @@ from sources.crossref import fetch_crossref
 from sources.openalex import SORT_RELEVANCE, fetch_openalex
 from sources.pubmed import fetch_pubmed
 
+logger = logging.getLogger(__name__)
+
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
+_SOURCE_NAMES = ("pubmed", "openalex", "crossref")
 
 
 def _rank_merge(items: list[Item]) -> list[Item]:
@@ -92,9 +96,15 @@ async def _fetch(query: str, limit: int) -> list[Item]:
         )
 
     merged: list[Item] = []
-    for result in results:
+    for source_name, result in zip(_SOURCE_NAMES, results):
         if isinstance(result, Exception):
-            continue  # per-source isolation — swallow this source, keep the rest
+            # per-source isolation — swallow this source, keep the rest, but log it
+            # (this loop is the only place that still knows which source failed).
+            logger.exception(
+                "search_papers: %s fetch failed for query=%r", source_name, query,
+                exc_info=result,
+            )
+            continue
         merged.extend(result)
 
     collapsed = merge_items(merged)   # DOI-aware cross-source merge (not first-seen-drop)

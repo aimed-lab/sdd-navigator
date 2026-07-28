@@ -17,8 +17,12 @@ from sources.openalex import fetch_openalex  # noqa: E402
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code: int = 200):
         self._payload = payload
+        # Real httpx.Response always has this; sources/base.py's get_json now
+        # reads it directly (no getattr fallback), so an unfaithful double
+        # fails loudly rather than silently reporting 200.
+        self.status_code = status_code
 
     def raise_for_status(self):
         return None

@@ -29,11 +29,15 @@ keeps whatever signal it already had, so nothing is ever labelled
 
 from __future__ import annotations
 
+import logging
 import re
+import time
 from typing import Iterable, Sequence
 
 from models import Item, Signal
 from sources.base import now_iso
+
+logger = logging.getLogger(__name__)
 
 # `winner` (and pandas) are optional at import time: the ranking must degrade to
 # the existing sort if the package isn't installed, never break the server.
@@ -46,6 +50,10 @@ try:  # pragma: no cover - import-guard
 except Exception as exc:  # pragma: no cover - import-guard
     _WINNER_AVAILABLE = False
     _WINNER_IMPORT_ERROR = str(exc)
+    logger.warning(
+        "WINNER unavailable at import time; paper ranking will always fall back "
+        "to the existing sort: %s", _WINNER_IMPORT_ERROR
+    )
 
 
 NETWORK_RANK_METRIC = "network_rank"
@@ -213,9 +221,14 @@ def rank_papers_winner(items: list[Item], seed_ids: set[str]) -> list[Item]:
 
     `seed_ids` are node ids (Item.id) marked "S"; everything else is "E".
     """
-    if not _WINNER_AVAILABLE or len(items) < 2:
+    if not _WINNER_AVAILABLE:
+        logger.info("WINNER fell back: package unavailable (%s)", _WINNER_IMPORT_ERROR)
+        return items
+    if len(items) < 2:
+        logger.info("WINNER skipped: only %d item(s), nothing to rank", len(items))
         return items
 
+    graph_started = time.perf_counter()
     try:
         # Constraint 4: cap the graph. `items` arrives best-first, so the head is
         # the top of the existing ranking; the tail passes through untouched.
@@ -227,6 +240,10 @@ def rank_papers_winner(items: list[Item], seed_ids: set[str]) -> list[Item]:
 
         # Guard rail: too sparse to mean anything -> existing sort, no signal.
         if len(edges) < MIN_EDGES:
+            logger.info(
+                "WINNER fell back: citation graph too sparse (%d edges < %d min, %d nodes)",
+                len(edges), MIN_EDGES, len(head),
+            )
             return items
 
         nodes = [_node_id(i) for i in head]
@@ -239,17 +256,28 @@ def rank_papers_winner(items: list[Item], seed_ids: set[str]) -> list[Item]:
             "gene2": [b for _, b in edges],
             "weight": [1.0] * len(edges),
         })
+        graph_ms = (time.perf_counter() - graph_started) * 1000
 
+        winner_started = time.perf_counter()
         result = run_winner(genes, interactions)
+        winner_ms = (time.perf_counter() - winner_started) * 1000
         scores = {
             name: float(score)
             for name, score in zip(result.gene_names, result.winner_score)
         }
 
+        logger.info(
+            "WINNER ran: %d nodes, %d edges, %d seeds, graph_construction=%.1fms, run_winner=%.1fms, total=%.1fms",
+            len(head), len(edges), len(seed_ids), graph_ms, winner_ms, graph_ms + winner_ms,
+        )
         return _apply_scores(head, scores) + tail
 
     except Exception:
         # WINNER must never break the feed.
+        logger.exception(
+            "WINNER fell back: run_winner raised (%d items, %.1fms before failure)",
+            len(items), (time.perf_counter() - graph_started) * 1000,
+        )
         return items
 
 

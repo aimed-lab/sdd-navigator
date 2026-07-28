@@ -24,9 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 
 import llm
+
+logger = logging.getLogger(__name__)
 from cache import (
     STALE_DEFAULT_FEED,
     STALE_LLM,
@@ -227,7 +230,7 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
                 return chosen, (reasoning if isinstance(reasoning, str) else None)
         # Parsed but no usable tools — fall through to the heuristic.
     except Exception:
-        pass
+        logger.exception("explore: LLM tool-routing failed for input=%r; using scope heuristic", input_text)
     return _heuristic_tools(scope), "fallback: routing JSON unavailable; used scope heuristic"
 
 
@@ -339,6 +342,9 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
             # one tool failing never sinks the others; report an empty, flagged section
             section["items"] = []
             section["error"] = f"{type(result).__name__}: {result}"
+            logger.exception(
+                "explore: tool %s failed for query=%r", tool, query, exc_info=result
+            )
         else:
             section["items"] = [item.model_dump() for item in result]
         sections.append(section)

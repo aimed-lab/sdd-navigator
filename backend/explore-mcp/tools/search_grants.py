@@ -9,12 +9,15 @@ degrades to an empty list rather than raising.
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import httpx
 
 from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
 from models import Item
 from sources.grants_gov import fetch_grants
+
+logger = logging.getLogger(__name__)
 
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 
@@ -32,6 +35,7 @@ async def _fetch(query: str, limit: int) -> list[Item]:
         async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
             return await fetch_grants(client, query, limit)
     except Exception:
+        logger.exception("search_grants: grants.gov fetch failed for query=%r", query)
         return []   # per-source isolation
 
 

@@ -32,7 +32,9 @@ Run:  python server.py      (serves MCP at /mcp, health at /health)
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import sys
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -54,10 +56,89 @@ from tools.search_wiki import search_wiki as _search_wiki
 
 load_dotenv()
 
+# ── Logging ──────────────────────────────────────────────────────────────────
+# Single setup point for the whole service: stdout (containers collect stdout,
+# not files), one line per record with timestamp/level/logger name so a failure
+# can be traced to its module. Level from LOG_LEVEL (default INFO). Every module
+# gets its own logger via logging.getLogger(__name__); this call just configures
+# the shared root handler they all funnel into.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+
+# basicConfig sets the ROOT level, which every third-party logger inherits too —
+# including httpx's OWN request logger, which prints "HTTP Request: <method>
+# <FULL URL>" at INFO. NCBI_API_KEY and OPENALEX_EMAIL ride in query strings
+# (see sources/pubmed.py, sources/openalex.py), so at the default LOG_LEVEL=INFO
+# httpx was printing both in plaintext on every request — a leak the redaction
+# in sources/base.py never covered, because that redaction only touches OUR
+# exception messages, not httpx's own request/response logging.
+# Pin every third-party logger we depend on to WARNING, UNCONDITIONALLY (not
+# derived from LOG_LEVEL): our own DEBUG needs are for OUR modules, not for
+# relogging every outbound request with its secrets attached. If you're
+# debugging a specific library and need its own logs back, raise that one
+# logger by name in your local environment — do not delete this block or
+# raise the whole root level, that reopens the leak.
+for _name in ("httpx", "httpcore", "groq", "openai", "urllib3", "requests"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
+
 HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_PORT", "8000"))
 
 mcp = FastMCP("explore-mcp", host=HOST, port=PORT)
+
+
+# ── Limit clamping ──────────────────────────────────────────────────────────────
+# The MCP tools below used to accept an UNBOUNDED `limit` — a caller could pass
+# 5000 and get an unbounded upstream fan-out, unbounded memory, and an unbounded
+# response payload. The HTTP bridge routes (/api/papers, /api/wiki) already clamp
+# their own `limit`; MCP clients are just as much a primary consumer of this
+# service as the HTTP routes (see module docstring), so they get the same
+# treatment here rather than being the one unguarded path in.
+#
+# Two ceilings, not one, because the two ALREADY-SHIPPED HTTP ceilings genuinely
+# differ and for a real reason:
+#   MAX_LIMIT (50)       — /api/papers' existing ceiling. Applies to every tool
+#                          that fans out to a LIVE upstream API per call
+#                          (papers/news/trials/grants/tools) plus the two
+#                          Supabase-backed tools that don't have their own HTTP
+#                          route (lab_resources/people) — same conservative
+#                          bound, since the risk (unbounded upstream work +
+#                          payload) is the same.
+#   MAX_WIKI_LIMIT (500)  — /api/wiki's existing ceiling. search_wiki alone: no
+#                          live upstream fan-out (Supabase's own row cap is
+#                          fixed elsewhere, independent of this `limit`), and
+#                          the whole table is ~64 episodes — 500 is already
+#                          effectively "no limit" for this dataset, so there's
+#                          no reason to shrink it below what /api/wiki already
+#                          ships.
+MAX_LIMIT = 50
+MAX_WIKI_LIMIT = 500
+
+
+def _clamp_limit(limit: int, *, ceiling: int, default: int, tool: str) -> int:
+    """Defensive clamp for an MCP tool's caller-supplied `limit`.
+
+    Never errors — an agent should get useful results, not a rejection. Missing/
+    non-numeric/zero/negative falls back to `default` silently (that's normal
+    usage, not a problem). Anything over `ceiling` is capped there AND logged at
+    INFO with both the requested and served values, since a caller expecting
+    `limit` items back deserves to know it got fewer.
+    """
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = default
+    if value <= 0:
+        value = default
+    if value > ceiling:
+        logger.info("%s: requested limit=%d exceeds ceiling, serving %d instead", tool, value, ceiling)
+        value = ceiling
+    return value
 
 
 # ── External-source tools ─────────────────────────────────────────────────────
@@ -76,8 +157,9 @@ async def search_papers(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A topical query, e.g. "PHGDH Alzheimer's disease" or "EGFR glioblastoma".
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_papers")
     items = await search_papers_async(query, limit)
     return [item.model_dump() for item in items]
 
@@ -93,8 +175,9 @@ async def search_news(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A field/topic query, e.g. "drug discovery" or "AI in drug discovery".
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_news")
     items = await search_news_async(query, limit)
     return [item.model_dump() for item in items]
 
@@ -109,8 +192,9 @@ async def search_trials(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A disease/intervention query, e.g. "glioblastoma".
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_trials")
     items = await search_trials_async(query, limit)
     return [item.model_dump() for item in items]
 
@@ -124,8 +208,9 @@ async def search_grants(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A topic/method query, e.g. "glioblastoma" or "CRISPR screen".
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_grants")
     items = await search_grants_async(query, limit)
     return [item.model_dump() for item in items]
 
@@ -140,8 +225,9 @@ async def search_tools(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A technique/tool query, e.g. "single cell rna seq".
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_tools")
     items = await search_tools_async(query, limit)
     return [item.model_dump() for item in items]
 
@@ -164,8 +250,9 @@ async def search_lab_resources(query: str, category: str | None = None, limit: i
     Args:
         query: A technique/method/capability/name query (empty string lists all).
         category: Optional category to scope to (one of the nine).
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_lab_resources")
     items = await asyncio.to_thread(_search_lab_resources, query, category, limit)
     return [item.model_dump() for item in items]
 
@@ -181,8 +268,9 @@ async def search_people(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A topic/expertise query, e.g. "cancer metabolism" (empty lists all public people).
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 50).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_people")
     items = await asyncio.to_thread(_search_people, query, limit)
     return [item.model_dump() for item in items]
 
@@ -197,8 +285,9 @@ async def search_wiki(query: str, limit: int = 20) -> list[dict]:
 
     Args:
         query: A topical query, e.g. "drug discovery" (empty lists all episodes).
-        limit: Max items to return (default 20).
+        limit: Max items to return (default 20, capped at 500).
     """
+    limit = _clamp_limit(limit, ceiling=MAX_WIKI_LIMIT, default=20, tool="search_wiki")
     items = await asyncio.to_thread(_search_wiki, query, limit)
     return [item.model_dump() for item in items]
 
@@ -229,7 +318,24 @@ async def explore(input_text: str) -> dict:
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health(_request):
+    """Liveness ONLY — "is this process up". Zero dependencies: no Groq, no
+    Supabase, no upstream source, and deliberately no dependency on prewarm's
+    warm state either. Always 200 the instant the process can answer a
+    request. See /ready for "has it finished warming"."""
     return JSONResponse({"service": "explore-mcp", "status": "ok", "transport": "streamable-http"})
+
+
+@mcp.custom_route("/ready", methods=["GET"])
+async def ready(_request):
+    """Readiness — distinct from liveness (/health above). 200 once the first
+    landing-feed warm has FINISHED, whether it succeeded, failed, or timed
+    out (see prewarm._first_warm_and_ready — availability beats warmth, so a
+    failed warm still flips this to ready rather than leaving the service
+    stuck unready). 503 while still warming. PREWARM_ENABLED=false means
+    there is nothing to wait for, so this is 200 immediately in that case
+    too. The body carries enough to diagnose a stuck deploy on its own."""
+    info = prewarm.ready_info()
+    return JSONResponse(info, status_code=200 if info["ready"] else 503)
 
 
 @mcp.custom_route("/cache/stats", methods=["GET"])
@@ -264,6 +370,7 @@ async def explore_http(request):
     try:
         body = await request.json()
     except Exception:
+        logger.exception("POST /api/explore: request body is not valid JSON")
         body = {}
     input_text = body.get("input", "") if isinstance(body, dict) else ""
     raw_scope = body.get("scope") if isinstance(body, dict) else None
@@ -275,6 +382,7 @@ async def explore_http(request):
             trim_explore_result(await explore_async(input_text or "", scope_terms))
         )
     except Exception as exc:
+        logger.exception("POST /api/explore failed: input=%r", input_text)
         return JSONResponse(
             {"input": input_text, "scope": {}, "tools_called": [], "sections": [], "error": str(exc)},
             status_code=200,
@@ -302,6 +410,7 @@ async def wiki_http(request):
         try:
             body = await request.json()
         except Exception:
+            logger.exception("POST /api/wiki: request body is not valid JSON")
             body = {}
         if isinstance(body, dict):
             query = body.get("query") or ""
@@ -320,6 +429,7 @@ async def wiki_http(request):
         episodes = [item.model_dump() for item in items]
         return JSONResponse({"query": query, "count": len(episodes), "episodes": episodes})
     except Exception as exc:
+        logger.exception("GET/POST /api/wiki failed: query=%r limit=%r", query, limit)
         return JSONResponse(
             {"query": query, "count": 0, "episodes": [], "error": str(exc)},
             status_code=200,
@@ -347,6 +457,7 @@ async def wiki_episode_http(request):
             return JSONResponse({"episode": None, "error": "not found"}, status_code=404)
         return JSONResponse({"episode": row})
     except Exception as exc:
+        logger.exception("GET /api/wiki/episode failed: slug=%r", slug)
         return JSONResponse({"episode": None, "error": str(exc)}, status_code=200)
 
 
@@ -371,6 +482,7 @@ async def papers_http(request):
             {"query": query, "items": trim_items([i.model_dump() for i in items])}
         )
     except Exception as exc:
+        logger.exception("GET /api/papers failed: query=%r limit=%r", query, limit)
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
@@ -385,6 +497,12 @@ def _serve() -> None:
         the only correct hook;
       * the cache's per-key asyncio.Locks bind to the loop that creates them, so
         pre-warming from another thread/loop would silently break single-flight.
+
+    `await prewarm.start()` does NOT wait for a warm feed anymore — it only
+    schedules the warm as a background task and returns. Startup (and with it,
+    /health) is available immediately regardless of upstream warm state; see
+    prewarm.py's LIVENESS vs READINESS note and the /ready route above for how
+    "has it finished warming" is tracked separately.
     """
     import uvicorn
     from contextlib import asynccontextmanager
@@ -395,7 +513,7 @@ def _serve() -> None:
     @asynccontextmanager
     async def lifespan(scope_app):
         async with session_lifespan(scope_app):      # MCP session manager
-            await prewarm.start()                    # first warm is awaited
+            await prewarm.start()                    # schedules the warm; returns immediately
             try:
                 yield
             finally:
