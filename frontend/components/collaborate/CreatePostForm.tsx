@@ -12,7 +12,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPostAction } from "@/app/collaborate/actions";
-import { STAGES, type Stage } from "@/lib/collabTypes";
+import {
+  FUNDING_STATUS_LABEL,
+  FUNDING_STATUSES,
+  STAGES,
+  type FundingStatus,
+  type Stage,
+} from "@/lib/collabTypes";
 
 const STAGE_LABEL: Record<Stage, string> = {
   concept: "Concept phase",
@@ -21,6 +27,12 @@ const STAGE_LABEL: Record<Stage, string> = {
   preclinical: "Pre-clinical",
   seeking_team: "Seeking a team",
 };
+
+// The DOM <select> only ever holds strings, so "unspecified" needs its own
+// sentinel value distinct from any real FundingStatus — converted back to
+// null (the actual "unspecified" value the DB and everything downstream
+// understands) at submit time, never stored or sent as this string.
+const UNSPECIFIED = "" as const;
 
 /** Add-pill input: type a value, Enter or "Add" to commit, × to remove. */
 function PillInput({
@@ -113,6 +125,9 @@ export default function CreatePostForm() {
   const [haves, setHaves] = useState<string[]>([]);
   const [needs, setNeeds] = useState<string[]>([]);
   const [stage, setStage] = useState<Stage>("concept");
+  const [fundingStatus, setFundingStatus] = useState<FundingStatus | typeof UNSPECIFIED>(
+    UNSPECIFIED
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,6 +148,7 @@ export default function CreatePostForm() {
       haves,
       needs,
       stage,
+      funding_status: fundingStatus === UNSPECIFIED ? null : fundingStatus,
     });
 
     if (res.ok) {
@@ -225,6 +241,31 @@ export default function CreatePostForm() {
           {STAGES.map((s) => (
             <option key={s} value={s}>
               {STAGE_LABEL[s]}
+            </option>
+          ))}
+        </select>
+
+        {/* Optional — unlike stage, "unspecified" is a real, first-class
+            choice here, not just the initial value. */}
+        <label
+          htmlFor="funding_status"
+          className="block font-label-md text-label-md text-on-background mb-2 mt-5"
+        >
+          Funding status{" "}
+          <span className="text-secondary font-body-sm">(optional)</span>
+        </label>
+        <select
+          id="funding_status"
+          value={fundingStatus}
+          onChange={(e) =>
+            setFundingStatus(e.target.value as FundingStatus | typeof UNSPECIFIED)
+          }
+          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+        >
+          <option value={UNSPECIFIED}>Prefer not to say</option>
+          {FUNDING_STATUSES.map((f) => (
+            <option key={f} value={f}>
+              {FUNDING_STATUS_LABEL[f]}
             </option>
           ))}
         </select>

@@ -26,22 +26,26 @@ import {
 // bundle. Re-exported here so server callers have one import.
 import {
   CONTACT_MAX,
+  FUNDING_STATUSES,
   INTEREST_TYPES,
   STAGES,
   type CollabOwner,
   type CollabPost,
   type CreateCollabPostInput,
+  type FundingStatus,
   type InterestType,
   type Stage,
 } from "@/lib/collabTypes";
 
 export {
+  FUNDING_STATUSES,
   INTEREST_TYPES,
   STAGES,
   type BoardFilter,
   type CollabOwner,
   type CollabPost,
   type CreateCollabPostInput,
+  type FundingStatus,
   type InterestType,
   type Stage,
 } from "@/lib/collabTypes";
@@ -58,7 +62,7 @@ import type { BoardFilter } from "@/lib/collabTypes";
 //
 // Posting identifies you by name; it does not publish your profile.
 const POST_SELECT =
-  "id, title, description, research_areas, haves, needs, stage, created_at, owner_id";
+  "id, title, description, research_areas, haves, needs, stage, funding_status, created_at, owner_id";
 
 // ── normalization ────────────────────────────────────────────────────────────
 
@@ -87,6 +91,16 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
     ? (b.stage as Stage)
     : "concept";
 
+  // Optional and nullable — anything not one of the three real values
+  // (missing, empty string from an unselected <select>, garbage) becomes
+  // null, i.e. "unspecified". Never defaulted to a real status: unlike
+  // `stage`, there is no correct default here for a poster who didn't say.
+  const funding_status =
+    typeof b.funding_status === "string" &&
+    (FUNDING_STATUSES as readonly string[]).includes(b.funding_status)
+      ? (b.funding_status as FundingStatus)
+      : null;
+
   return {
     title: title.slice(0, 200),
     description: typeof b.description === "string" ? b.description.trim().slice(0, 4000) : "",
@@ -94,6 +108,7 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
     haves: asStringArray(b.haves),
     needs: asStringArray(b.needs),
     stage,
+    funding_status,
   };
 }
 
@@ -164,6 +179,10 @@ export async function listCollabPosts(opts: {
   const { data, error } = await query;
   if (error || !data) return [];
 
+  // Computed here, once, from the session — NOT shipped as owner_id. The
+  // client gets a yes/no per post, never the id it'd be compared against.
+  const viewer = await getCurrentUser();
+
   const [counts, owners] = await Promise.all([interestCounts(db), ownerMap(db)]);
   return (data as Record<string, unknown>[]).map((row) => ({
     id: row.id as string,
@@ -173,9 +192,11 @@ export async function listCollabPosts(opts: {
     haves: (row.haves as string[]) ?? [],
     needs: (row.needs as string[]) ?? [],
     stage: (row.stage as Stage) ?? "concept",
+    funding_status: (row.funding_status as FundingStatus | null) ?? null,
     created_at: row.created_at as string,
     owner: owners.get(row.owner_id as string) ?? null,
     interested: counts.get(row.id as string) ?? 0,
+    is_owner: viewer !== null && row.owner_id === viewer.id,
   }));
 }
 
@@ -192,6 +213,7 @@ export async function getCollabPost(id: string): Promise<CollabPost | null> {
 
   if (error || !data) return null;
 
+  const viewer = await getCurrentUser();
   const [counts, owners] = await Promise.all([interestCounts(db), ownerMap(db)]);
   const row = data as Record<string, unknown>;
   return {
@@ -202,9 +224,11 @@ export async function getCollabPost(id: string): Promise<CollabPost | null> {
     haves: (row.haves as string[]) ?? [],
     needs: (row.needs as string[]) ?? [],
     stage: (row.stage as Stage) ?? "concept",
+    funding_status: (row.funding_status as FundingStatus | null) ?? null,
     created_at: row.created_at as string,
     owner: owners.get(row.owner_id as string) ?? null,
     interested: counts.get(row.id as string) ?? 0,
+    is_owner: viewer !== null && row.owner_id === viewer.id,
   };
 }
 
@@ -225,6 +249,7 @@ export async function createCollabPost(input: CreateCollabPostInput): Promise<st
       haves: input.haves ?? [],
       needs: input.needs ?? [],
       stage: input.stage ?? "concept",
+      funding_status: input.funding_status ?? null,
     })
     .select("id")
     .single();
@@ -279,4 +304,33 @@ export async function respondToCollabPost(input: {
 /** Whether the viewer can post/respond — for rendering the sign-in gate. */
 export async function canParticipate(): Promise<boolean> {
   return (await getCurrentUser()) !== null;
+}
+
+/** Delete a post as the signed-in user. Hard delete — matches the idiom in
+ *  lib/server/savedItems.ts:removeSavedItem (session-derived user,
+ *  .delete().eq()), not a soft-delete: no such pattern exists anywhere in
+ *  this codebase and this isn't the place to start one.
+ *
+ *  The .eq("owner_id", user.id) here is belt-and-suspenders, matching
+ *  savedItems.ts's own style — the REAL gate is the collab_posts_delete_own
+ *  RLS policy (database/schema.sql), which enforces auth.uid() = owner_id in
+ *  Postgres regardless of what this query claims. A caller cannot delete
+ *  someone else's post by forging this call: RLS silently matches zero rows
+ *  for a post that isn't theirs, same as it would for update/select.
+ *
+ *  connection_requests.post_id is ON DELETE CASCADE (schema.sql) — deleting a
+ *  post also deletes every response to it, including responders' self-
+ *  provided contact details. That's a data-loss decision for the CALLER to
+ *  have confirmed with the user before invoking this — this function itself
+ *  does not warn or ask again. */
+export async function deleteCollabPost(postId: string): Promise<void> {
+  const { user, db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("collab_posts")
+    .delete()
+    .eq("id", postId)
+    .eq("owner_id", user.id);
+
+  if (error) throw error;
 }

@@ -18,6 +18,18 @@ export const STAGES = [
 ] as const;
 export type Stage = (typeof STAGES)[number];
 
+// Optional, nullable — see database/migrations/2026-07-28_collab_posts_funding_status.sql.
+// NULL means "the poster didn't say", not a fourth state; every reader (the
+// form, the card) must treat it as "render nothing", never "Unknown".
+export const FUNDING_STATUSES = ["funded", "applying", "unfunded"] as const;
+export type FundingStatus = (typeof FUNDING_STATUSES)[number];
+
+export const FUNDING_STATUS_LABEL: Record<FundingStatus, string> = {
+  funded: "Funded",
+  applying: "Grant applying",
+  unfunded: "Unfunded",
+};
+
 export const INTEREST_TYPES = [
   "can_provide",
   "want_to_join",
@@ -59,9 +71,18 @@ export type CollabPost = {
   haves: string[];
   needs: string[];
   stage: Stage;
+  /** Optional, nullable — null means unspecified. Render nothing when null,
+   *  never a placeholder like "Unknown". */
+  funding_status: FundingStatus | null;
   created_at: string;
   owner: CollabOwner | null;
   interested: number;
+  /** Computed server-side (session user vs. the row's owner_id) — owner_id
+   *  itself is never sent to the browser, just this yes/no. The client uses
+   *  it only to decide whether to SHOW the delete affordance; the actual
+   *  gate is the collab_posts_delete_own RLS policy, enforced again in
+   *  Postgres regardless of what this flag says. */
+  is_owner: boolean;
 };
 
 export type CreateCollabPostInput = {
@@ -71,4 +92,5 @@ export type CreateCollabPostInput = {
   haves?: string[];
   needs?: string[];
   stage?: Stage;
+  funding_status?: FundingStatus | null;
 };

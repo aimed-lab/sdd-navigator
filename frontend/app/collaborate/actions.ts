@@ -17,12 +17,14 @@ import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
 import {
   createCollabPost,
+  deleteCollabPost,
   parseCollabPostInput,
   respondToCollabPost,
   type InterestType,
 } from "@/lib/server/collab";
 
 export type ActionResult = { ok: true; id: string } | { ok: false; error: string };
+export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
 /** Create a post as the signed-in user. Rejects (401-equivalent) when signed
  *  out — the UI gate is a convenience, this is the actual enforcement. */
@@ -69,5 +71,27 @@ export async function respondAction(input: {
     }
     console.error("respondAction failed", e);
     return { ok: false, error: "Couldn't send your request. Please try again." };
+  }
+}
+
+/** Delete a post as its owner. The UI only shows this to whoever the server
+ *  already told is the owner (post.is_owner) and requires a confirmation
+ *  naming the response count first — but neither of those is the real gate.
+ *  deleteCollabPost re-derives the caller from the session and the
+ *  collab_posts_delete_own RLS policy enforces ownership again in Postgres,
+ *  so a forged call for someone else's post_id deletes nothing. */
+export async function deletePostAction(postId: string): Promise<SimpleActionResult> {
+  if (!postId) return { ok: false, error: "Missing post." };
+
+  try {
+    await deleteCollabPost(postId);
+    revalidatePath("/collaborate");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in to delete this post." };
+    }
+    console.error("deletePostAction failed", e);
+    return { ok: false, error: "Couldn't delete the post. Please try again." };
   }
 }
