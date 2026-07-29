@@ -1,15 +1,23 @@
+"use client";
+
 // One showcase entry. Two card styles from one component: with a figure the
 // image leads; without one the card is text-only — never a placeholder image.
 //
-// Server component: nothing here is interactive.
+// Client component (not a server component anymore) because the owner-only
+// delete affordance needs local state for the confirm dialog — same reason
+// collaborate/PostCard.tsx is a client component.
 
+import { useState } from "react";
 import type { ShowcaseEntry } from "@/lib/showcaseTypes";
 import { SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
+import DeleteShowcaseConfirm from "./DeleteShowcaseConfirm";
 
 export default function ShowcaseCard({ entry }: { entry: ShowcaseEntry }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const credit = [entry.authors, entry.owner?.affiliation].filter(Boolean).join(" · ");
 
   return (
+    <>
     <article className="glass-panel rounded-2xl overflow-hidden flex flex-col h-full">
       {entry.image_url && (
         <div className="w-full aspect-video bg-surface-container-high overflow-hidden">
@@ -57,20 +65,40 @@ export default function ShowcaseCard({ entry }: { entry: ShowcaseEntry }) {
             <span className="font-label-sm text-label-sm text-secondary truncate">
               {credit || "SmartDrugDiscovery"}
             </span>
-            {entry.link && (
-              <a
-                href={entry.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
-              >
-                View
-                <span className="material-symbols-outlined text-base">open_in_new</span>
-              </a>
-            )}
+            <span className="shrink-0 flex items-center gap-3">
+              {entry.link && (
+                <a
+                  href={entry.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                >
+                  View
+                  <span className="material-symbols-outlined text-base">open_in_new</span>
+                </a>
+              )}
+              {entry.is_owner && (
+                <button
+                  type="button"
+                  onClick={() => setConfirmingDelete(true)}
+                  className="font-label-sm text-label-sm text-secondary/60 hover:text-error transition-colors"
+                >
+                  Delete
+                </button>
+              )}
+            </span>
           </div>
         </div>
       </div>
     </article>
+
+    {confirmingDelete && (
+      <DeleteShowcaseConfirm
+        entryId={entry.id}
+        entryTitle={entry.title}
+        onClose={() => setConfirmingDelete(false)}
+      />
+    )}
+    </>
   );
 }

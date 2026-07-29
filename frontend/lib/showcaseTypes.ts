@@ -42,6 +42,12 @@ export type ShowcaseEntry = {
   tags: string[];
   created_at: string;
   owner: ShowcaseOwner | null;
+  /** Computed server-side (session user vs. the row's owner_id) — owner_id
+   *  itself is never sent to the browser, just this yes/no. The client uses
+   *  it only to decide whether to SHOW the delete affordance; the actual
+   *  gate is the promote_showcase_delete_own RLS policy, enforced again in
+   *  Postgres regardless of what this flag says. */
+  is_owner: boolean;
 };
 
 export type CreateShowcaseInput = {

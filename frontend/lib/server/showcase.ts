@@ -14,6 +14,7 @@
 // card anonymous. The function returns name + affiliation only — never email.
 
 import {
+  getCurrentUser,
   getDb,
   requireCurrentUser,
   ServerConfigError,
@@ -104,7 +105,8 @@ async function ownerMap(db: Db): Promise<Map<string, ShowcaseOwner>> {
 
 function toEntry(
   row: Record<string, unknown>,
-  owners: Map<string, ShowcaseOwner>
+  owners: Map<string, ShowcaseOwner>,
+  viewerId: string | null
 ): ShowcaseEntry {
   return {
     id: row.id as string,
@@ -117,6 +119,9 @@ function toEntry(
     tags: (row.tags as string[]) ?? [],
     created_at: row.created_at as string,
     owner: owners.get(row.owner_id as string) ?? null,
+    // Computed here, once, from the session — NOT shipped as owner_id. The
+    // client gets a yes/no per entry, never the id it'd be compared against.
+    is_owner: viewerId !== null && row.owner_id === viewerId,
   };
 }
 
@@ -139,8 +144,11 @@ export async function listShowcase(
   const { data, error } = await query;
   if (error || !data) return [];
 
+  const viewer = await getCurrentUser();
   const owners = await ownerMap(db);
-  return (data as Record<string, unknown>[]).map((r) => toEntry(r, owners));
+  return (data as Record<string, unknown>[]).map((r) =>
+    toEntry(r, owners, viewer?.id ?? null)
+  );
 }
 
 /** One showcase entry. Null when it doesn't exist. */
@@ -155,8 +163,9 @@ export async function getShowcaseEntry(id: string): Promise<ShowcaseEntry | null
     .maybeSingle();
 
   if (error || !data) return null;
+  const viewer = await getCurrentUser();
   const owners = await ownerMap(db);
-  return toEntry(data as Record<string, unknown>, owners);
+  return toEntry(data as Record<string, unknown>, owners, viewer?.id ?? null);
 }
 
 // ── writes (auth-gated) ──────────────────────────────────────────────────────
@@ -218,4 +227,67 @@ export async function createShowcaseEntry(
 
   if (error || !data) throw error ?? new Error("Insert returned no row.");
   return data.id as string;
+}
+
+/** Extract the storage object path from a showcase-images public URL — the
+ *  part after '.../object/public/showcase-images/', which is exactly the
+ *  `<uid>/<random>.<ext>` path uploadImage() wrote it to. Null for anything
+ *  that doesn't match (defensive; image_url is always ours). */
+function storagePathFromUrl(url: string): string | null {
+  const marker = `/object/public/${SHOWCASE_BUCKET}/`;
+  const i = url.indexOf(marker);
+  return i === -1 ? null : url.slice(i + marker.length);
+}
+
+/** Delete a showcase entry as the signed-in user. Hard delete — same idiom as
+ *  lib/server/collab.ts:deleteCollabPost (session-derived user,
+ *  .delete().eq()).
+ *
+ *  The .eq("owner_id", user.id) here is belt-and-suspenders — the REAL gate
+ *  is the promote_showcase_delete_own RLS policy (database/schema.sql),
+ *  which enforces auth.uid() = owner_id in Postgres regardless of what this
+ *  query claims.
+ *
+ *  Unlike collab_posts, nothing has a foreign key onto promote_showcase — no
+ *  table cascades off it, so there is no "other people's data" to warn about
+ *  the way connection_requests forces for collab_posts.
+ *
+ *  An uploaded figure is NOT covered by ON DELETE CASCADE — that only
+ *  applies to Postgres rows, and storage.objects is a separate lifecycle
+ *  entirely. Deleting the row alone would orphan the file in the
+ *  showcase-images bucket forever, so this deletes the object too, using
+ *  the same session (showcase_images_own_delete in schema.sql permits a
+ *  user to delete objects under their own '<uid>/' folder, matching the
+ *  insert policy uploadImage() relies on).
+ *
+ *  Ordering: the row delete happens first, with `.select("image_url")` so
+ *  the same round trip both confirms deletion (RLS silently matches zero
+ *  rows for someone else's entry) and returns the path to clean up. The
+ *  storage removal that follows is best-effort: if it fails, the entry the
+ *  user asked to remove is still gone — that's the primary action and it
+ *  already succeeded — so this only logs rather than throwing. An orphaned
+ *  file costs storage, not correctness; failing the whole delete here would
+ *  leave a post the user asked to remove still showing on the gallery,
+ *  which is worse. */
+export async function deleteShowcaseEntry(entryId: string): Promise<void> {
+  const { user, db } = await requireCurrentUser();
+
+  const { data, error } = await db
+    .from("promote_showcase")
+    .delete()
+    .eq("id", entryId)
+    .eq("owner_id", user.id)
+    .select("image_url")
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const imageUrl = (data?.image_url as string | null) ?? null;
+  const path = imageUrl ? storagePathFromUrl(imageUrl) : null;
+  if (path) {
+    const { error: storageError } = await db.storage.from(SHOWCASE_BUCKET).remove([path]);
+    if (storageError) {
+      console.error("showcase image cleanup failed", storageError, path);
+    }
+  }
 }

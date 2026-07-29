@@ -36,6 +36,80 @@ export default function SubmitShowcaseForm() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // DOI/PMID autofill. Same "only fill a blank field" guard as the ORCID
+  // import in OnboardingForm.tsx (components/profile/OnboardingForm.tsx,
+  // runImport) — a value the researcher already typed is never touched, only
+  // an empty field gets filled.
+  const [lookupId, setLookupId] = useState("");
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [lookedUpAbstract, setLookedUpAbstract] = useState<string | null>(null);
+  const [filledFields, setFilledFields] = useState<string[]>([]);
+
+  const runLookup = async () => {
+    const id = lookupId.trim();
+    if (!id || looking) return;
+
+    setLookupError(null);
+    setLookedUpAbstract(null);
+    setFilledFields([]);
+
+    // Cheap client-side shape check before spending a round trip: a PMID is
+    // digits-only, a DOI always has a "/" (matches isPmid/isDoi in
+    // lib/server/promote/fetchPaper.ts). Anything else can't resolve.
+    const looksLikeId = /^\d+$/.test(id) || id.includes("/") || /^https?:\/\//i.test(id);
+    if (!looksLikeId) {
+      setLookupError("That doesn't look like a DOI or PubMed ID.");
+      return;
+    }
+
+    setLooking(true);
+    try {
+      const res = await fetch("/api/promote/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: id }),
+      });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setLookupError(json?.error ?? "Couldn't look that up. Please try again.");
+        return;
+      }
+
+      const filled: string[] = [];
+      if (json.title && !title.trim()) {
+        setTitle(json.title);
+        filled.push("Title");
+      }
+      if (Array.isArray(json.authors) && json.authors.length > 0 && !authors.trim()) {
+        setAuthors(json.authors.join(", "));
+        filled.push("Authors");
+      }
+      if (json.sourceUrl && !link.trim()) {
+        setLink(json.sourceUrl);
+        filled.push("Link");
+      }
+      setFilledFields(filled);
+      // Description is deliberately NOT autofilled — an abstract answers "what
+      // did they find", the form asks "what did you do, and why does it
+      // matter", and those are different pieces of writing. Offered as an
+      // optional insert instead, below.
+      if (typeof json.abstract === "string" && json.abstract.trim()) {
+        setLookedUpAbstract(json.abstract);
+      }
+    } catch {
+      setLookupError("Couldn't reach the lookup service. Please try again.");
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  const insertAbstract = () => {
+    if (!lookedUpAbstract) return;
+    setDescription((prev) => (prev.trim() ? prev : lookedUpAbstract));
+  };
+
   const addTag = () => {
     const v = tagDraft.trim();
     if (!v) return;
@@ -103,6 +177,87 @@ export default function SubmitShowcaseForm() {
 
   return (
     <form onSubmit={submit} className="space-y-6">
+      <section className="glass-panel rounded-2xl p-6 space-y-3">
+        <label htmlFor="lookup" className="block font-label-md text-label-md text-on-background mb-2">
+          DOI or PubMed ID <span className="text-secondary font-body-sm">(optional)</span>
+        </label>
+        <p className="-mt-1 font-body-sm text-body-sm text-secondary">
+          Paste a DOI or PubMed ID to fill this in automatically. Works for any
+          type here, not just Paper — a case study can have a DOI too.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input
+            id="lookup"
+            type="text"
+            value={lookupId}
+            onChange={(e) => setLookupId(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                runLookup();
+              }
+            }}
+            placeholder="10.1126/science.1225829 or a PubMed ID"
+            className={field + " flex-1"}
+          />
+          <button
+            type="button"
+            onClick={runLookup}
+            disabled={looking || !lookupId.trim()}
+            className="btn-outline shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {looking ? (
+              <>
+                <span className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                Looking up…
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined text-base">search</span>
+                Fill in automatically
+              </>
+            )}
+          </button>
+        </div>
+
+        {lookupError && (
+          <p className="font-body-sm text-body-sm text-error" role="alert">
+            {lookupError}
+          </p>
+        )}
+
+        {filledFields.length > 0 && !lookupError && (
+          <p className="font-body-sm text-body-sm text-primary">
+            Filled in: {filledFields.join(", ")}. Everything stays editable — change
+            anything below.
+          </p>
+        )}
+
+        {lookedUpAbstract && (
+          <div className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4">
+            <p className="font-label-sm text-label-sm text-secondary uppercase mb-1">
+              Abstract found
+            </p>
+            <p className="font-body-sm text-body-sm text-secondary line-clamp-4">
+              {lookedUpAbstract}
+            </p>
+            <p className="mt-2 font-body-sm text-body-sm text-secondary">
+              This is what the paper found, not what you did with it — the
+              Description below asks the latter. Insert it only if you want a
+              starting point to rewrite from.
+            </p>
+            <button
+              type="button"
+              onClick={insertAbstract}
+              disabled={!!description.trim()}
+              className="mt-2 font-label-md text-label-md text-primary hover:underline underline-offset-4 disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+            >
+              {description.trim() ? "Description already has text" : "Insert into Description"}
+            </button>
+          </div>
+        )}
+      </section>
+
       <section className="glass-panel rounded-2xl p-6 space-y-5">
         <h2 className="font-headline-md text-lg text-on-background">What are you sharing?</h2>
 
