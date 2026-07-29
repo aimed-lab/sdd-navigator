@@ -13,6 +13,7 @@
 import Link from "next/link";
 import GeneratorPanel from "@/components/promote/GeneratorPanel";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
+import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { listShowcase } from "@/lib/server/showcase";
 import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/showcaseTypes";
 
@@ -132,6 +133,13 @@ export default async function PromotePage({
       {/* ── Generator ────────────────────────────────────────────────────── */}
       <div className="border-t border-outline-variant/30 pt-16">
         <GeneratorPanel />
+      </div>
+
+      <div className="mt-16 pt-8 border-t border-outline-variant/30">
+        <InlineFeedback
+          prompt="What kind of work do you want to share?"
+          pagePath="/promote"
+        />
       </div>
     </div>
   );

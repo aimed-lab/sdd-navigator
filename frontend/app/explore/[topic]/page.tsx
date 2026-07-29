@@ -5,11 +5,13 @@
 // explore backend and renders the routed sections. Selecting a category filters
 // to that section; an empty selected category shows the A+D invitation card.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
+import InlineFeedback from "@/components/feedback/InlineFeedback";
+import { submitFeedbackAction } from "@/app/feedback/actions";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -87,7 +89,39 @@ export default function SearchResultsPage() {
   }, [data]);
 
   const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
-  const showError = failed || data?.error === true || (!loading && totalItems === 0);
+  // Two DISTINCT settled failure shapes, never conflated:
+  //   backendError — the search never actually ran (transport failure, or the
+  //                  route itself reporting error:true). An availability
+  //                  problem: we couldn't search, not that we searched and
+  //                  found nothing.
+  //   emptyResult  — the search ran, worked, and matched nothing. A coverage
+  //                  problem: worth recording as a real signal about missing
+  //                  sources, which backendError is not.
+  // Both are "settled" (not loading) and mutually exclusive.
+  const backendError = !loading && (failed || data?.error === true);
+  const emptyResult = !loading && !backendError && totalItems === 0;
+  const showError = backendError || emptyResult;
+
+  // Auto-capture: page_path + the query, tagged with which of the two
+  // settled outcomes it was, once per distinct topic. Fires for BOTH —
+  // dropping backendError here would lose the exact signal this feature
+  // exists for when the discovery backend is down (the expected case for
+  // the info session). The ref (not state) is what makes this fire once per
+  // topic: state would re-render and re-run the effect's dependency check on
+  // every render, but the ref only changes when a topic actually gets
+  // captured. Only fires on a SETTLED outcome — never while loading, and
+  // never on a partial result (there is no partial state here: totalItems
+  // reflects the full response once loading is false).
+  const capturedTopicRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showError || capturedTopicRef.current === topic) return;
+    capturedTopicRef.current = topic;
+    submitFeedbackAction({
+      page_path: `/explore/${encodeURIComponent(topic)}`,
+      message: null,
+      context: { query: topic, outcome: backendError ? "backend_error" : "empty" },
+    });
+  }, [showError, backendError, topic]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -145,22 +179,55 @@ export default function SearchResultsPage() {
         </div>
       )}
 
-      {/* Error / no results at all */}
+      {/* Error / no results at all — copy differs by which settled outcome
+          this was. A backend failure must never read like an empty search:
+          "try a broader term" tells someone their query was the problem when
+          the actual problem is that nothing searched at all. */}
       {!loading && showError && (
         <div className="max-w-md mx-auto text-center py-24">
-          <span className="material-symbols-outlined text-5xl text-secondary/50">search_off</span>
-          <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
-            No results for &ldquo;{topic}&rdquo;
-          </h2>
-          <p className="mt-2 text-secondary font-body-md">
-            Try a broader term, or browse the full feed.
-          </p>
+          {backendError ? (
+            <>
+              <span className="material-symbols-outlined text-5xl text-secondary/50">
+                cloud_off
+              </span>
+              <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                Couldn&apos;t search right now
+              </h2>
+              <p className="mt-2 text-secondary font-body-md">
+                The discovery backend didn&apos;t respond. This isn&apos;t about your
+                search — please try again in a moment.
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="material-symbols-outlined text-5xl text-secondary/50">
+                search_off
+              </span>
+              <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                No results for &ldquo;{topic}&rdquo;
+              </h2>
+              <p className="mt-2 text-secondary font-body-md">
+                Try a broader term, or browse the full feed.
+              </p>
+            </>
+          )}
+
           <button
             onClick={() => router.push("/explore")}
             className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
           >
             Browse the full feed
           </button>
+
+          {emptyResult && (
+            <div className="mt-8 text-left">
+              <InlineFeedback
+                prompt="What were you hoping to find?"
+                pagePath={`/explore/${encodeURIComponent(topic)}`}
+                context={{ query: topic }}
+              />
+            </div>
+          )}
         </div>
       )}
 

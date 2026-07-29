@@ -10,6 +10,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Fragment } from "react";
+import CollabofestFeedbackForm from "@/components/feedback/CollabofestFeedbackForm";
 // Static import so Next derives the intrinsic size (1103x1426 portrait) itself.
 import collabofestGraphic from "../public/colabofest-2026.avif";
 
@@ -293,6 +294,8 @@ export default function Home() {
               </a>
               )
             </p>
+
+            <CollabofestFeedbackForm />
           </div>
         </div>
       </section>

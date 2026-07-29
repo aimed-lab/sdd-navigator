@@ -13,6 +13,7 @@
 
 import Link from "next/link";
 import PostCard from "@/components/collaborate/PostCard";
+import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 
@@ -193,6 +194,13 @@ export default async function CollaboratePage({
           />
         </div>
       )}
+
+      <div className="mt-16 pt-8 border-t border-outline-variant/30">
+        <InlineFeedback
+          prompt="What would make you post here?"
+          pagePath="/collaborate"
+        />
+      </div>
     </div>
   );
 }
