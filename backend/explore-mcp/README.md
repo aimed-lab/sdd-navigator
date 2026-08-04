@@ -42,20 +42,27 @@ Docker/deploy config.
 
 ## Docker build
 
-`docker build .` here does NOT hit pypi.org — every PyPI dependency installs
-from a local wheelhouse (`./docker-wheels/`, gitignored, not committed)
-instead. That's not a style choice: on this project's Docker setup, `pypi.org`
-is specifically unreachable from inside any container (confirmed — DNS
-resolves identically to the host, other domains including
-`files.pythonhosted.org` and `github.com` ARE reachable from the same
-containers, only `pypi.org` itself is not; looks like a deliberate network
-policy rather than a flaky connection). `github.com` being reachable is why
-`winner-net` — a git dependency with no PyPI release — still installs
-straight from GitHub in the Dockerfile; every OTHER package needs the
-wheelhouse.
+`docker build .` installs normally from pypi.org (via `requirements.lock.txt`)
+by default — that's what anyone who just cloned the repo gets, no extra setup.
+`winner-net` (a git-only dependency, no PyPI release) always installs from
+GitHub regardless.
 
-**If you change `requirements.txt` (or bump `winner-net`'s pinned commit),
-regenerate both `docker-wheels/` and `requirements.lock.txt`:**
+**Offline build (one specific machine only):** on the machine this Dockerfile
+was originally written on, `pypi.org` is specifically unreachable from inside
+any container (confirmed there — DNS resolves identically to the host, other
+domains including `files.pythonhosted.org` and `github.com` ARE reachable
+from the same containers, only `pypi.org` itself is not; looks like a
+deliberate network policy rather than a flaky connection). For that machine
+only, build with `--build-arg PIP_SOURCE=offline`, which installs every PyPI
+dependency from a local wheelhouse (`./docker-wheels/`, gitignored — a
+tracked `docker-wheels/.gitkeep` keeps the directory itself present on a
+fresh clone so the plain online build's unconditional `COPY docker-wheels`
+never fails) instead of pypi.org. Nobody else building this image should need
+`PIP_SOURCE=offline`.
+
+**If you change `requirements.txt` (or bump `winner-net`'s pinned commit) and
+need to refresh the offline wheelhouse, regenerate both `docker-wheels/` and
+`requirements.lock.txt`:**
 
 1. From the HOST (not a container — pypi.org must be reachable), download
    every PyPI dependency as a wheel targeting the CONTAINER's platform
@@ -104,18 +111,22 @@ regenerate both `docker-wheels/` and `requirements.lock.txt`:**
    deliberate exception: it's pure Python with no wheel on PyPI at all
    (it's not on PyPI — it's git-only), so it's never in this directory; the
    Dockerfile clones and installs it separately.
-3. `docker build --target builder -t explore-mcp:builder-bootstrap .`, then
-   `docker run --rm explore-mcp:builder-bootstrap /opt/venv/bin/pip freeze`
+3. `docker build --build-arg PIP_SOURCE=offline --target builder -t explore-mcp:builder-bootstrap .`,
+   then `docker run --rm explore-mcp:builder-bootstrap /opt/venv/bin/pip freeze`
    and copy the output into `requirements.lock.txt` — except the `winner-net`
    line, which `pip freeze` prints as a throwaway build-time local path
    (`winner-net @ file:///tmp/winner/python`); replace it by hand with the
    git+commit form already in `requirements.txt`. See
-   `requirements.lock.txt`'s own header comment for the exact steps.
+   `requirements.lock.txt`'s own header comment for the exact steps. (Either
+   `PIP_SOURCE` resolves to the same fully-pinned set — `--offline` here just
+   matches what this one machine can actually build.)
 4. `docker rmi explore-mcp:builder-bootstrap` (throwaway), then
-   `docker build -t explore-mcp .` for the real image, which installs from
-   `requirements.lock.txt` (full transitive pins) rather than
-   `requirements.txt` (direct deps only) — that's what makes the build
-   reproducible down to indirect dependencies like `numpy`/`scipy`.
+   `docker build --build-arg PIP_SOURCE=offline -t explore-mcp .` for the real
+   image on this machine (drop the `--build-arg` entirely anywhere else —
+   that's the online default), which installs from `requirements.lock.txt`
+   (full transitive pins) rather than `requirements.txt` (direct deps only) —
+   that's what makes the build reproducible down to indirect dependencies
+   like `numpy`/`scipy`.
 
 `requirements.txt` stays the human-readable source of intent (direct
 dependencies only); `requirements.lock.txt` is the generated, fully-pinned

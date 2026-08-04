@@ -5,6 +5,13 @@ python-dotenv==1.2.2
 requests==2.34.2
 starlette==1.3.1
 uvicorn==0.51.0
+# certifi — imported DIRECTLY by sources/pager.py to build the PAGER trust
+# bundle (certifi.where()). Was previously only a transitive dep of httpx/
+# requests, which happened to work locally but is exactly the winner-net/
+# pandas failure mode (a transitive dep silently missing on a clean
+# install) if it's ever removed or changed by one of those. Declared
+# explicitly now that something imports it by name.
+certifi==2026.7.22
 # LLM SDKs — only the one named by LLM_PROVIDER is imported at runtime (see llm.py)
 groq==1.6.0
 openai==2.48.0

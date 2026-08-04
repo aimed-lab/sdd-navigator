@@ -5,23 +5,37 @@
 # the safer target for numpy/scipy/pandas wheels pulled in transitively by
 # winner-net. git + build tooling live ONLY in this stage — the final image
 # ships neither.
-#
-# OFFLINE BUILD. pypi.org is unreachable from inside any container on this
-# host's Docker network (confirmed: DNS resolves identically to the host,
-# --dns 8.8.8.8 makes no difference, files.pythonhosted.org/github.com/every
-# other tested domain IS reachable — pypi.org specifically is not, likely a
-# deliberate network policy rather than a flaky connection). github.com IS
-# reachable, so winner-net can still install via git. Every OTHER package
-# installs from ./docker-wheels — a wheelhouse pre-downloaded on the HOST
-# (where pypi.org works) targeting this image's exact platform/Python. See
-# README.md's "Docker build" section for the one command that regenerates it.
 FROM python:3.12-slim-bookworm AS builder
 
+# PIP_SOURCE=online (DEFAULT) — installs every PyPI dependency the normal
+# way, straight from pypi.org. This is what a plain `docker build .` gets
+# for anyone who just cloned the repo (Zhandos's server, CI, a fresh
+# machine) — no wheelhouse required, nothing gitignored to regenerate first.
+#
+# PIP_SOURCE=offline (--build-arg PIP_SOURCE=offline) — installs from the
+# local ./docker-wheels wheelhouse instead. This exists ONLY because
+# pypi.org is specifically unreachable from inside any container on ONE
+# machine's Docker network (confirmed there: DNS resolves identically to
+# the host, --dns 8.8.8.8 makes no difference, files.pythonhosted.org/
+# github.com/every other tested domain IS reachable — pypi.org specifically
+# is not, likely a deliberate network policy rather than a flaky
+# connection). Nobody else building this image should need it. See
+# README.md's "Docker build" section for how to regenerate docker-wheels/
+# before using this path — it's gitignored (a tracked docker-wheels/
+# .gitkeep keeps the directory itself present so the unconditional COPY
+# below never fails on a fresh clone; PIP_SOURCE=online never reads from it).
+#
+# Either way, github.com IS reachable everywhere this has been tested, so
+# winner-net (a git-only dependency, no PyPI release) always installs from
+# GitHub regardless of PIP_SOURCE.
+ARG PIP_SOURCE=online
+
 # git only — winner-net installs from GitHub (aimed-lab/WINNER, public,
-# pinned to a commit). No compilers needed: every PyPI dependency in
-# ./docker-wheels is a genuine prebuilt wheel (verified when the wheelhouse
-# was generated — see README), and winner-net itself is pure Python (no C
-# extension; its pyproject.toml build-system is plain setuptools.build_meta).
+# pinned to a commit). No compilers needed: every PyPI dependency is a
+# genuine prebuilt wheel either way (verified for the offline wheelhouse
+# when it was generated — see README), and winner-net itself is pure Python
+# (no C extension; its pyproject.toml build-system is plain
+# setuptools.build_meta).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
     && rm -rf /var/lib/apt/lists/*
@@ -31,19 +45,24 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /build
 
-# The local wheelhouse — every PyPI package this image needs, as a wheel
-# matching cp312/manylinux/x86_64. --no-index below means pip NEVER contacts
-# any index (pypi.org or otherwise); --find-links is the only source of
-# packages apart from the winner-net git clone below.
+# The local wheelhouse — every PyPI package this image needs when
+# PIP_SOURCE=offline, as a wheel matching cp312/manylinux/x86_64. COPYing it
+# unconditionally (even though PIP_SOURCE=online never reads it) is what
+# lets `docker-wheels/` be empty-but-present on a fresh clone without
+# breaking the build — see the .gitkeep note above.
 COPY docker-wheels /wheels
 COPY requirements.lock.txt .
 
 # setuptools + wheel FIRST, and as an explicit step: winner-net's build
 # (below) uses --no-build-isolation, which means "use whatever's already
 # installed" rather than fetching its own build-system requires into an
-# isolated env — so setuptools/wheel must be genuinely installed (not just
-# sitting in /wheels) before that step runs.
-RUN pip install --no-index --find-links=/wheels "setuptools>=68" wheel
+# isolated env — so setuptools/wheel must be genuinely installed before that
+# step runs, from PyPI or from /wheels depending on PIP_SOURCE.
+RUN if [ "$PIP_SOURCE" = "offline" ]; then \
+        pip install --no-index --find-links=/wheels "setuptools>=68" wheel; \
+    else \
+        pip install "setuptools>=68" wheel; \
+    fi
 
 # winner-net, from git (github.com is reachable), installed from a LOCAL
 # clone rather than `pip install git+https://...` directly. Chosen over the
@@ -52,12 +71,17 @@ RUN pip install --no-index --find-links=/wheels "setuptools>=68" wheel
 # not something to rely on implicitly for a package with no test coverage
 # once it's inside a container. `--no-build-isolation` on a literal local
 # path is unambiguous — pip does no isolation at all, uses exactly the venv
-# we just populated (setuptools/wheel), and needs no network beyond the git
-# clone itself. Its own runtime deps (numpy/scipy/pandas/statsmodels/joblib)
-# resolve from /wheels via the same --no-index --find-links.
+# we just populated (setuptools/wheel) regardless of PIP_SOURCE, and needs
+# no network beyond the git clone itself. Its own runtime deps (numpy/scipy/
+# pandas/statsmodels/joblib) resolve from /wheels (offline) or pypi.org
+# (online, the default) via the same --no-build-isolation install below.
 RUN git clone --quiet https://github.com/aimed-lab/WINNER.git /tmp/winner \
     && git -C /tmp/winner checkout -q 8365f7192e190c378199adf3ec7a49caf66bd37c \
-    && pip install --no-build-isolation --no-index --find-links=/wheels /tmp/winner/python \
+    && if [ "$PIP_SOURCE" = "offline" ]; then \
+           pip install --no-build-isolation --no-index --find-links=/wheels /tmp/winner/python; \
+       else \
+           pip install --no-build-isolation /tmp/winner/python; \
+       fi \
     && rm -rf /tmp/winner
 
 # Everything else — the FULL fully-resolved set (requirements.lock.txt, see
@@ -69,9 +93,13 @@ RUN git clone --quiet https://github.com/aimed-lab/WINNER.git /tmp/winner \
 # Installing from the LOCK (not requirements.txt) here, not just for
 # winner-net's own transitive deps but for every package, is what makes this
 # build fully reproducible — exact versions of indirect dependencies too,
-# not just the ones requirements.txt names directly.
+# not just the ones requirements.txt names directly — in EITHER mode.
 RUN grep -v '^winner-net' requirements.lock.txt > /tmp/requirements-pypi.txt \
-    && pip install --no-index --find-links=/wheels -r /tmp/requirements-pypi.txt \
+    && if [ "$PIP_SOURCE" = "offline" ]; then \
+           pip install --no-index --find-links=/wheels -r /tmp/requirements-pypi.txt; \
+       else \
+           pip install -r /tmp/requirements-pypi.txt; \
+       fi \
     && rm /tmp/requirements-pypi.txt
 
 # ── Final ────────────────────────────────────────────────────────────────────

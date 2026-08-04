@@ -4,5 +4,11 @@ __pycache__/
 *.pyc
 
 # Host-generated wheelhouse for the offline Docker build (see README.md's
-# "Docker build" section) — regenerated on demand, not committed.
-docker-wheels/
+# "Docker build" section) — regenerated on demand, not committed. The
+# directory itself stays tracked (via docker-wheels/.gitkeep below) so
+# `COPY docker-wheels /wheels` in the Dockerfile never fails with "not
+# found" on a fresh clone — PIP_SOURCE=online (the default) never reads
+# from it anyway; PIP_SOURCE=offline needs the dir to exist even before
+# it's been populated.
+docker-wheels/*
+!docker-wheels/.gitkeep
