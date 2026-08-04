@@ -1,16 +1,17 @@
 """
-tools/explore.py — the orchestration tool (7-tool JSON routing).
+tools/explore.py — the orchestration tool (9-tool JSON routing).
 
 Takes a scientist's free-text message and, in order:
   1. extracts a structured SCOPE (topics/genes/diseases/assets/methods) via the
      LLM — empty fields are expected and left empty, never invented;
-  2. ROUTES to a subset of the 7 search tools via a JSON routing prompt (native
+  2. ROUTES to a subset of the 9 search tools via a JSON routing prompt (native
      function-calling was unreliable for parallel calls on Groq, so the LLM
      instead returns {"tools": [...], "reasoning": "..."} which we parse);
   3. builds each chosen tool's query from the RIGHT slice of scope — grants /
      trials / papers get the disease + topic; tools / resources get the method +
-     gene; people get disease + method; wiki gets the topic. The slices are NEVER
-     swapped (a grant search must not be run with a technique string, etc.);
+     gene; datasets get disease + gene + topic(tissue) — NOT method; people get
+     disease + method; wiki gets the topic. The slices are NEVER swapped (a
+     grant search must not be run with a technique string, etc.);
   4. runs the chosen tools in parallel (failures isolated);
   5. returns {scope, tools_called, reasoning, sections:[{kind, items}]}.
 
@@ -40,6 +41,7 @@ from cache import (
     cache,
     normalize_key,
 )
+from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
@@ -155,6 +157,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_trials":        "clinical trials — ClinicalTrials.gov",
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
+    "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
     "search_lab_resources": "INTERNAL lab registry — techniques, equipment, models, cell lines, reagents, software for collaboration",
     "search_people":        "researchers — public platform profiles + internal collaborators",
     "search_wiki":          "INTERNAL podcast-derived episode wiki pages",
@@ -167,10 +170,16 @@ _ROUTING_SYSTEM = (
     "run. Rules:\n"
     "  • Choose ONLY tools that fit the message. One tool or several is fine; do not "
     "call everything by default.\n"
-    "  • A scientific target/topic/disease (e.g. 'PHGDH in Alzheimer's') → papers, "
-    "internal resources, people, and the internal wiki.\n"
+    "  • A scientific target/topic/disease/gene (e.g. 'PHGDH in Alzheimer's', or even "
+    "just a bare gene symbol or disease name by itself) → papers, datasets, internal "
+    "resources, people, and the internal wiki. ALWAYS include datasets whenever the "
+    "scope has a disease and/or a gene, even if the message doesn't explicitly ask "
+    "for data — a named gene or disease is itself reason enough to check GEO for "
+    "existing datasets on it.\n"
     "  • A message about DATA or a METHOD the user has (e.g. 'I have RNA-seq datasets') "
-    "→ internal resources, software tools, and people who can help — not papers-first.\n"
+    "→ internal resources, software tools, and people who can help — not papers-first, "
+    "and not search_datasets either (that tool is about disease/tissue/gene targets, "
+    "not the user's own method).\n"
     "  • 'clinical trials for X' → trials (and papers).\n"
     "  • 'funding for X' / a grant/screen to fund → grants (and relevant tools).\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
@@ -194,6 +203,8 @@ def _heuristic_tools(scope: dict) -> list[str]:
     if methody:
         chosen.append("search_tools")
         chosen.append("search_lab_resources")
+    if scope["diseases"] or scope["genes"]:
+        chosen.append("search_datasets")
     if scope["diseases"] or scope["methods"]:
         chosen.append("search_people")
     if topical:
@@ -242,12 +253,23 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 # search_papers intentionally gets the RICHEST slice (disease + topic + gene):
 # papers are the broadest result kind, so a gene target like PHGDH belongs in the
 # literature query even though trials/grants stay strictly disease + topic.
+#
+# search_datasets gets disease + gene + topic (topic standing in for tissue —
+# SCOPE_KEYS has no dedicated tissue field, and the LLM's `topics` extraction
+# already captures tissue/organ phrases like "liver" or "brain tissue" when
+# they're in the message). Deliberately EXCLUDES methods: GEO's own metadata
+# already carries the assay/method (gdstype — RNA-seq vs microarray vs
+# ChIP-seq), so a method term in the query text narrows by keyword match
+# against submitter-written titles/summaries instead, which is much noisier
+# than letting disease/gene/tissue drive the search. Datasets are found BY
+# disease/tissue/gene, not by method — see tools/search_datasets.py.
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
     "search_trials":        ("diseases", "topics"),
     "search_grants":        ("diseases", "topics"),
     "search_tools":         ("methods", "genes"),
+    "search_datasets":      ("diseases", "genes", "topics"),  # disease + gene + tissue(topic) — NOT method
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -271,6 +293,7 @@ _KINDS: dict[str, str] = {
     "search_trials": "trial",
     "search_grants": "grant",
     "search_tools": "tool",
+    "search_datasets": "dataset",
     "search_lab_resources": "resource",
     "search_people": "person",
     "search_wiki": "episode",
@@ -316,6 +339,8 @@ def _dispatch(name: str, query: str):
         return search_grants_async(query, _NET_LIMIT)
     if name == "search_tools":
         return search_tools_async(query, _NET_LIMIT)
+    if name == "search_datasets":
+        return search_datasets_async(query, _NET_LIMIT)
     if name == "search_lab_resources":
         return asyncio.to_thread(search_lab_resources, query, None, _INTERNAL_LIMIT)
     if name == "search_people":

@@ -25,6 +25,7 @@ export const CATEGORIES: {
 }[] = [
   { label: "All", kind: null },
   { label: "Papers", kind: "paper" },
+  { label: "Datasets", kind: "dataset" },
   { label: "Tools", kind: "tool" },
   { label: "Trials", kind: "trial" },
   { label: "Grants", kind: "grant" },

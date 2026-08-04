@@ -1,7 +1,7 @@
 """
 server.py — Explore MCP server (streamable-HTTP transport).
 
-Exposes 9 tools to other agents over MCP (external agents such as Pleaser call
+Exposes 10 tools to other agents over MCP (external agents such as Pleaser call
 these directly to learn about papers, news, assays/trials, funding,
 datasets/tools, internal resources, people, and podcast episodes):
 
@@ -10,6 +10,7 @@ datasets/tools, internal resources, people, and podcast episodes):
   • search_trials        — clinical trials (ClinicalTrials.gov)
   • search_grants        — federal funding opportunities (Grants.gov)
   • search_tools         — open-source software tools/repos (GitHub)
+  • search_datasets      — gene-expression/functional-genomics DATASETS (NCBI GEO), not papers
   • search_lab_resources — internal lab-resource registry (read-only; never contact_info)
   • search_people        — researchers: public platform profiles + internal collaborators
   • search_wiki          — internal podcast-derived episode wiki pages
@@ -44,6 +45,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
+from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
 from tools.search_news import search_news_async
@@ -229,6 +231,35 @@ async def search_tools(query: str, limit: int = 20) -> list[dict]:
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_tools")
     items = await search_tools_async(query, limit)
+    return [item.model_dump() for item in items]
+
+
+@mcp.tool()
+async def search_datasets(query: str, limit: int = 20) -> list[dict]:
+    """Search NCBI GEO (Gene Expression Omnibus) for gene-expression and
+    functional-genomics DATASETS — NOT papers.
+
+    Returns up to `limit` GEO Series/DataSet records (kind="dataset",
+    source="geo") relevant to `query`: accession (GSEnnnnnn/GDSnnnn), title,
+    summary, organism, sample count, experiment type (as GEO itself labels
+    it — e.g. "Expression profiling by high throughput sequencing",
+    "Expression profiling by array", a ChIP-seq/binding-profiling label,
+    etc.), platform accession, submission date, the GEO record's own page
+    URL, and any PubMed IDs GEO has linked to it (in `raw.pubmed_ids`) — use
+    those to connect a dataset back to search_papers results. No ranking
+    signal (signal=null): GEO records don't cite each other, so there is no
+    citation graph to rank by. Sorted by NCBI's own relevance ranking.
+
+    Use this when the ask is for existing DATA to reuse/reanalyze (e.g. "is
+    there public RNA-seq data for X"), not when the ask is for literature —
+    call search_papers for that instead.
+
+    Args:
+        query: A disease/tissue/gene query, e.g. "glioblastoma" or "PHGDH glioblastoma".
+        limit: Max items to return (default 20, capped at 50).
+    """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_datasets")
+    items = await search_datasets_async(query, limit)
     return [item.model_dump() for item in items]
 
 

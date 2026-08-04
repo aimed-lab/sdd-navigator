@@ -15,10 +15,26 @@ const ACCENT: Record<string, string> = {
   tool: "border-t-blue-500",
   trial: "border-t-purple-500",
   grant: "border-t-amber-500",
+  dataset: "border-t-emerald-500",
   episode: "border-t-primary-container",
   resource: "border-t-teal-500",
   person: "border-t-secondary",
 };
+
+// GEO dataset fields (backend/explore-mcp/sources/geo.py) — all in `raw`,
+// there is no top-level Item field for any of them except date_iso/url.
+type GeoRaw = {
+  accession?: string;
+  organism?: string | null;
+  sample_count?: number | null;
+  experiment_type?: string | null;
+  platform?: string | null;
+};
+
+function geoFields(item: ExploreItem): GeoRaw | null {
+  if (item.kind !== "dataset") return null;
+  return (item.raw ?? {}) as GeoRaw;
+}
 
 function compact(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
@@ -68,11 +84,17 @@ function formatDate(iso: string | null): string | null {
 export default function ItemCard({ item }: { item: ExploreItem }) {
   const [saved, setSaved] = useState(false);
 
+  // GEO reports no ranking metric (see backend/explore-mcp/tools/search_datasets.py
+  // — it never calls WINNER, there is no citation graph between datasets), so
+  // signal is always null here and signalBadge() falls through to the plain date
+  // badge below automatically. No dataset-specific badge logic needed or wanted:
+  // a badge slot is exactly where a fabricated "ranked" label would be a lie.
   const badge = signalBadge(item);
   const date = badge ? null : formatDate(item.date_iso);
   const accent = ACCENT[item.kind] ?? "border-t-outline-variant";
   const imageUrl =
     item.kind === "episode" ? (item.raw?.image_url as string | undefined) : undefined;
+  const geo = geoFields(item);
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
@@ -135,11 +157,54 @@ export default function ItemCard({ item }: { item: ExploreItem }) {
         </div>
 
         <div className="mt-auto">
+          {/* Organism + sample count are what tells a researcher in one glance
+              whether this dataset is worth opening — PROMINENT (bold, badge-sized
+              text), not folded into the small-print summary line below. This is
+              deliberately doing the job a relevance filter would otherwise do
+              badly (see backend audit: GEO keyword search returns real but
+              sometimes only-incidentally-relevant hits). */}
+          {geo && (geo.organism || geo.sample_count != null) && (
+            <div className="flex items-center gap-2 flex-wrap mb-3">
+              {geo.organism && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 font-label-md text-label-md font-semibold">
+                  {geo.organism}
+                </span>
+              )}
+              {geo.sample_count != null && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 font-label-md text-label-md font-semibold">
+                  {geo.sample_count.toLocaleString()} sample{geo.sample_count === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+          )}
+
           <h3 className="font-headline-md text-lg leading-tight mb-2 text-on-background line-clamp-3">
             {item.title}
           </h3>
           {item.summary && (
             <p className="text-secondary text-body-sm font-body-sm line-clamp-2">{item.summary}</p>
+          )}
+
+          {/* Accession (explicit link, not just relying on the whole-card click),
+              experiment type and platform — secondary metadata, smaller print is
+              fine here since organism/sample-count above already carries the
+              at-a-glance decision. */}
+          {geo && (geo.accession || geo.experiment_type || geo.platform) && (
+            <div className="mt-2 flex items-center gap-x-2 gap-y-1 flex-wrap text-secondary text-body-sm font-body-sm">
+              {geo.accession && item.url && (
+                <a
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-primary hover:underline font-medium"
+                >
+                  {geo.accession}
+                </a>
+              )}
+              {geo.experiment_type && <span>{geo.experiment_type}</span>}
+              {geo.platform && <span>{geo.platform}</span>}
+            </div>
           )}
         </div>
       </div>

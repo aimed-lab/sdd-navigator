@@ -22,6 +22,7 @@ import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explo
 const SECTION_TITLE: Record<string, string> = {
   news: "Industry News",
   paper: "Latest Papers",
+  dataset: "Datasets",
   tool: "Trending Tools",
   trial: "Clinical Trials",
   grant: "Funding & Grants",
@@ -153,7 +154,7 @@ function ExploreFeed() {
       {/* Stat strip */}
       <div className="mb-6 py-3 border-y border-surface-variant/40 text-center">
         <p className="text-primary font-label-md text-label-md tracking-wide">
-          Live across 6+ sources · 64 podcast episodes · papers, news, tools, trials, grants, people
+          Live across 7+ sources · 64 podcast episodes · papers, datasets, news, tools, trials, grants, people
         </p>
       </div>
 

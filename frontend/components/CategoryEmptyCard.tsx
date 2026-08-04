@@ -4,8 +4,8 @@
 // selected category returns no results. Category-aware:
 //   • INTERNAL categories (person, resource) LEAD with a contribute CTA →
 //     Collaborate ("know one? Add it").
-//   • EXTERNAL categories (paper, tool, trial, grant, episode) LEAD with a broaden
-//     CTA → back to All ("try a broader term / browse the full feed").
+//   • EXTERNAL categories (paper, dataset, tool, trial, grant, episode) LEAD with a
+//     broaden CTA → back to All ("try a broader term / browse the full feed").
 // Both elements are always present; only the lead order changes with the type.
 
 import Link from "next/link";

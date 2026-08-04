@@ -34,6 +34,18 @@ Two different rules, because `raw` means two different things:
     dedupe). Everything else is dropped. All the fields a card actually shows —
     title, summary, url, doi, date_iso, signal — are top-level Item fields and
     are never touched by any of this.
+
+  * geo (sources/geo.py) is grouped with the INTERNAL rule, not the external
+    one, despite being a live third-party fetch: its `raw` (accession,
+    organism, sample_count, experiment_type, platform, pubmed_ids) is a
+    handful of first-party structured fields with nowhere else to live — none
+    of them are top-level Item fields, unlike papers' title/summary/url/doi.
+    OpenAlex's trim exists because its `raw` is a 150+-id citation blob the
+    UI never reads; GEO's `raw` is small and IS the payload, same as an
+    internal wiki/lab_resources row. Trimming it to prior_signal/sources
+    (both always absent for GEO — it carries no WINNER signal, see
+    tools/search_datasets.py) would silently discard every dataset-specific
+    field this fetcher exists to return.
 """
 
 from __future__ import annotations
@@ -41,7 +53,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 # Sources whose `raw` is first-party content the UI renders directly.
-_INTERNAL_SOURCES = {"internal"}
+_INTERNAL_SOURCES = {"internal", "geo"}
 
 # For external items, the ONLY raw keys the frontend reads.
 #   prior_signal -> components/ItemCard.tsx priorCitations()
