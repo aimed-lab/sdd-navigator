@@ -46,6 +46,13 @@ Two different rules, because `raw` means two different things:
     (both always absent for GEO — it carries no WINNER signal, see
     tools/search_datasets.py) would silently discard every dataset-specific
     field this fetcher exists to return.
+
+  * pager (sources/pager.py) is grouped the same way, same reasoning: its
+    `raw` (gs_id, type_code, type_label, source, size, ncoco_score) is a
+    handful of small first-party fields PAGER's own search endpoint returns
+    directly — nowhere else for them to live, and none of them are
+    top-level Item fields. There is no large citation-graph-style blob to
+    trim here either (unlike OpenAlex).
 """
 
 from __future__ import annotations
@@ -53,7 +60,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 # Sources whose `raw` is first-party content the UI renders directly.
-_INTERNAL_SOURCES = {"internal", "geo"}
+_INTERNAL_SOURCES = {"internal", "geo", "pager"}
 
 # For external items, the ONLY raw keys the frontend reads.
 #   prior_signal -> components/ItemCard.tsx priorCitations()

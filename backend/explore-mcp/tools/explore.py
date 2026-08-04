@@ -1,17 +1,17 @@
 """
-tools/explore.py — the orchestration tool (9-tool JSON routing).
+tools/explore.py — the orchestration tool (10-tool JSON routing).
 
 Takes a scientist's free-text message and, in order:
   1. extracts a structured SCOPE (topics/genes/diseases/assets/methods) via the
      LLM — empty fields are expected and left empty, never invented;
-  2. ROUTES to a subset of the 9 search tools via a JSON routing prompt (native
+  2. ROUTES to a subset of the 10 search tools via a JSON routing prompt (native
      function-calling was unreliable for parallel calls on Groq, so the LLM
      instead returns {"tools": [...], "reasoning": "..."} which we parse);
   3. builds each chosen tool's query from the RIGHT slice of scope — grants /
      trials / papers get the disease + topic; tools / resources get the method +
-     gene; datasets get disease + gene + topic(tissue) — NOT method; people get
-     disease + method; wiki gets the topic. The slices are NEVER swapped (a
-     grant search must not be run with a technique string, etc.);
+     gene; datasets and pager get disease + gene + topic(tissue) — NOT method;
+     people get disease + method; wiki gets the topic. The slices are NEVER
+     swapped (a grant search must not be run with a technique string, etc.);
   4. runs the chosen tools in parallel (failures isolated);
   5. returns {scope, tools_called, reasoning, sections:[{kind, items}]}.
 
@@ -45,6 +45,7 @@ from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
+from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
@@ -158,6 +159,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
     "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
+    "search_pager":         "GENE SETS and PATHWAYS a gene/disease belongs to (not papers, not datasets) — PAGER",
     "search_lab_resources": "INTERNAL lab registry — techniques, equipment, models, cell lines, reagents, software for collaboration",
     "search_people":        "researchers — public platform profiles + internal collaborators",
     "search_wiki":          "INTERNAL podcast-derived episode wiki pages",
@@ -171,15 +173,16 @@ _ROUTING_SYSTEM = (
     "  • Choose ONLY tools that fit the message. One tool or several is fine; do not "
     "call everything by default.\n"
     "  • A scientific target/topic/disease/gene (e.g. 'PHGDH in Alzheimer's', or even "
-    "just a bare gene symbol or disease name by itself) → papers, datasets, internal "
-    "resources, people, and the internal wiki. ALWAYS include datasets whenever the "
-    "scope has a disease and/or a gene, even if the message doesn't explicitly ask "
-    "for data — a named gene or disease is itself reason enough to check GEO for "
-    "existing datasets on it.\n"
+    "just a bare gene symbol or disease name by itself) → papers, datasets, pager, "
+    "internal resources, people, and the internal wiki. ALWAYS include BOTH datasets "
+    "AND pager whenever the scope has a disease and/or a gene, even if the message "
+    "doesn't explicitly ask for data or pathways — a named gene or disease is itself "
+    "reason enough to check GEO for existing datasets AND PAGER for the gene sets/ "
+    "pathways it belongs to.\n"
     "  • A message about DATA or a METHOD the user has (e.g. 'I have RNA-seq datasets') "
     "→ internal resources, software tools, and people who can help — not papers-first, "
-    "and not search_datasets either (that tool is about disease/tissue/gene targets, "
-    "not the user's own method).\n"
+    "and not search_datasets or search_pager either (both are about disease/tissue/gene "
+    "targets, not the user's own method).\n"
     "  • 'clinical trials for X' → trials (and papers).\n"
     "  • 'funding for X' / a grant/screen to fund → grants (and relevant tools).\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
@@ -205,6 +208,7 @@ def _heuristic_tools(scope: dict) -> list[str]:
         chosen.append("search_lab_resources")
     if scope["diseases"] or scope["genes"]:
         chosen.append("search_datasets")
+        chosen.append("search_pager")
     if scope["diseases"] or scope["methods"]:
         chosen.append("search_people")
     if topical:
@@ -270,6 +274,7 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_grants":        ("diseases", "topics"),
     "search_tools":         ("methods", "genes"),
     "search_datasets":      ("diseases", "genes", "topics"),  # disease + gene + tissue(topic) — NOT method
+    "search_pager":         ("diseases", "genes", "topics"),  # same slice as datasets — PAGER keyword-matches disease/gene/tissue text, not method text
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -294,6 +299,7 @@ _KINDS: dict[str, str] = {
     "search_grants": "grant",
     "search_tools": "tool",
     "search_datasets": "dataset",
+    "search_pager": "geneset",
     "search_lab_resources": "resource",
     "search_people": "person",
     "search_wiki": "episode",
@@ -341,6 +347,8 @@ def _dispatch(name: str, query: str):
         return search_tools_async(query, _NET_LIMIT)
     if name == "search_datasets":
         return search_datasets_async(query, _NET_LIMIT)
+    if name == "search_pager":
+        return search_pager_async(query, _NET_LIMIT)
     if name == "search_lab_resources":
         return asyncio.to_thread(search_lab_resources, query, None, _INTERNAL_LIMIT)
     if name == "search_people":

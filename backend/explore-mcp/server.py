@@ -1,9 +1,10 @@
 """
 server.py — Explore MCP server (streamable-HTTP transport).
 
-Exposes 10 tools to other agents over MCP (external agents such as Pleaser call
+Exposes 11 tools to other agents over MCP (external agents such as Pleaser call
 these directly to learn about papers, news, assays/trials, funding,
-datasets/tools, internal resources, people, and podcast episodes):
+datasets/tools, gene sets/pathways, internal resources, people, and podcast
+episodes):
 
   • search_papers        — live scientific literature (PubMed/OpenAlex/Crossref)
   • search_news          — recency-first industry news for the field (OpenAlex, newest first)
@@ -11,6 +12,7 @@ datasets/tools, internal resources, people, and podcast episodes):
   • search_grants        — federal funding opportunities (Grants.gov)
   • search_tools         — open-source software tools/repos (GitHub)
   • search_datasets      — gene-expression/functional-genomics DATASETS (NCBI GEO), not papers
+  • search_pager         — gene sets / pathways (PAGER), not papers, not datasets
   • search_lab_resources — internal lab-resource registry (read-only; never contact_info)
   • search_people        — researchers: public platform profiles + internal collaborators
   • search_wiki          — internal podcast-derived episode wiki pages
@@ -49,6 +51,7 @@ from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
 from tools.search_news import search_news_async
+from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_async
 from tools.search_people import search_people as _search_people
 from tools.search_tools import search_tools_async
@@ -260,6 +263,38 @@ async def search_datasets(query: str, limit: int = 20) -> list[dict]:
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_datasets")
     items = await search_datasets_async(query, limit)
+    return [item.model_dump() for item in items]
+
+
+@mcp.tool()
+async def search_pager(query: str, limit: int = 20) -> list[dict]:
+    """Search PAGER (Pathway, Annotated-list and Gene-signature Electronic
+    Repository) for GENE SETS AND PATHWAYS — NOT papers, NOT datasets.
+
+    Returns up to `limit` PAGs (kind="geneset", source="pager") relevant to
+    `query`: name, type (Pathway / Annotated list / Gene signature — the
+    label in `raw.type_label`), source database (Reactome, KEGG, GWAS
+    Catalog, DSigDB, I2D, ...), size (gene count), an nCoCo quality score
+    (`raw.ncoco_score`), and a link to the PAG's own page. Gene MEMBERS are
+    NOT included (a separate, per-PAG lookup — too expensive to fetch for
+    every result in a list). Ranked by nCoCo score then size, both
+    descending — PAGER itself returns results unsorted, so this tool fetches
+    the full set and ranks it before trimming to `limit`, not the other way
+    around. No ranking signal on the item itself (signal=null): gene sets
+    don't cite each other, so there is no citation graph for a WINNER-style
+    rank.
+
+    Use this for a gene, protein, or disease target when the ask is about
+    which PATHWAYS or curated GENE SETS it belongs to (e.g. "what pathways
+    involve PHGDH") — not for literature (search_papers) and not for raw
+    expression data (search_datasets).
+
+    Args:
+        query: A gene symbol or disease/keyword query, e.g. "PHGDH" or "glioblastoma".
+        limit: Max items to return (default 20, capped at 50).
+    """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_pager")
+    items = await search_pager_async(query, limit)
     return [item.model_dump() for item in items]
 
 
