@@ -17,6 +17,13 @@ const PILLARS = [
   { label: "Promote", href: "/promote" },
 ] as const;
 
+// "Projects" goes FIRST, before Explore, but only once we know the viewer is
+// signed in — a signed-out visitor has nothing to see at /projects (it
+// redirects straight to /login), so the logged-out nav must not change at
+// all. See callers below: both the desktop and mobile pillar lists build
+// off this, never off PILLARS directly, so the two can't drift apart.
+const PROJECTS_PILLAR = { label: "Projects", href: "/projects" } as const;
+
 // Unseen count for the inbox badge. Refetched on every navigation so that
 // opening /inbox (which marks things seen) is reflected when you leave it.
 //
@@ -77,6 +84,10 @@ export default function Nav() {
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
+  // Signed-out visitors see exactly the pillars they always have; Projects
+  // only appears once `user` is known to be signed in.
+  const pillars = user ? [PROJECTS_PILLAR, ...PILLARS] : PILLARS;
+
   return (
     <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-white/70 backdrop-blur-xl border-b border-surface-variant/50 shadow-sm">
       <div className="max-w-container-max mx-auto h-full flex justify-between items-center px-margin-mobile md:px-margin-desktop">
@@ -86,7 +97,7 @@ export default function Nav() {
             SmartDrugDiscovery
           </Link>
           <div className="hidden md:flex items-center gap-6">
-            {PILLARS.map((p) => (
+            {pillars.map((p) => (
               <Link
                 key={p.href}
                 href={p.href}
@@ -194,7 +205,7 @@ export default function Nav() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden bg-white/95 backdrop-blur-xl border-b border-surface-variant/50 px-margin-mobile py-4 flex flex-col gap-3">
-          {PILLARS.map((p) => (
+          {pillars.map((p) => (
             <Link
               key={p.href}
               href={p.href}

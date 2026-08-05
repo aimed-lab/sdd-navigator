@@ -351,7 +351,6 @@ export async function deleteAccount(confirmEmail: string): Promise<AuthOutcome> 
     ["researcher_works", "user_id"],
     ["saved_items", "user_id"],
     ["connection_requests", "user_id"],
-    ["projects", "user_id"],
     ["collab_posts", "owner_id"],
     ["promote_showcase", "owner_id"],
     ["lab_resources", "owner_id"],

@@ -37,6 +37,10 @@ frontend/app/funnel/
 
 # Design files
 design/
+!frontend/design/
+!frontend/design/projects/
+frontend/design/projects/*
+!frontend/design/projects/STRUCTURE.md
 
 # Planning documents
 docs/
