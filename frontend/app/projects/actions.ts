@@ -14,6 +14,7 @@ import {
   type Modality,
   type ProjectStage,
 } from "@/lib/projectTypes";
+import { COLABOFEST_DEADLINE } from "@/components/projects/ColabofestBanner";
 
 export type ActionResult = { ok: true; id: string } | { ok: false; error: string };
 
@@ -57,11 +58,20 @@ export async function createProjectAction(input: {
       ? COLABOFEST_CHALLENGE_KEY
       : null;
 
+  // ColaboFest's deadline is fixed (30 September 2026) and is not the
+  // team's choice — set it HERE, server-side, regardless of anything the
+  // client sent. The create form hides the field entirely for this entry
+  // point, but that's a courtesy: even a hand-crafted request claiming
+  // colabofest=true (or challenge=colabofest2026) with its own `deadline`
+  // gets overridden below, never passed through.
+  const isColabofest = challenge_key === COLABOFEST_CHALLENGE_KEY;
+  const deadline = isColabofest ? COLABOFEST_DEADLINE : input.deadline || null;
+
   try {
     const result = await createProject({
       name,
       description,
-      deadline: input.deadline || null,
+      deadline,
       challenge_key,
       target: input.target || null,
       indication: input.indication || null,

@@ -6,10 +6,18 @@
 // is a plain constant standing in for it — flip it to false (or wire it to a
 // real settings row) once the challenge closes or a second one needs
 // scheduling. Documented here rather than silently hardcoding the banner on.
-
+//
+// COLABOFEST_DEADLINE lives right next to it for the same reason: ONE named
+// constant, not a date scattered across the create form and the server
+// action. ColaboFest 2026 closes 30 September 2026 — this is not the
+// team's choice to make, so app/projects/actions.ts sets every ColaboFest
+// project's deadline to this value SERVER-SIDE and the create form never
+// asks for one. End-of-day UTC, not midnight, so the deadline reads as
+// "through September 30", not "up to the start of it".
 import Link from "next/link";
 
-const COLABOFEST_OPEN = true;
+export const COLABOFEST_OPEN = true;
+export const COLABOFEST_DEADLINE = "2026-09-30T23:59:59Z";
 
 export default function ColabofestBanner() {
   if (!COLABOFEST_OPEN) return null;
@@ -31,6 +39,17 @@ export default function ColabofestBanner() {
           className="w-full sm:w-auto btn-outline px-6 py-3 rounded-lg font-label-md text-label-md flex items-center justify-center"
         >
           Start your ColaboFest project
+        </Link>
+        {/* The landing page's #collabofest section (dates, proposal
+            outline, registration/info-session/announcement links, contact)
+            has no OTHER in-app entry point since the hero button there was
+            replaced with "Start project" — this is that entry point, per
+            the Stitch design's own spec for this banner. */}
+        <Link
+          href="/#collabofest"
+          className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors whitespace-nowrap"
+        >
+          Learn more
         </Link>
       </div>
     </section>

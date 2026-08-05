@@ -53,6 +53,14 @@ export type ProjectMember = {
   user_id: string | null;
   role: "lead" | "member";
   created_at: string;
+  // Resolved via project_member_names() (2026-08-07_project_member_names.sql),
+  // NOT a join on public.users — that table's own SELECT policy
+  // (`is_public = true`) would blank out a private-profile member instead of
+  // falling back to email. Both null for a pending (user_id-less) member,
+  // and profile_slug is null whenever the profile isn't public even if name
+  // resolved — same rule as CollabOwner/ShowcaseOwner.
+  name: string | null;
+  profile_slug: string | null;
 };
 
 // One project's proposal draft/submission. At most one per project — see
@@ -125,6 +133,8 @@ export type SubmitProposalResult =
   | { status: "error"; error: string };
 
 export type SignedUrlResult = { status: "ok"; url: string } | { status: "error"; error: string };
+
+export type DeleteProjectResult = { status: "ok" } | { status: "error"; error: string };
 
 // Internal only — lead_id and deadline read for a permission/deadline check,
 // never returned from an exported function. null covers BOTH "no such
@@ -242,7 +252,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   }
   if (!projectRow) return { status: "not_found" };
 
-  const [membersRes, proposalRes] = await Promise.all([
+  const [membersRes, proposalRes, namesRes] = await Promise.all([
     db
       .from("project_members")
       .select("id, email, user_id, role, created_at")
@@ -257,6 +267,11 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // Public identity for linked members — see project_member_names() in
+    // 2026-08-07_project_member_names.sql for why this can't be a plain
+    // join on public.users (its own SELECT policy blanks out a
+    // private-profile member instead of falling back to their email).
+    db.rpc("project_member_names", { project_ids: [id] }),
   ]);
 
   if (membersRes.error) {
@@ -266,6 +281,17 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   if (proposalRes.error) {
     console.error("getProject: project_proposals query failed", proposalRes.error);
     return { status: "error", error: "Couldn't load this project's proposal." };
+  }
+  // Degrades to an empty map on failure — same stance as collab.ts's
+  // ownerMap(): a names lookup failing should leave rows showing email,
+  // not blank the whole team list.
+  const names = new Map<string, { name: string | null; profile_slug: string | null }>();
+  if (!namesRes.error && Array.isArray(namesRes.data)) {
+    for (const row of namesRes.data as { user_id: string; name: string | null; profile_slug: string | null }[]) {
+      names.set(row.user_id, { name: row.name, profile_slug: row.profile_slug });
+    }
+  } else if (namesRes.error) {
+    console.error("getProject: project_member_names RPC failed", namesRes.error);
   }
 
   const row = projectRow as Record<string, unknown>;
@@ -284,13 +310,19 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       modality: (row.modality as string | null) ?? null,
       stage: (row.stage as string | null) ?? null,
       is_lead: row.lead_id === viewer.id,
-      members: ((membersRes.data ?? []) as Record<string, unknown>[]).map((m) => ({
-        id: m.id as string,
-        email: m.email as string,
-        user_id: (m.user_id as string | null) ?? null,
-        role: m.role as "lead" | "member",
-        created_at: m.created_at as string,
-      })),
+      members: ((membersRes.data ?? []) as Record<string, unknown>[]).map((m) => {
+        const userId = (m.user_id as string | null) ?? null;
+        const identity = userId ? names.get(userId) : undefined;
+        return {
+          id: m.id as string,
+          email: m.email as string,
+          user_id: userId,
+          role: m.role as "lead" | "member",
+          created_at: m.created_at as string,
+          name: identity?.name ?? null,
+          profile_slug: identity?.profile_slug ?? null,
+        };
+      }),
       proposal: proposalRow
         ? {
             id: proposalRow.id as string,
@@ -425,6 +457,11 @@ export async function addProjectMember(
       user_id: (data.user_id as string | null) ?? null,
       role: data.role as "lead" | "member",
       created_at: data.created_at as string,
+      // Always freshly inserted with no user_id (added by email only) — a
+      // brand-new row is pending by construction, so there is no identity
+      // to resolve yet. Not a call to project_member_names() needed here.
+      name: null,
+      profile_slug: null,
     },
   };
 }
@@ -700,4 +737,94 @@ export async function getProposalFileUrl(
   }
 
   return { status: "ok", url: data.signedUrl as string };
+}
+
+// ── delete ───────────────────────────────────────────────────────────────────
+
+/** Delete a project as its lead. Same pattern as
+ *  lib/server/collab.ts:deleteCollabPost and
+ *  lib/server/showcase.ts:deleteShowcaseEntry — session-derived user,
+ *  .eq() on id (plus lead_id as belt-and-suspenders, matching those two's
+ *  owner_id check), RLS ("Projects: lead delete", is_project_lead()) as the
+ *  real gate. A non-lead's call — even a member's — matches zero rows
+ *  silently, same as those two functions' own forged-caller case.
+ *
+ *  The database's ON DELETE CASCADE (2026-08-04_projects.sql) removes
+ *  project_members, checklist_items and the project_proposals row for
+ *  free. It does NOT remove a proposal FILE from storage — that's a
+ *  separate lifecycle (storage.objects), same gap deleteShowcaseEntry
+ *  handles for showcase-images.
+ *
+ *  STORAGE CLEANUP RUNS BEFORE THE ROW DELETE HERE — the opposite order
+ *  from deleteShowcaseEntry, and worth being explicit about why: this
+ *  bucket's RLS ("project_proposals_member_delete" on storage.objects,
+ *  2026-08-04_projects_storage.sql) gates the delete on
+ *  is_project_member(project_id, auth.uid()) — a DB lookup against
+ *  project_members. showcase-images' delete policy gates on the uid
+ *  embedded IN THE PATH ITSELF and needs no such lookup. Verified this the
+ *  hard way: deleting the project row first (matching showcase's order
+ *  literally) cascades away every project_members row for it, including
+ *  the lead's own — so by the time the storage delete ran, is_project_
+ *  member() was already false for the very caller who just deleted their
+ *  own project, and the storage delete silently no-op'd (no error, file
+ *  left behind). Cleaning up storage FIRST, while the caller is still a
+ *  real member of a project that still exists, is what makes it actually
+ *  succeed. The spirit of "log rather than throw, so a cleanup failure
+ *  can't block the delete" is preserved either way — only the ordering
+ *  changed, and only because this bucket's policy needed it to.
+ *
+ *  ONE MORE THING THAT ORDERING CHANGE OPENS UP: the storage delete policy
+ *  checks MEMBERSHIP, not LEADERSHIP — so doing it before the projects-row
+ *  delete (which is where leadership actually gets enforced, via
+ *  .eq("lead_id", user.id) + RLS) would let any non-lead MEMBER delete the
+ *  proposal file by calling this function, even though their attempt on
+ *  the project row itself would then fail. That's a real gap a member
+ *  shouldn't get just because storage now runs first — closed below with
+ *  an explicit lead check (loadProjectGate) BEFORE touching storage at
+ *  all, not left for the row delete to catch after the fact. */
+export async function deleteProject(projectId: string): Promise<DeleteProjectResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const gate = await loadProjectGate(db, projectId);
+  if (!gate) return { status: "error", error: "Couldn't delete the project." };
+  if (gate.leadId !== user.id) {
+    return { status: "error", error: "Couldn't delete the project." };
+  }
+
+  const { data: proposalRow } = await db
+    .from("project_proposals")
+    .select("file_path")
+    .eq("project_id", projectId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const filePath = (proposalRow?.file_path as string | null) ?? null;
+
+  if (filePath) {
+    const { error: storageError } = await db.storage.from(PROPOSALS_BUCKET).remove([filePath]);
+    if (storageError) {
+      console.error("deleteProject: proposal file cleanup failed", storageError, filePath);
+    }
+  }
+
+  const { data: deleted, error } = await db
+    .from("projects")
+    .delete()
+    .eq("id", projectId)
+    .eq("lead_id", user.id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.error("deleteProject: delete failed", error);
+    return { status: "error", error: "Couldn't delete the project." };
+  }
+  if (!deleted) {
+    // RLS silently matched zero rows — not the lead, or the project
+    // doesn't exist. Same non-distinction as GetProjectResult's
+    // "not_found": telling the two apart isn't this function's call to make.
+    return { status: "error", error: "Couldn't delete the project." };
+  }
+
+  return { status: "ok" };
 }

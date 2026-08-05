@@ -206,18 +206,26 @@ export default function CreateProjectForm({ colabofest }: { colabofest: boolean 
           />
         </div>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="deadline" className="font-label-md text-label-md text-on-surface-variant flex items-center gap-2">
-            Deadline <span className="font-body-sm text-body-sm text-secondary">(optional)</span>
-          </label>
-          <input
-            id="deadline"
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            className={inputClass}
-          />
-        </div>
+        {/* ColaboFest's deadline is fixed (30 September 2026, see
+            COLABOFEST_DEADLINE in components/projects/ColabofestBanner.tsx)
+            and set server-side in createProjectAction — not this team's
+            choice, so this entry point doesn't even ask. Hiding the field
+            is a courtesy, not the enforcement: the server action ignores
+            any deadline this form could still be made to send. */}
+        {!colabofest && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor="deadline" className="font-label-md text-label-md text-on-surface-variant flex items-center gap-2">
+              Deadline <span className="font-body-sm text-body-sm text-secondary">(optional)</span>
+            </label>
+            <input
+              id="deadline"
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              className={inputClass}
+            />
+          </div>
+        )}
 
         {/* "Entering a challenge?" — only on the plain "New project" entry
             point. The ColaboFest-banner entry point already implies

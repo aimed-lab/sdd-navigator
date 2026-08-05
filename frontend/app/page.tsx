@@ -4,12 +4,23 @@
 // .btn-outline component classes from globals.css. Nav + Footer come from the
 // root layout, which also owns the pt-16 offset for the fixed nav.
 //
-// Server component on purpose: the only interaction is the "Learn about
-// Collabofest" anchor, which relies on `scroll-behavior: smooth` in globals.css.
+// Still a SERVER component — the one bit of per-viewer branching (the hero's
+// second button target) is a plain session read via getCurrentUser(), not
+// client state, so this stays server-rendered rather than becoming
+// "use client" for one link.
+//
+// NOTE: the hero's second button used to be "Learn about Collabofest", a
+// same-page `#collabofest` anchor (relies on `scroll-behavior: smooth` in
+// globals.css) into the section below. It's now "Start project" instead.
+// The section briefly had NO in-app entry point after that swap — fixed by
+// wiring the ColaboFest banner's "Learn more" link
+// (components/projects/ColabofestBanner.tsx) to `/#collabofest`, per the
+// Stitch design's own spec for that banner. Confirmed via grep.
 
 import Image from "next/image";
 import Link from "next/link";
 import { Fragment } from "react";
+import { getCurrentUser } from "@/lib/auth";
 import CollabofestFeedbackForm from "@/components/feedback/CollabofestFeedbackForm";
 // Static import so Next derives the intrinsic size (1103x1426 portrait) itself.
 import collabofestGraphic from "../public/colabofest-2026.avif";
@@ -65,7 +76,12 @@ const HOW_IT_WORKS = [
   "Promote your work",
 ] as const;
 
-export default function Home() {
+export default async function Home() {
+  const user = await getCurrentUser();
+  const startProjectHref = user
+    ? "/projects/new?colabofest=1"
+    : `/login?callbackUrl=${encodeURIComponent("/projects/new?colabofest=1")}`;
+
   return (
     <>
       {/* Hero */}
@@ -86,12 +102,12 @@ export default function Home() {
             >
               Start Exploring
             </Link>
-            <a
-              href="#collabofest"
+            <Link
+              href={startProjectHref}
               className="btn-outline px-8 py-4 rounded-lg font-label-md text-lg w-full md:w-auto text-center bg-white/50"
             >
-              Learn about Collabofest
-            </a>
+              Start project
+            </Link>
           </div>
         </div>
       </section>

@@ -15,6 +15,7 @@ import { getProject, getProposalFileUrl } from "@/lib/server/projects";
 import { MODALITY_LABEL, PROJECT_STAGE_LABEL, type Modality, type ProjectStage } from "@/lib/projectTypes";
 import TeamSection from "@/components/projects/TeamSection";
 import ProposalSection from "@/components/projects/ProposalSection";
+import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -89,6 +90,14 @@ export default async function ProjectDetailPage({
               </p>
             )}
           </div>
+          {project.is_lead && (
+            <DeleteProjectButton
+              projectId={project.id}
+              projectName={project.name}
+              memberCount={project.members.length}
+              proposalSubmitted={!!project.proposal?.submitted_at}
+            />
+          )}
         </div>
 
         {/* Status strip — members only for now (step 2a). Resources and

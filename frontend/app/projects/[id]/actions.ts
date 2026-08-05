@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
 import {
   addProjectMember,
+  deleteProject,
   removeProjectMember,
   submitProposal,
   upsertProposal,
@@ -94,5 +95,23 @@ export async function submitProposalAction(projectId: string): Promise<ActionRes
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to submit the proposal." };
     console.error("submitProposalAction failed", e);
     return { ok: false, error: "Couldn't submit the proposal. Please try again." };
+  }
+}
+
+/** Delete the project. Confirmation (naming what's destroyed) lives in the
+ *  UI — lib/server/projects.ts's deleteProject() is what actually gates
+ *  this to the lead, via RLS ("Projects: lead delete"), not this action. */
+export async function deleteProjectAction(projectId: string): Promise<ActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+
+  try {
+    const result = await deleteProject(projectId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath("/projects");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to delete this project." };
+    console.error("deleteProjectAction failed", e);
+    return { ok: false, error: "Couldn't delete the project. Please try again." };
   }
 }

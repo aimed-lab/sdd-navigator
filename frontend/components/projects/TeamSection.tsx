@@ -6,14 +6,21 @@
 // is_project_lead-equivalent logic server-side on every call, and RLS backs
 // that up in Postgres regardless of what this component renders.
 //
-// NAME GAP, flagged rather than silently patched: project_members only
-// carries `email`, never a display name. Resolving user_id -> a public name
-// would need a SECURITY DEFINER function like collab_post_owners() (public.
-// users' own SELECT policy is `is_public = true`, so a plain join blanks
-// out a private-profile member here exactly like it would on the
-// Collaborate board) — that's a new migration this task didn't ask for, so
-// every member row renders by EMAIL only for now, linked or pending.
+// DISPLAY NAME: resolved server-side via project_member_names()
+// (database/migrations/2026-08-07_project_member_names.sql), NOT a plain
+// join on public.users — that table's own SELECT policy blanks out a
+// private-profile member instead of falling back to email. Three cases per
+// row, matching that function's own privacy rule:
+//   - no user_id yet (pending invite)         -> email + "Pending" pill
+//   - linked, name resolved                   -> name, linked to their
+//                                                 profile when profile_slug
+//                                                 is set (same as PostCard),
+//                                                 email shown as a second,
+//                                                 muted line
+//   - linked, no name resolved (shouldn't
+//     really happen, but defensive)           -> email only
 
+import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { addMemberAction, removeMemberAction } from "@/app/projects/[id]/actions";
@@ -158,6 +165,14 @@ export default function TeamSection({
       <div className="flex flex-col gap-2 max-w-3xl">
         {members.map((m) => {
           const pending = !m.user_id;
+          // Primary line: name when resolved, email otherwise (pending, or
+          // the defensive "linked but no name came back" case).
+          const primary = !pending && m.name ? m.name : m.email;
+          // Secondary muted line: only when the primary line is a NAME —
+          // showing the email again under itself (pending) or repeating it
+          // with nothing new to add (no name resolved) would be noise.
+          const showEmailBelow = !pending && !!m.name;
+
           return (
             <div
               key={m.id}
@@ -167,7 +182,16 @@ export default function TeamSection({
                 <MemberAvatar pending={pending} />
                 <div className="min-w-0">
                   <div className="font-label-md text-label-md text-on-background flex items-center gap-3 truncate">
-                    <span className="truncate">{m.email}</span>
+                    {!pending && m.name && m.profile_slug ? (
+                      <Link
+                        href={`/researchers/${m.profile_slug}`}
+                        className="truncate hover:text-primary hover:underline underline-offset-4"
+                      >
+                        {primary}
+                      </Link>
+                    ) : (
+                      <span className="truncate">{primary}</span>
+                    )}
                     {m.role === "lead" && (
                       <span className="shrink-0 bg-primary/10 text-primary px-2 py-0.5 rounded-full font-label-sm text-[10px] uppercase tracking-wider">
                         Lead
@@ -179,6 +203,11 @@ export default function TeamSection({
                       </span>
                     )}
                   </div>
+                  {showEmailBelow && (
+                    <div className="font-body-sm text-body-sm text-secondary truncate">
+                      {m.email}
+                    </div>
+                  )}
                   {pending && (
                     <div className="font-body-sm text-body-sm text-secondary">
                       Awaiting invitation acceptance

@@ -22,10 +22,25 @@ export const metadata = { title: "Create a project · SmartDrugDiscovery" };
 export default async function NewProjectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ colabofest?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await getCurrentUser();
-  if (!user) redirect("/login?callbackUrl=%2Fprojects%2Fnew");
+
+  if (!user) {
+    // Built from the ACTUAL incoming search params, not hardcoded to plain
+    // "/projects/new" — a signed-out visitor hitting
+    // /projects/new?colabofest=1 previously lost that query string here and
+    // landed back on the plain form after logging in, not the ColaboFest
+    // one they actually asked for.
+    const params = await searchParams;
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (typeof value === "string") qs.set(key, value);
+      else if (Array.isArray(value) && value.length > 0) qs.set(key, value[0]);
+    }
+    const target = qs.toString() ? `/projects/new?${qs.toString()}` : "/projects/new";
+    redirect(`/login?callbackUrl=${encodeURIComponent(target)}`);
+  }
 
   const { colabofest } = await searchParams;
 
