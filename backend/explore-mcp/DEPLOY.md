@@ -4,6 +4,10 @@ This is written for someone standing this service up for the first time,
 with no prior context on this project. If something here is unclear or
 wrong, that's a bug in this document — fix it or ask.
 
+**Questions or something looks wrong:** ask Karthik (this repo's
+maintainer — GitHub: `Karthikeya2302`) or open an issue on the repo
+(https://github.com/aimed-lab/sdd-navigator).
+
 ## 1. What this is
 
 `explore-mcp` is the search backend behind smartdrugdiscovery.org — it's
@@ -24,12 +28,39 @@ to go wrong in a first deployment. Confirm public HTTPS reachability before
 moving on to anything else in this document.
 
 One detail that trips people up: **the container itself only speaks plain
-HTTP** on its own port (see §9) — it does not terminate TLS. Something in
-front of it (a reverse proxy, load balancer, or ingress — whatever UAB
-normally uses for public-facing services) has to provide the HTTPS
-endpoint and forward to this container's HTTP port. This document doesn't
-prescribe which — use whatever's standard at UAB — but that piece has to
-exist and has to be internet-facing, not just campus-facing.
+HTTP** on its own port (see §10, "Verifying it's working") — it does not
+terminate TLS. Something in front of it (a reverse proxy, load balancer, or
+ingress — whatever UAB normally uses for public-facing services) has to
+provide the HTTPS endpoint and forward to this container's HTTP port. This
+document doesn't prescribe which — use whatever's standard at UAB — but
+that piece has to exist and has to be internet-facing, not just
+campus-facing.
+
+Also: **don't firewall this endpoint to a single source IP or IP range**
+(e.g. "just allow Vercel's IPs"). Vercel is the main caller, but it is not
+the only one — other internal tools and agents at the lab call this same
+service directly too, over the same HTTP API. It needs to be generally
+reachable, not allowlisted to one specific caller.
+
+**Verify the container locally before spending any time on DNS, TLS, or a
+proxy.** Once it's running (§4 below), from the *same host* running the
+container:
+
+```bash
+curl http://localhost:8000/health
+```
+
+Expect immediately:
+
+```json
+{"service":"explore-mcp","status":"ok","transport":"streamable-http"}
+```
+
+If that doesn't work, nothing downstream — DNS, TLS, the proxy — will
+either, so this is the cheapest possible first check. Only once it passes
+locally is it worth investing time in making the HTTPS-facing piece
+described above actually reachable from the public internet (and then
+re-verifying externally, per §10).
 
 ## 3. Host requirements
 
@@ -39,7 +70,7 @@ exist and has to be internet-facing, not just campus-facing.
 - **Stateless — no persistent volume needed.** Nothing this service writes
   needs to survive a restart. All state (an in-memory search-result cache)
   is disposable and rebuilds itself from live upstream sources.
-- Outbound internet access (see §6) and, per §2, inbound HTTPS reachability
+- Outbound internet access (see §7) and, per §2, inbound HTTPS reachability
   from the public internet.
 
 ## 4. PRIMARY: run the prebuilt image
@@ -47,7 +78,8 @@ exist and has to be internet-facing, not just campus-facing.
 This is the tested path — the exact image referenced below has been built,
 run, and verified end to end (health checks, a real search, TLS to every
 upstream, log output, graceful shutdown). Prefer this over building from
-source.
+source. You do **not** need to clone the repo for this path — everything
+below is self-contained.
 
 ```bash
 # 1. Log in to ghcr.io. Use --password-stdin — the interactive password
@@ -59,31 +91,84 @@ echo "<your-github-token>" | docker login ghcr.io -u <your-github-username> --pa
 #    which can move — the digest can't).
 docker pull ghcr.io/aimed-lab/explore-mcp@sha256:5acf4b3cae4c89911033f81233e09d9eac53457a11ead66f2bac95028e3ae9eb
 
-# 3. Create your env file (see §5 for what goes in it).
-cp .env.example .env
-# ... edit .env with real values ...
+# 3. Create your env file — every variable this service reads, with empty
+#    values. See the "Environment variables" table at the end of this
+#    document for what each one does and which are required; fill those in
+#    below before running the container.
+cat > .env <<'EOF'
+GROQ_API_KEY=
+SUPABASE_URL=
+SUPABASE_KEY=
+LLM_PROVIDER=
+LLM_MODEL=
+LLM_API_KEY=
+NCBI_API_KEY=
+OPENALEX_EMAIL=
+GITHUB_TOKEN=
+PREWARM_ENABLED=
+PREWARM_INTERVAL_SEC=
+PREWARM_TIMEOUT_SEC=
+MCP_HOST=
+MCP_PORT=
+LOG_LEVEL=
+EOF
+# ... now edit .env and fill in real values ...
 
 # 4. Run it.
 docker run -d \
   --name explore-mcp \
   --restart unless-stopped \
+  --memory=2g \
   -p 8000:8000 \
   --env-file .env \
   ghcr.io/aimed-lab/explore-mcp@sha256:5acf4b3cae4c89911033f81233e09d9eac53457a11ead66f2bac95028e3ae9eb
 ```
 
+`--memory=2g` matters: this service's cache has no eviction (see §8) —
+bounding the container's memory means a pathological cache growth is a
+contained, restartable failure instead of something that can take down the
+whole host.
+
 That's it — no volumes, no separate database, no init step. Point your
 reverse proxy / load balancer (§2) at port 8000 on this container and you're
 running.
 
-## 5. FALLBACK: build from source
+## 5. Updating to a new version
+
+```bash
+# 1. Pull the new image, by its new digest (get this from whoever verified
+#    the new build — see the contact line at the top of this document).
+docker pull ghcr.io/aimed-lab/explore-mcp@sha256:<new-digest>
+
+# 2. Stop and remove the old container.
+docker stop explore-mcp
+docker rm explore-mcp
+
+# 3. Run the new one — same command as §4, step 4, with the new digest.
+docker run -d \
+  --name explore-mcp \
+  --restart unless-stopped \
+  --memory=2g \
+  -p 8000:8000 \
+  --env-file .env \
+  ghcr.io/aimed-lab/explore-mcp@sha256:<new-digest>
+```
+
+**Get a new digest each time — don't just re-pull `:latest` and assume it's
+fine.** `:latest` is a moving tag; the whole point of pinning by digest
+throughout this document is that the digest you're running is the exact
+one that was actually verified end to end (§4). Re-pulling `:latest` blind
+means running whatever happens to be newest, untested by you. Ask whoever
+built the new image for its digest, the same way you got the one in §4.
+
+## 6. FALLBACK: build from source
 
 Only do this if you specifically need to build (e.g. you're changing code).
 Otherwise use §4.
 
 ```bash
-git clone <this repo>
-cd backend/explore-mcp
+git clone https://github.com/aimed-lab/sdd-navigator.git
+cd sdd-navigator/backend/explore-mcp
 docker build -t explore-mcp .
 ```
 
@@ -106,7 +191,7 @@ around it** — don't add flags or change the Dockerfile to make an error go
 away; the failure itself is useful information. The prebuilt image in §4
 has no such caveat — it's the one that's actually been fully verified.
 
-## 6. Outbound network access this service needs
+## 7. Outbound network access this service needs
 
 The container makes outbound HTTPS calls to these hosts. All must be
 reachable from wherever the container runs:
@@ -126,9 +211,11 @@ is whether one of these hosts is blocked.** This service is built to
 degrade gracefully — one upstream failing never crashes a request, it just
 quietly produces fewer results for that one category — which is exactly
 why a blocked host doesn't look like a loud failure. It looks like
-"search works, but this one section is always empty."
+"search works, but this one section is always empty." See §11
+(Troubleshooting) for how to find out *which* host, directly from the logs,
+rather than testing each one by hand.
 
-## 7. Running instance shape: one container, one process, no replicas
+## 8. Running instance shape: one container, one process, no replicas
 
 Run exactly **one** instance of this container, and do not scale it
 horizontally (no multiple replicas behind a load balancer, no
@@ -148,7 +235,7 @@ PAGER) that already rate-limit. If this service ever needs to scale beyond
 one instance, the cache needs to move to something shared (Redis or
 similar) first — that's a real code change, not a deployment setting.
 
-## 8. Health checks
+## 9. Health checks
 
 Two different endpoints, two different meanings — point the right kind of
 probe at each:
@@ -166,10 +253,15 @@ probe at each:
 **Do not point a liveness/restart probe at `/ready`.** Every normal cold
 start is briefly `503` on `/ready` — a liveness probe checking that path
 will see the container as unhealthy and restart it, which just restarts it
-again into the same brief `503` window, forever. See §11 for what this
-looks like when it happens.
+again into the same brief `503` window, forever. See §11 (Troubleshooting)
+for what this looks like when it happens.
 
-## 9. Verifying it's working
+## 10. Verifying it's working
+
+This checks the full public path — DNS, TLS, and the proxy in front of the
+container, on top of the container itself. If you haven't already done the
+local-only check in §2 (`curl http://localhost:8000/health` on the host),
+do that first — it isolates the container from everything in front of it.
 
 Once the container is running and (per §2) reachable over HTTPS:
 
@@ -193,22 +285,38 @@ curl -s -X POST https://<your-domain>/api/explore \
 
 A healthy response is a JSON object with a `"sections"` array, where at
 least the `"paper"`-kind section has non-empty `"items"`. If you have the
-optional keys in §5/§6 configured, you should also see non-empty
+optional keys in §6/§7 configured, you should also see non-empty
 `"dataset"` and `"geneset"` sections. An empty `"sections"` array, or every
 section's `"items"` empty, with no `"error"` field set anywhere — go to
-§11.
+§11 (Troubleshooting).
 
-## 10. Troubleshooting
+## 11. Troubleshooting
+
+**Start here for anything unexpected: `docker logs explore-mcp`.**
+This service logs every upstream failure — a rate limit or any non-2xx
+response — with the exact host name, so the logs answer "which upstream is
+blocked" directly, instead of you having to test each host in §7 by hand.
+A blocked or rate-limited upstream shows up as a line like this:
+
+```
+2026-08-04 21:39:39,270 WARNING sources.base: upstream 429 (rate limited): https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi
+2026-08-04 21:39:39,270 WARNING sources.base: upstream non-2xx (status=403): https://api.github.com/search/repositories
+```
+
+Whatever host name appears there is the one to check connectivity to —
+that's the whole point of checking logs first instead of testing every
+host in §7 individually.
 
 **Search results are empty, but nothing looks like an error.**
-One (or more) of the outbound hosts in §6 is blocked or unreachable. This
+One (or more) of the outbound hosts in §7 is blocked or unreachable. This
 service isolates failures per-upstream on purpose, so a blocked host
-produces quiet, empty results instead of a loud crash. Check outbound
-connectivity to each host in §6 individually.
+produces quiet, empty results instead of a loud crash. Check
+`docker logs explore-mcp` first (above) — it names the blocked host
+directly.
 
 **Container keeps restarting in a loop.**
 Almost always: the liveness/restart probe is pointed at `/ready` instead
-of `/health` (§8). `/ready` is briefly `503` on every normal startup —
+of `/health` (§9). `/ready` is briefly `503` on every normal startup —
 if your restart policy treats that as a failed health check, it restarts
 the container right back into the same brief window, repeatedly. Point
 liveness at `/health`.
@@ -216,10 +324,10 @@ liveness at `/health`.
 **Everything works — papers, datasets, trials, grants — except gene
 sets/pathways from PAGER are always empty.**
 This is very likely `discovery.informatics.uab.edu`'s TLS certificate
-chain issue — see §11 below. This service ships a workaround for it, so
+chain issue — see §12 below. This service ships a workaround for it, so
 if it's still failing, either the workaround itself broke somehow, or
 outbound access to `discovery.informatics.uab.edu` is blocked separately
-from every other host in §6 (check that specifically — it's a different
+from every other host in §7 (check that specifically — it's a different
 host than the well-known public APIs, and some network policies allowlist
 by destination).
 
@@ -228,9 +336,9 @@ from GitHub).**
 The build host doesn't have outbound access to `github.com`. This is a
 separate dependency to `pypi.org` — one of this project's ranking
 components is only distributed via GitHub, not a package index, so the
-build always needs GitHub reachability regardless of `PIP_SOURCE` (§5).
+build always needs GitHub reachability regardless of `PIP_SOURCE` (§6).
 
-## 11. For UAB IT: a TLS issue on discovery.informatics.uab.edu
+## 12. For UAB IT: a TLS issue on discovery.informatics.uab.edu
 
 `discovery.informatics.uab.edu` (used for PAGER gene-set/pathway search)
 sends an incomplete certificate chain in its TLS handshake — it presents
@@ -259,9 +367,10 @@ way — it doesn't change behavior once the real fix lands).
 ## Environment variables
 
 Every variable this service reads, by name. See `.env.example` for a
-ready-to-fill template. **No values are given here or anywhere in this
-document** — get real values from whoever manages this project's
-credentials, never invent or reuse a value from another project.
+ready-to-fill template (also inlined directly in §4, step 3, so you don't
+need to clone the repo just to get it). **No values are given here or
+anywhere in this document** — get real values from whoever manages this
+project's credentials, never invent or reuse a value from another project.
 
 | Variable | Required? | What it's for |
 |---|---|---|
