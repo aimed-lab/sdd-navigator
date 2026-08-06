@@ -7,6 +7,14 @@
 // Only rendered for a signed-in user — app/collaborate/new/page.tsx shows the
 // sign-in gate instead when signed out. createPostAction re-checks server-side
 // regardless, so the gate is UX, not the enforcement.
+//
+// THE CHECKLIST BRIDGE: a project's "Ask for help" link routes here with
+// query params (read by app/collaborate/new/page.tsx and passed down as the
+// props below) — the checklist item's label seeds "needs", the project's
+// name/description seed title/description, and checklistItemId rides along
+// to createPostAction so the new post's checklist_item_id links back to the
+// item. `returnTo` is where Cancel and a successful submit both go — the
+// project page when this came from there, /collaborate otherwise.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -117,13 +125,29 @@ function PillInput({
   );
 }
 
-export default function CreatePostForm() {
+export default function CreatePostForm({
+  initialTitle = "",
+  initialDescription = "",
+  initialNeed,
+  checklistItemId,
+  returnTo = "/collaborate",
+}: {
+  initialTitle?: string;
+  initialDescription?: string;
+  /** Seeds the "needs" pill group with one entry — the checklist item's
+   *  own label. Not the same shape as `initialTitle`/`-Description`
+   *  (those are plain strings) because "needs" is itself a list; this is
+   *  just the one value it starts with. */
+  initialNeed?: string;
+  checklistItemId?: string;
+  returnTo?: string;
+} = {}) {
   const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
+  const [title, setTitle] = useState(initialTitle);
+  const [description, setDescription] = useState(initialDescription);
   const [areas, setAreas] = useState<string[]>([]);
   const [haves, setHaves] = useState<string[]>([]);
-  const [needs, setNeeds] = useState<string[]>([]);
+  const [needs, setNeeds] = useState<string[]>(initialNeed?.trim() ? [initialNeed.trim()] : []);
   const [stage, setStage] = useState<Stage>("concept");
   const [fundingStatus, setFundingStatus] = useState<FundingStatus | typeof UNSPECIFIED>(
     UNSPECIFIED
@@ -149,10 +173,11 @@ export default function CreatePostForm() {
       needs,
       stage,
       funding_status: fundingStatus === UNSPECIFIED ? null : fundingStatus,
+      checklist_item_id: checklistItemId ?? null,
     });
 
     if (res.ok) {
-      router.push("/collaborate");
+      router.push(returnTo);
       router.refresh();
     } else {
       setError(res.error);
@@ -279,7 +304,7 @@ export default function CreatePostForm() {
 
       <div className="flex items-center justify-end gap-3">
         <Link
-          href="/collaborate"
+          href={returnTo}
           className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
         >
           Cancel

@@ -4,9 +4,21 @@
 // as the Explore feed, but scoped to a query: it POSTs { input: topic } to the
 // explore backend and renders the routed sections. Selecting a category filters
 // to that section; an empty selected category shows the A+D invitation card.
+//
+// PROJECT CONTEXT: arriving with ?project_id=&project_name= (from a
+// project's "Explore for this project" button — see
+// lib/projectTypes.ts:buildProjectExploreHref) puts a visible "Saving to
+// <project>" banner up top and passes projectId down to every <ItemCard>,
+// so its bookmark button saves INTO that project instead of being a bare
+// local toggle. Re-searching from this page carries the same project
+// context forward (see `submit` below) — losing it after one search would
+// silently revert to local-toggle saving with no warning, which is worse
+// than not having the integration at all. WITHOUT these params, this page
+// behaves exactly as it always has: no banner, no project-aware saving,
+// ItemCard's default (local-toggle) behavior untouched.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
@@ -39,12 +51,22 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-export default function SearchResultsPage() {
+function SearchResults() {
   const router = useRouter();
   const params = useParams<{ topic: string }>();
+  const searchParams = useSearchParams();
   const topic = decodeURIComponent(
     Array.isArray(params.topic) ? params.topic[0] : params.topic ?? ""
   );
+
+  const projectId = searchParams.get("project_id") || undefined;
+  const projectName = searchParams.get("project_name") || undefined;
+  // Carried forward on re-search (see `submit`) so project context
+  // survives editing the query, not just the first arrival.
+  const projectQs =
+    projectId && projectName
+      ? `?${new URLSearchParams({ project_id: projectId, project_name: projectName }).toString()}`
+      : "";
 
   const [query, setQuery] = useState(topic); // search bar value (pre-filled)
   const [data, setData] = useState<ExploreResponse | null>(null);
@@ -127,11 +149,22 @@ export default function SearchResultsPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}`);
+    if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}${projectQs}`);
   };
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
+      {/* Saving-to-project indicator — a save from this page must never go
+          somewhere the visitor didn't expect, so this is not subtle. */}
+      {projectId && projectName && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary font-label-md text-label-md">
+            <span className="material-symbols-outlined text-[18px]">bookmark_added</span>
+            Saving to <strong>{projectName}</strong>
+          </div>
+        </div>
+      )}
+
       {/* Search (pre-filled, editable) */}
       <section className="max-w-3xl mx-auto mb-6">
         <form onSubmit={submit} className="relative">
@@ -259,7 +292,7 @@ export default function SearchResultsPage() {
                 <SectionHeader title={titleFor(section.kind)} />
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} />
+                    <ItemCard key={item.id} item={item} projectId={projectId} />
                   ))}
                 </div>
               </section>
@@ -270,7 +303,7 @@ export default function SearchResultsPage() {
                 <SectionHeader title="Also Found" />
                 <div className={GRID}>
                   {pooledItems.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} />
+                    <ItemCard key={item.id} item={item} projectId={projectId} />
                   ))}
                 </div>
               </section>
@@ -279,5 +312,25 @@ export default function SearchResultsPage() {
         );
       })()}
     </div>
+  );
+}
+
+// useSearchParams() must sit inside a Suspense boundary (see CLAUDE.md /
+// app/explore/page.tsx's own version of this same wrapper).
+export default function SearchResultsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
+          <div className={GRID}>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+        </div>
+      }
+    >
+      <SearchResults />
+    </Suspense>
   );
 }

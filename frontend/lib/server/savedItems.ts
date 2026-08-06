@@ -20,6 +20,12 @@ export async function listSavedItems(): Promise<SavedItem[]> {
     .from("saved_items")
     .select("item_id, item_data")
     .eq("user_id", user.id)
+    // A project save still carries this same user_id (you always save as
+    // yourself, project-scoped or not — see 2026-08-09_saved_items_projects.sql).
+    // Without this filter, a project save would ALSO show up in this
+    // person's own personal bookmarks, which is wrong: it belongs to the
+    // team's Resources section, not their private list.
+    .is("project_id", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as SavedItem[];

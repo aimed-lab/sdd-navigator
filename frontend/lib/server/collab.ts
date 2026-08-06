@@ -101,6 +101,17 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
       ? (b.funding_status as FundingStatus)
       : null;
 
+  // A plain string, opaque to this layer — not validated as "belongs to a
+  // project this caller is a member of" here. That's fine: the only thing
+  // it grants is a FK link on the CALLER'S OWN post, and checklist_items'
+  // own RLS still gates who can ever read/write the item itself. Forging
+  // an arbitrary id here just gives your own post a dangling/irrelevant
+  // link, nothing more.
+  const checklist_item_id =
+    typeof b.checklist_item_id === "string" && b.checklist_item_id.trim()
+      ? b.checklist_item_id.trim()
+      : null;
+
   return {
     title: title.slice(0, 200),
     description: typeof b.description === "string" ? b.description.trim().slice(0, 4000) : "",
@@ -109,6 +120,7 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
     needs: asStringArray(b.needs),
     stage,
     funding_status,
+    checklist_item_id,
   };
 }
 
@@ -250,6 +262,7 @@ export async function createCollabPost(input: CreateCollabPostInput): Promise<st
       needs: input.needs ?? [],
       stage: input.stage ?? "concept",
       funding_status: input.funding_status ?? null,
+      checklist_item_id: input.checklist_item_id ?? null,
     })
     .select("id")
     .single();

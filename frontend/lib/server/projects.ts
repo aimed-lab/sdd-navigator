@@ -81,6 +81,35 @@ export type ProjectProposal = {
   updated_at: string;
 };
 
+export type ChecklistStatus = "not_yet" | "in_progress" | "ready";
+
+export type ChecklistItem = {
+  id: string;
+  label: string;
+  status: ChecklistStatus;
+  position: number;
+  updated_at: string;
+  // The Collaborate bridge: null until someone has hit "Ask for help" on
+  // this item. Once set, the row shows "Posted to Collaborate · N
+  // responses" instead of (in addition to) the "Ask for help" link — see
+  // STRUCTURE.md's Checklist section. Resolved via a plain query on
+  // collab_posts.checklist_item_id, count via the existing
+  // collab_post_interest_counts() RPC (lib/server/collab.ts already uses
+  // it for the board; this is the same function, not a new one).
+  collab_post_id: string | null;
+  collab_post_responses: number;
+};
+
+// projects.shared_folder_url/_set_by/_set_at — a team pastes a link to
+// whatever their institution already runs (Box, Drive, ...); we store the
+// link, never files. set_by is resolved to a display name the same way
+// team members are (project_member_names()), not a raw user_id.
+export type SharedFolder = {
+  url: string;
+  set_by_name: string | null;
+  set_at: string;
+};
+
 export type ProjectDetail = {
   id: string;
   name: string;
@@ -96,10 +125,11 @@ export type ProjectDetail = {
   // NOT the same as is_creator: co-leads are real leads for every purpose
   // EXCEPT deleting the project itself.
   is_lead: boolean;
-  // The ORIGINAL creator (projects.lead_id). Gates project deletion and
-  // proposal submission ONLY — see database/migrations/2026-08-08_project_co_leads.sql
-  // for why those two stay creator-only while everything else follows
-  // is_lead now.
+  // The ORIGINAL creator (projects.lead_id). Gates project deletion ONLY —
+  // see database/migrations/2026-08-08_project_co_leads.sql: proposal
+  // submission used to be creator-only too but is now "any lead"
+  // (lib/server/projects.ts:submitProposal), so deletion is the one thing
+  // left that checks this instead of is_lead.
   is_creator: boolean;
   members: ProjectMember[];
   // Null for every project without challenge_key set, AND for a
@@ -108,6 +138,8 @@ export type ProjectDetail = {
   // which is the distinction the Proposal section's own gating (on
   // challenge_key, not on this) actually needs.
   proposal: ProjectProposal | null;
+  checklist: ChecklistItem[];
+  shared_folder: SharedFolder | null;
 };
 
 export type GetProjectResult =
@@ -158,6 +190,16 @@ export type SubmitProposalResult =
   | { status: "error"; error: string };
 
 export type SignedUrlResult = { status: "ok"; url: string } | { status: "error"; error: string };
+
+export type AddChecklistItemResult =
+  | { status: "ok"; item: ChecklistItem }
+  | { status: "error"; error: string };
+
+export type ChecklistWriteResult = { status: "ok" } | { status: "error"; error: string };
+
+export type SetSharedFolderResult =
+  | { status: "ok"; shared_folder: SharedFolder }
+  | { status: "error"; error: string };
 
 export type DeleteProjectResult = { status: "ok" } | { status: "error"; error: string };
 
@@ -291,7 +333,8 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   const { data: projectRow, error: projectErr } = await db
     .from("projects")
     .select(
-      "id, name, description, lead_id, deadline, challenge_key, target, indication, modality, stage"
+      "id, name, description, lead_id, deadline, challenge_key, target, indication, modality, stage, " +
+        "shared_folder_url, shared_folder_set_by, shared_folder_set_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -302,27 +345,42 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   }
   if (!projectRow) return { status: "not_found" };
 
-  const [membersRes, proposalRes, namesRes] = await Promise.all([
-    db
-      .from("project_members")
-      .select("id, email, user_id, role, created_at")
-      .eq("project_id", id)
-      .order("created_at", { ascending: true }),
-    // Fetched regardless of challenge_key — a leadless-cost lookup, and the
-    // section's own gate is challenge_key, not "does a proposal row exist".
-    db
-      .from("project_proposals")
-      .select("id, title, category, summary, file_path, submitted_at, updated_at")
-      .eq("project_id", id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    // Public identity for linked members — see project_member_names() in
-    // 2026-08-07_project_member_names.sql for why this can't be a plain
-    // join on public.users (its own SELECT policy blanks out a
-    // private-profile member instead of falling back to their email).
-    db.rpc("project_member_names", { project_ids: [id] }),
-  ]);
+  const [membersRes, proposalRes, namesRes, checklistRes, checklistPostsRes, interestCountsRes] =
+    await Promise.all([
+      db
+        .from("project_members")
+        .select("id, email, user_id, role, created_at")
+        .eq("project_id", id)
+        .order("created_at", { ascending: true }),
+      // Fetched regardless of challenge_key — a leadless-cost lookup, and the
+      // section's own gate is challenge_key, not "does a proposal row exist".
+      db
+        .from("project_proposals")
+        .select("id, title, category, summary, file_path, submitted_at, updated_at")
+        .eq("project_id", id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      // Public identity for linked members AND the shared-folder setter —
+      // see project_member_names() in 2026-08-07_project_member_names.sql
+      // for why this can't be a plain join on public.users (its own SELECT
+      // policy blanks out a private-profile member instead of falling back
+      // to their email).
+      db.rpc("project_member_names", { project_ids: [id] }),
+      db
+        .from("checklist_items")
+        .select("id, label, status, position, created_at, updated_at")
+        .eq("project_id", id)
+        .order("position", { ascending: true }),
+      // Which checklist items already have a Collaborate post attached —
+      // one row per post, not per item, since a post either has this
+      // project's checklist_item_id or it doesn't.
+      db.from("collab_posts").select("id, checklist_item_id").not("checklist_item_id", "is", null),
+      // Same SECURITY DEFINER aggregate lib/server/collab.ts's board view
+      // uses — connection_requests SELECT is own-rows-only, so counting
+      // responses cannot be done with a normal query.
+      db.rpc("collab_post_interest_counts"),
+    ]);
 
   if (membersRes.error) {
     console.error("getProject: project_members query failed", membersRes.error);
@@ -331,6 +389,10 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   if (proposalRes.error) {
     console.error("getProject: project_proposals query failed", proposalRes.error);
     return { status: "error", error: "Couldn't load this project's proposal." };
+  }
+  if (checklistRes.error) {
+    console.error("getProject: checklist_items query failed", checklistRes.error);
+    return { status: "error", error: "Couldn't load this project's checklist." };
   }
   // Degrades to an empty map on failure — same stance as collab.ts's
   // ownerMap(): a names lookup failing should leave rows showing email,
@@ -344,8 +406,33 @@ export async function getProject(id: string): Promise<GetProjectResult> {
     console.error("getProject: project_member_names RPC failed", namesRes.error);
   }
 
+  // checklist_item_id -> post id, and post id -> response count. Both
+  // degrade to empty maps on failure, same reasoning as `names` above: a
+  // Collaborate-bridge lookup failing should leave the checklist showing
+  // plain items, not blank the whole section.
+  const postByChecklistItem = new Map<string, string>();
+  if (!checklistPostsRes.error && Array.isArray(checklistPostsRes.data)) {
+    for (const row of checklistPostsRes.data as { id: string; checklist_item_id: string | null }[]) {
+      if (row.checklist_item_id) postByChecklistItem.set(row.checklist_item_id, row.id);
+    }
+  } else if (checklistPostsRes.error) {
+    console.error("getProject: collab_posts (checklist bridge) query failed", checklistPostsRes.error);
+  }
+  const responseCounts = new Map<string, number>();
+  if (!interestCountsRes.error && Array.isArray(interestCountsRes.data)) {
+    for (const row of interestCountsRes.data as { post_id: string; interested: number }[]) {
+      responseCounts.set(row.post_id, Number(row.interested) || 0);
+    }
+  } else if (interestCountsRes.error) {
+    console.error("getProject: collab_post_interest_counts RPC failed", interestCountsRes.error);
+  }
+
   const row = projectRow as Record<string, unknown>;
   const proposalRow = proposalRes.data as Record<string, unknown> | null;
+
+  const sharedFolderUrl = (row.shared_folder_url as string | null) ?? null;
+  const sharedFolderSetBy = (row.shared_folder_set_by as string | null) ?? null;
+  const sharedFolderSetAt = (row.shared_folder_set_at as string | null) ?? null;
 
   return {
     status: "ok",
@@ -388,6 +475,26 @@ export async function getProject(id: string): Promise<GetProjectResult> {
             file_path: (proposalRow.file_path as string | null) ?? null,
             submitted_at: (proposalRow.submitted_at as string | null) ?? null,
             updated_at: proposalRow.updated_at as string,
+          }
+        : null,
+      checklist: ((checklistRes.data ?? []) as Record<string, unknown>[]).map((c) => {
+        const itemId = c.id as string;
+        const postId = postByChecklistItem.get(itemId) ?? null;
+        return {
+          id: itemId,
+          label: c.label as string,
+          status: c.status as ChecklistStatus,
+          position: c.position as number,
+          updated_at: c.updated_at as string,
+          collab_post_id: postId,
+          collab_post_responses: postId ? responseCounts.get(postId) ?? 0 : 0,
+        };
+      }),
+      shared_folder: sharedFolderUrl
+        ? {
+            url: sharedFolderUrl,
+            set_by_name: sharedFolderSetBy ? names.get(sharedFolderSetBy)?.name ?? null : null,
+            set_at: sharedFolderSetAt as string,
           }
         : null,
     },
@@ -929,6 +1036,254 @@ export async function getProposalFileUrl(
   }
 
   return { status: "ok", url: data.signedUrl as string };
+}
+
+// ── checklist ────────────────────────────────────────────────────────────────
+//
+// ANY MEMBER may add/edit/reorder/change-status/delete — unlike Team and
+// Proposal, nothing here is lead-gated. "Checklist items: member *" RLS
+// (2026-08-04_projects.sql) already permits exactly this for every command,
+// so these functions don't add an extra permission check the way
+// addProjectMember()/removeProjectMember() do for lead-only actions —
+// requireCurrentUser() + RLS is the whole gate.
+
+const CHECKLIST_STATUSES: readonly ChecklistStatus[] = ["not_yet", "in_progress", "ready"];
+
+/** Add an item at the end of the list (max existing position + 1, or 0 for
+ *  the first item). */
+export async function addChecklistItem(
+  projectId: string,
+  label: string
+): Promise<AddChecklistItemResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const trimmed = label.trim();
+  if (!trimmed) return { status: "error", error: "A checklist item needs a label." };
+
+  const { data: lastRow, error: lastErr } = await db
+    .from("checklist_items")
+    .select("position")
+    .eq("project_id", projectId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastErr) {
+    console.error("addChecklistItem: position lookup failed", lastErr);
+    return { status: "error", error: "Couldn't add that item." };
+  }
+  const nextPosition = ((lastRow?.position as number | undefined) ?? -1) + 1;
+
+  const { data, error } = await db
+    .from("checklist_items")
+    .insert({
+      project_id: projectId,
+      label: trimmed.slice(0, 300),
+      position: nextPosition,
+      updated_by: user.id,
+    })
+    .select("id, label, status, position, updated_at")
+    .single();
+
+  if (error || !data) {
+    console.error("addChecklistItem: insert failed", error);
+    return { status: "error", error: "Couldn't add that item." };
+  }
+
+  return {
+    status: "ok",
+    item: {
+      id: data.id as string,
+      label: data.label as string,
+      status: data.status as ChecklistStatus,
+      position: data.position as number,
+      updated_at: data.updated_at as string,
+      // Brand new — no Collaborate post can exist for an item that didn't
+      // exist a moment ago.
+      collab_post_id: null,
+      collab_post_responses: 0,
+    },
+  };
+}
+
+/** Change an item's status (Not yet / In progress / Ready). The CLIENT does
+ *  the optimistic UI update; this is what makes it real or reverts it — see
+ *  ChecklistSection.tsx for the revert-on-failure side. */
+export async function updateChecklistItemStatus(
+  projectId: string,
+  itemId: string,
+  status: ChecklistStatus
+): Promise<ChecklistWriteResult> {
+  const { user, db } = await requireCurrentUser();
+
+  if (!CHECKLIST_STATUSES.includes(status)) {
+    return { status: "error", error: "Invalid status." };
+  }
+
+  const { error } = await db
+    .from("checklist_items")
+    .update({ status, updated_by: user.id })
+    .eq("id", itemId)
+    .eq("project_id", projectId);
+
+  if (error) {
+    console.error("updateChecklistItemStatus: update failed", error);
+    return { status: "error", error: "Couldn't update that item." };
+  }
+  return { status: "ok" };
+}
+
+/** Edit an item's label. */
+export async function updateChecklistItemLabel(
+  projectId: string,
+  itemId: string,
+  label: string
+): Promise<ChecklistWriteResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const trimmed = label.trim();
+  if (!trimmed) return { status: "error", error: "A checklist item needs a label." };
+
+  const { error } = await db
+    .from("checklist_items")
+    .update({ label: trimmed.slice(0, 300), updated_by: user.id })
+    .eq("id", itemId)
+    .eq("project_id", projectId);
+
+  if (error) {
+    console.error("updateChecklistItemLabel: update failed", error);
+    return { status: "error", error: "Couldn't rename that item." };
+  }
+  return { status: "ok" };
+}
+
+/** Move an item up or down one position, swapping with its neighbor. Moving
+ *  past either end is a no-op (not an error) — there's nowhere further for
+ *  the top item to go up, or the bottom item to go down. */
+export async function moveChecklistItem(
+  projectId: string,
+  itemId: string,
+  direction: "up" | "down"
+): Promise<ChecklistWriteResult> {
+  const { db } = await requireCurrentUser();
+
+  const { data: items, error } = await db
+    .from("checklist_items")
+    .select("id, position")
+    .eq("project_id", projectId)
+    .order("position", { ascending: true });
+
+  if (error || !items) {
+    console.error("moveChecklistItem: lookup failed", error);
+    return { status: "error", error: "Couldn't reorder the checklist." };
+  }
+
+  const rows = items as { id: string; position: number }[];
+  const idx = rows.findIndex((i) => i.id === itemId);
+  if (idx === -1) return { status: "error", error: "That item no longer exists." };
+
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= rows.length) return { status: "ok" }; // already at the edge
+
+  const a = rows[idx];
+  const b = rows[swapIdx];
+
+  const [r1, r2] = await Promise.all([
+    db.from("checklist_items").update({ position: b.position }).eq("id", a.id).eq("project_id", projectId),
+    db.from("checklist_items").update({ position: a.position }).eq("id", b.id).eq("project_id", projectId),
+  ]);
+
+  if (r1.error || r2.error) {
+    console.error("moveChecklistItem: swap failed", r1.error, r2.error);
+    return { status: "error", error: "Couldn't reorder the checklist." };
+  }
+  return { status: "ok" };
+}
+
+/** Delete a checklist item. Confirmation lives in the UI; RLS
+ *  ("Checklist items: member delete") is the real gate — any member, not
+ *  lead-only. collab_posts.checklist_item_id is ON DELETE SET NULL
+ *  (2026-08-04_projects.sql), so an attached Collaborate post survives —
+ *  it just stops showing as "posted" against an item that no longer
+ *  exists. */
+export async function deleteChecklistItem(
+  projectId: string,
+  itemId: string
+): Promise<ChecklistWriteResult> {
+  const { db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("checklist_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("project_id", projectId);
+
+  if (error) {
+    console.error("deleteChecklistItem: delete failed", error);
+    return { status: "error", error: "Couldn't delete that item." };
+  }
+  return { status: "ok" };
+}
+
+// ── shared folder ────────────────────────────────────────────────────────────
+
+/** http(s) only — same rule and same reasoning as
+ *  lib/server/showcase.ts:safeLink(): a raw user-supplied string rendered
+ *  as an href is an XSS vector, and a `javascript:` URL is exactly what
+ *  this rejects. Checked HERE, server-side — a browser-side check on the
+ *  input is a courtesy, not the rule; a raw PostgREST/curl caller with a
+ *  valid session could otherwise write anything into shared_folder_url. */
+function safeFolderUrl(v: string): string | null {
+  try {
+    const u = new URL(v.trim());
+    return u.protocol === "http:" || u.protocol === "https:" ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Set or change the shared folder link. ANY MEMBER may call this — RLS
+ *  ("Projects: member update") already permits any member to update the
+ *  project row, and this is just one more field on it. */
+export async function setSharedFolder(
+  projectId: string,
+  url: string
+): Promise<SetSharedFolderResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const safe = safeFolderUrl(url);
+  if (!safe) {
+    return { status: "error", error: "Please paste a valid http:// or https:// link." };
+  }
+
+  const setAt = new Date().toISOString();
+  const { error } = await db
+    .from("projects")
+    .update({
+      shared_folder_url: safe,
+      shared_folder_set_by: user.id,
+      shared_folder_set_at: setAt,
+    })
+    .eq("id", projectId);
+
+  if (error) {
+    console.error("setSharedFolder: update failed", error);
+    return { status: "error", error: "Couldn't save the folder link." };
+  }
+
+  // Best-effort name resolution for the immediate UI update — a lookup
+  // failure here still means the link saved fine; the next full load
+  // resolves the name normally via getProject().
+  let setByName: string | null = null;
+  const { data: namesData } = await db.rpc("project_member_names", { project_ids: [projectId] });
+  if (Array.isArray(namesData)) {
+    const mine = (namesData as { user_id: string; name: string | null }[]).find(
+      (n) => n.user_id === user.id
+    );
+    setByName = mine?.name ?? null;
+  }
+
+  return { status: "ok", shared_folder: { url: safe, set_by_name: setByName, set_at: setAt } };
 }
 
 // ── delete ───────────────────────────────────────────────────────────────────

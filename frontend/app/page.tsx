@@ -78,9 +78,13 @@ const HOW_IT_WORKS = [
 
 export default async function Home() {
   const user = await getCurrentUser();
-  const startProjectHref = user
-    ? "/projects/new?colabofest=1"
-    : `/login?callbackUrl=${encodeURIComponent("/projects/new?colabofest=1")}`;
+  // Lands on /projects itself, not straight into the ColaboFest form: the
+  // list page shows the ColaboFest banner AND any projects the visitor
+  // already has, a better landing than jumping straight into a form. The
+  // banner's own "Start your ColaboFest project" button
+  // (components/projects/ColabofestBanner.tsx) is still the direct entry
+  // point into that form — nothing lost by not routing straight there here.
+  const startProjectHref = user ? "/projects" : `/login?callbackUrl=${encodeURIComponent("/projects")}`;
 
   return (
     <>

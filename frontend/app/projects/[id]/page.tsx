@@ -1,6 +1,9 @@
-// Project detail — /projects/[id]. Step 2a: Team and Proposal sections only
-// — Checklist, Resources and Shared Folder are step 2b, not built here (see
-// frontend/design/projects/STRUCTURE.md).
+// Project detail — /projects/[id]. Step 2b, part 2: adds Resources.
+// Project-scoped Explore itself (a dedicated saved-resources listing page)
+// is still out of scope — see components/projects/ResourcesSection.tsx for
+// what "clickable" tiles actually route to instead.
+// Order follows STRUCTURE.md: Header & status → Team → Resources →
+// Checklist → Shared Folder → Proposal → Promote.
 //
 // SERVER component: redirects to /login when signed out (matches /projects
 // and /inbox), then reads through lib/server/projects.ts, whose
@@ -12,9 +15,19 @@
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { getProject, getProposalFileUrl } from "@/lib/server/projects";
-import { MODALITY_LABEL, PROJECT_STAGE_LABEL, type Modality, type ProjectStage } from "@/lib/projectTypes";
+import { listProjectResources } from "@/lib/server/projectResources";
+import {
+  MODALITY_LABEL,
+  PROJECT_STAGE_LABEL,
+  buildProjectExploreHref,
+  type Modality,
+  type ProjectStage,
+} from "@/lib/projectTypes";
 import TeamSection from "@/components/projects/TeamSection";
 import ProposalSection from "@/components/projects/ProposalSection";
+import ChecklistSection from "@/components/projects/ChecklistSection";
+import SharedFolderSection from "@/components/projects/SharedFolderSection";
+import ResourcesSection from "@/components/projects/ResourcesSection";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -72,6 +85,13 @@ export default async function ProjectDetailPage({
     fileUrl = signed.status === "ok" ? signed.url : null;
   }
 
+  const resourcesResult = await listProjectResources(project.id);
+  const resources =
+    resourcesResult.status === "ok"
+      ? resourcesResult.resources
+      : { total: 0, tiles: [], recent: [], items: [] };
+  const exploreHref = buildProjectExploreHref(project);
+
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16">
       {/* Header & status */}
@@ -100,15 +120,34 @@ export default async function ProjectDetailPage({
           )}
         </div>
 
-        {/* Status strip — members only for now (step 2a). Resources and
-            checklist progress join this once those sections exist (step
-            2b); until then this never reads "0 of 0" because there's
-            nothing to hide a zero behind yet. */}
+        {/* Status strip — members always; checklist progress and resource
+            count join ONLY when there's something to report, per
+            STRUCTURE.md: a new project must never read "0 of 0" or
+            "0 resources saved". */}
         <div className="inline-flex items-center gap-6 font-label-md text-label-md text-secondary bg-surface-container-low/50 px-6 py-3 rounded-lg border border-outline-variant/30">
           <div className="flex items-center gap-2">
             <span className="material-symbols-outlined text-[18px]">group</span>
             {project.members.length} {project.members.length === 1 ? "member" : "members"}
           </div>
+          {resources.total > 0 && (
+            <>
+              <div className="w-px h-4 bg-outline-variant/50" />
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[18px]">bookmark</span>
+                {resources.total} {resources.total === 1 ? "resource" : "resources"} saved
+              </div>
+            </>
+          )}
+          {project.checklist.length > 0 && (
+            <>
+              <div className="w-px h-4 bg-outline-variant/50" />
+              <div className="flex items-center gap-2 text-primary">
+                <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                {project.checklist.filter((c) => c.status === "ready").length} of{" "}
+                {project.checklist.length} ready
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -120,6 +159,23 @@ export default async function ProjectDetailPage({
         isLead={project.is_lead}
         viewerUserId={user.id}
       />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      <ResourcesSection projectId={project.id} exploreHref={exploreHref} resources={resources} />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      <ChecklistSection
+        projectId={project.id}
+        projectName={project.name}
+        projectDescription={project.description}
+        items={project.checklist}
+      />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />
 
       {/* Only exists at all for a ColaboFest project — not merely empty or
           disabled for an ordinary one. */}

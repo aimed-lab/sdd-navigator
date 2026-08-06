@@ -93,4 +93,8 @@ export type CreateCollabPostInput = {
   needs?: string[];
   stage?: Stage;
   funding_status?: FundingStatus | null;
+  // The one-click bridge from a project's Checklist section (see
+  // database/migrations/2026-08-04_projects.sql: collab_posts.checklist_item_id,
+  // ON DELETE SET NULL). Optional — a normal board post has none.
+  checklist_item_id?: string | null;
 };

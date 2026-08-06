@@ -4,9 +4,20 @@
 // saved, etc.). Renders one backend Item: title, one-line context, and an
 // evidence-backed SIGNAL BADGE only when a real metric exists. It NEVER shows a
 // vague label ("recommended" etc.) — no signal falls back to the date, or nothing.
+//
+// PROJECT-SCOPED SAVING: pass `projectId` (from /explore/[topic] when
+// arrived via a project's "Explore for this project" link, or from the
+// project page's own Resources section) and the bookmark button saves
+// INTO that project via app/explore/actions.ts, with an optimistic toggle
+// that REVERTS and shows a visible error on failure — never a silent
+// no-op. Omit `projectId` and this is byte-for-byte the original
+// behavior: a bare local toggle, no network call, no persistence — that
+// is deliberate, not an oversight; see app/explore/[topic]/page.tsx for
+// why Explore without project context must stay exactly as it was.
 
 import { useState } from "react";
 import type { ExploreItem } from "@/types/explore";
+import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
 const ACCENT: Record<string, string> = {
@@ -81,8 +92,23 @@ function formatDate(iso: string | null): string | null {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-export default function ItemCard({ item }: { item: ExploreItem }) {
-  const [saved, setSaved] = useState(false);
+export default function ItemCard({
+  item,
+  projectId,
+  initiallySaved = false,
+}: {
+  item: ExploreItem;
+  /** When set, the bookmark button saves into/removes from THIS project
+   *  instead of being a purely local toggle. */
+  projectId?: string;
+  /** Seeds the bookmark's starting visual state — true for cards the
+   *  project Resources section already knows are saved; false (the
+   *  default) everywhere else, matching today's behavior exactly. */
+  initiallySaved?: boolean;
+}) {
+  const [saved, setSaved] = useState(initiallySaved);
+  const [pending, setPending] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // GEO reports no ranking metric (see backend/explore-mcp/tools/search_datasets.py
   // — it never calls WINNER, there is no citation graph between datasets), so
@@ -98,6 +124,33 @@ export default function ItemCard({ item }: { item: ExploreItem }) {
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
+  };
+
+  const toggleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (pending) return;
+
+    if (!projectId) {
+      // No project context — EXACTLY today's behavior: a bare local
+      // toggle, nothing persisted, no network call at all.
+      setSaved((s) => !s);
+      return;
+    }
+
+    const next = !saved;
+    setSaved(next); // optimistic
+    setSaveError(null);
+    setPending(true);
+
+    const res = next
+      ? await saveToProjectAction(projectId, item)
+      : await removeFromProjectAction(projectId, item.id);
+
+    setPending(false);
+    if (!res.ok) {
+      setSaved(!next); // revert — the failure must be visible, not silent
+      setSaveError(res.error);
+    }
   };
 
   return (
@@ -140,12 +193,10 @@ export default function ItemCard({ item }: { item: ExploreItem }) {
           ) : null}
 
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setSaved((s) => !s);
-            }}
+            onClick={toggleSave}
+            disabled={pending}
             aria-label={saved ? "Remove bookmark" : "Save item"}
-            className="text-secondary hover:text-primary transition-colors shrink-0 ml-auto"
+            className="text-secondary hover:text-primary transition-colors shrink-0 ml-auto disabled:opacity-50"
           >
             <span
               className="material-symbols-outlined"
@@ -155,6 +206,17 @@ export default function ItemCard({ item }: { item: ExploreItem }) {
             </span>
           </button>
         </div>
+
+        {/* Visible, not silent — a reverted save must say why. */}
+        {saveError && (
+          <p
+            className="-mt-2 mb-3 font-body-sm text-body-sm text-error"
+            role="alert"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {saveError}
+          </p>
+        )}
 
         <div className="mt-auto">
           {/* Organism + sample count are what tells a researcher in one glance

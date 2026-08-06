@@ -77,3 +77,41 @@ export type CreateProjectInput = {
   modality?: Modality | null;
   stage?: ProjectStage | null;
 };
+
+/** The "Explore for this project" query text — target + indication +
+ *  modality (as its human label, not the raw enum value a search bar
+ *  would be a poor match against), joined with spaces. Falls back to the
+ *  project's own name when all three are empty, which is always
+ *  non-blank (a project can't exist without one) — so this function
+ *  always returns something searchable. */
+export function buildProjectExploreQuery(project: {
+  name: string;
+  target: string | null;
+  indication: string | null;
+  modality: string | null;
+}): string {
+  const modalityLabel = project.modality
+    ? MODALITY_LABEL[project.modality as Modality] ?? project.modality
+    : null;
+  const parts = [project.target, project.indication, modalityLabel]
+    .map((s) => s?.trim())
+    .filter((s): s is string => !!s);
+  const query = parts.join(" ").trim();
+  return query || project.name;
+}
+
+/** The full href for "Explore for this project" — the built query as the
+ *  route param, plus project_id/project_name as query string so Explore
+ *  knows saves from this visit belong to this project (see
+ *  app/explore/[topic]/page.tsx). */
+export function buildProjectExploreHref(project: {
+  id: string;
+  name: string;
+  target: string | null;
+  indication: string | null;
+  modality: string | null;
+}): string {
+  const query = buildProjectExploreQuery(project);
+  const params = new URLSearchParams({ project_id: project.id, project_name: project.name });
+  return `/explore/${encodeURIComponent(query)}?${params.toString()}`;
+}

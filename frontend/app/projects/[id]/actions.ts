@@ -8,13 +8,22 @@
 import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
 import {
+  addChecklistItem,
   addProjectMember,
+  deleteChecklistItem,
   deleteProject,
+  moveChecklistItem,
   promoteProjectMember,
   removeProjectMember,
+  setSharedFolder,
   stepDownFromLead,
   submitProposal,
+  updateChecklistItemLabel,
+  updateChecklistItemStatus,
   upsertProposal,
+  type ChecklistItem,
+  type ChecklistStatus,
+  type SharedFolder,
 } from "@/lib/server/projects";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -154,5 +163,141 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to delete this project." };
     console.error("deleteProjectAction failed", e);
     return { ok: false, error: "Couldn't delete the project. Please try again." };
+  }
+}
+
+// ── checklist ──────────────────────────────────────────────────────────────
+// ANY member may call any of these — lib/server/projects.ts's checklist
+// functions have no lead check to translate; RLS ("Checklist items: member
+// *") is the whole gate.
+
+export type AddChecklistItemActionResult =
+  | { ok: true; item: ChecklistItem }
+  | { ok: false; error: string };
+
+export async function addChecklistItemAction(
+  projectId: string,
+  label: string
+): Promise<AddChecklistItemActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+
+  try {
+    const result = await addChecklistItem(projectId, label);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, item: result.item };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to add checklist items." };
+    console.error("addChecklistItemAction failed", e);
+    return { ok: false, error: "Couldn't add that item. Please try again." };
+  }
+}
+
+/** Status changes are meant to feel instant — the caller (ChecklistSection)
+ *  updates its own state optimistically BEFORE this resolves and only
+ *  reverts if it comes back { ok: false }. That revert is what makes a
+ *  failure visible rather than silently lost — see STRUCTURE.md's own
+ *  requirement. */
+export async function updateChecklistStatusAction(
+  projectId: string,
+  itemId: string,
+  status: ChecklistStatus
+): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await updateChecklistItemStatus(projectId, itemId, status);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to update the checklist." };
+    console.error("updateChecklistStatusAction failed", e);
+    return { ok: false, error: "Couldn't update that item. Please try again." };
+  }
+}
+
+export async function updateChecklistLabelAction(
+  projectId: string,
+  itemId: string,
+  label: string
+): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await updateChecklistItemLabel(projectId, itemId, label);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to edit the checklist." };
+    console.error("updateChecklistLabelAction failed", e);
+    return { ok: false, error: "Couldn't rename that item. Please try again." };
+  }
+}
+
+export async function moveChecklistItemAction(
+  projectId: string,
+  itemId: string,
+  direction: "up" | "down"
+): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await moveChecklistItem(projectId, itemId, direction);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to reorder the checklist." };
+    console.error("moveChecklistItemAction failed", e);
+    return { ok: false, error: "Couldn't reorder the checklist. Please try again." };
+  }
+}
+
+/** Delete a checklist item. Confirmation lives in the UI. */
+export async function deleteChecklistItemAction(
+  projectId: string,
+  itemId: string
+): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await deleteChecklistItem(projectId, itemId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to edit the checklist." };
+    console.error("deleteChecklistItemAction failed", e);
+    return { ok: false, error: "Couldn't delete that item. Please try again." };
+  }
+}
+
+// ── shared folder ────────────────────────────────────────────────────────────
+
+export type SetSharedFolderActionResult =
+  | { ok: true; shared_folder: SharedFolder }
+  | { ok: false; error: string };
+
+/** Set or change the shared folder link. ANY member — lib/server/projects.ts
+ *  validates the URL server-side (http/https only, rejecting a
+ *  javascript: URL regardless of what the form's own <input type="url">
+ *  would have caught); that check is the real gate, not this action. */
+export async function setSharedFolderAction(
+  projectId: string,
+  url: string
+): Promise<SetSharedFolderActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+
+  try {
+    const result = await setSharedFolder(projectId, url);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, shared_folder: result.shared_folder };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to set the shared folder." };
+    console.error("setSharedFolderAction failed", e);
+    return { ok: false, error: "Couldn't save the folder link. Please try again." };
   }
 }
