@@ -1,10 +1,21 @@
 "use client";
 
 // Team section — frontend/design/projects/STRUCTURE.md, detail workspace,
-// "Team". Add/remove are lead-only; the UI hiding those controls is a
-// convenience, not the gate — lib/server/projects.ts re-checks
-// is_project_lead-equivalent logic server-side on every call, and RLS backs
+// "Team". Add/remove/promote are lead-only (ANY lead — co-leads have equal
+// standing here, see database/migrations/2026-08-08_project_co_leads.sql);
+// the UI hiding those controls is a convenience, not the gate —
+// lib/server/projects.ts re-checks server-side on every call, and RLS backs
 // that up in Postgres regardless of what this component renders.
+//
+// CONTROLS PER ROW (viewer must be a lead to see any of this at all):
+//   - a MEMBER row (linked)  -> "Make lead" and "Remove"
+//   - a PENDING row          -> "Remove" only (can't promote someone who
+//                                hasn't accepted their invite yet)
+//   - the VIEWER'S OWN row, if they're a lead -> "Step down" (self only)
+//   - any OTHER lead's row   -> no controls at all — no one may remove or
+//                                demote a lead but themselves
+// A plain (non-lead) member sees names and the Lead pill only, no controls
+// anywhere, including their own row.
 //
 // DISPLAY NAME: resolved server-side via project_member_names()
 // (database/migrations/2026-08-07_project_member_names.sql), NOT a plain
@@ -23,7 +34,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { addMemberAction, removeMemberAction } from "@/app/projects/[id]/actions";
+import {
+  addMemberAction,
+  promoteMemberAction,
+  removeMemberAction,
+  stepDownAction,
+} from "@/app/projects/[id]/actions";
 import type { ProjectMember } from "@/lib/server/projects";
 
 function MemberAvatar({ pending }: { pending: boolean }) {
@@ -112,10 +128,15 @@ export default function TeamSection({
   projectId,
   members,
   isLead,
+  viewerUserId,
 }: {
   projectId: string;
   members: ProjectMember[];
   isLead: boolean;
+  /** The signed-in viewer's own user id — needed to tell "the viewer's own
+   *  row" apart from any other lead's row (only the former gets a "Step
+   *  down" control; the latter gets no control at all). */
+  viewerUserId: string;
 }) {
   const router = useRouter();
 
@@ -126,6 +147,12 @@ export default function TeamSection({
   const [confirmTarget, setConfirmTarget] = useState<ProjectMember | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promoteError, setPromoteError] = useState<string | null>(null);
+
+  const [steppingDown, setSteppingDown] = useState(false);
+  const [stepDownError, setStepDownError] = useState<string | null>(null);
 
   const submitAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,6 +183,37 @@ export default function TeamSection({
       setRemoveError(res.error);
     }
     setRemoving(false);
+  };
+
+  const promote = async (memberId: string) => {
+    if (promotingId) return;
+    setPromotingId(memberId);
+    setPromoteError(null);
+
+    const res = await promoteMemberAction(projectId, memberId);
+    if (res.ok) {
+      router.refresh();
+    } else {
+      setPromoteError(res.error);
+    }
+    setPromotingId(null);
+  };
+
+  const stepDown = async () => {
+    if (steppingDown) return;
+    setSteppingDown(true);
+    setStepDownError(null);
+
+    const res = await stepDownAction(projectId);
+    if (res.ok) {
+      router.refresh();
+    } else {
+      // Most commonly "A project must always have at least one lead." —
+      // the app-layer pre-check's message; the trigger's own rejection (if
+      // it ever races ahead of that check) reads the same way.
+      setStepDownError(res.error);
+    }
+    setSteppingDown(false);
   };
 
   return (
@@ -216,21 +274,61 @@ export default function TeamSection({
                 </div>
               </div>
 
-              {isLead && m.role !== "lead" && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRemoveError(null);
-                    setConfirmTarget(m);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity font-label-sm text-label-sm text-secondary hover:text-error shrink-0"
-                >
-                  Remove
-                </button>
+              {isLead && (
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-4 shrink-0">
+                  {m.role === "member" && (
+                    <>
+                      {!pending && (
+                        <button
+                          type="button"
+                          onClick={() => promote(m.id)}
+                          disabled={promotingId === m.id}
+                          className="font-label-sm text-label-sm text-primary hover:underline disabled:opacity-50"
+                        >
+                          {promotingId === m.id ? "Making lead…" : "Make lead"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRemoveError(null);
+                          setConfirmTarget(m);
+                        }}
+                        className="font-label-sm text-label-sm text-secondary hover:text-error"
+                      >
+                        Remove
+                      </button>
+                    </>
+                  )}
+                  {m.role === "lead" && m.user_id === viewerUserId && (
+                    <button
+                      type="button"
+                      onClick={stepDown}
+                      disabled={steppingDown}
+                      className="font-label-sm text-label-sm text-secondary hover:text-error disabled:opacity-50"
+                    >
+                      {steppingDown ? "Stepping down…" : "Step down"}
+                    </button>
+                  )}
+                  {/* Another lead's row (m.role === "lead" && m.user_id !==
+                      viewerUserId): no control at all, on purpose — no one
+                      may remove or demote a lead but themselves. */}
+                </div>
               )}
             </div>
           );
         })}
+
+        {isLead && promoteError && (
+          <p className="font-body-sm text-body-sm text-error mt-1" role="alert">
+            {promoteError}
+          </p>
+        )}
+        {isLead && stepDownError && (
+          <p className="font-body-sm text-body-sm text-error mt-1" role="alert">
+            {stepDownError}
+          </p>
+        )}
 
         {isLead && (
           <form

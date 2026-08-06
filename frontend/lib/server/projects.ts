@@ -91,7 +91,16 @@ export type ProjectDetail = {
   indication: string | null;
   modality: string | null;
   stage: string | null;
+  // "Any lead" — project_members.role = 'lead' for the viewer. Gates the
+  // Team section's controls (add member, promote, remove, step down).
+  // NOT the same as is_creator: co-leads are real leads for every purpose
+  // EXCEPT deleting the project itself.
   is_lead: boolean;
+  // The ORIGINAL creator (projects.lead_id). Gates project deletion and
+  // proposal submission ONLY — see database/migrations/2026-08-08_project_co_leads.sql
+  // for why those two stay creator-only while everything else follows
+  // is_lead now.
+  is_creator: boolean;
   members: ProjectMember[];
   // Null for every project without challenge_key set, AND for a
   // challenge project that hasn't saved any proposal fields yet — both
@@ -124,6 +133,22 @@ export type RemoveMemberResult =
   | { status: "forbidden"; error: string }
   | { status: "error"; error: string };
 
+export type PromoteMemberResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  | { status: "error"; error: string };
+
+export type StepDownResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  // The last-lead guard. The REAL gate is the enforce_min_one_lead()
+  // trigger (2026-08-08_project_co_leads.sql) — this status exists so the
+  // pre-check below (done for a friendly message) and the trigger's own
+  // raised exception (if the pre-check ever races or is bypassed) both
+  // surface the same way to a caller.
+  | { status: "last_lead"; error: string }
+  | { status: "error"; error: string };
+
 export type UpsertProposalResult = { status: "ok" } | { status: "error"; error: string };
 
 export type SubmitProposalResult =
@@ -136,21 +161,37 @@ export type SignedUrlResult = { status: "ok"; url: string } | { status: "error";
 
 export type DeleteProjectResult = { status: "ok" } | { status: "error"; error: string };
 
-// Internal only — lead_id and deadline read for a permission/deadline check,
-// never returned from an exported function. null covers BOTH "no such
-// project" and "not a member" (same RLS-driven ambiguity as GetProjectResult
-// above): a plain select on `projects` returns nothing in either case.
+// Internal only — lead_id (the CREATOR, not "any lead" — see
+// 2026-08-08_project_co_leads.sql) and deadline, read for a permission/
+// deadline check, never returned from an exported function. null covers
+// BOTH "no such project" and "not a member" (same RLS-driven ambiguity as
+// GetProjectResult above): a plain select on `projects` returns nothing in
+// either case.
 async function loadProjectGate(
   db: Db,
   projectId: string
-): Promise<{ leadId: string; deadline: string | null } | null> {
+): Promise<{ creatorId: string; deadline: string | null } | null> {
   const { data, error } = await db
     .from("projects")
     .select("lead_id, deadline")
     .eq("id", projectId)
     .maybeSingle();
   if (error || !data) return null;
-  return { leadId: data.lead_id as string, deadline: (data.deadline as string | null) ?? null };
+  return { creatorId: data.lead_id as string, deadline: (data.deadline as string | null) ?? null };
+}
+
+// Internal only — "is this uid A lead (any lead) of this project", the
+// app-layer mirror of is_project_lead() for call sites that want a plain
+// boolean rather than relying solely on RLS to reject an insert/update.
+async function isCallerLead(db: Db, projectId: string, userId: string): Promise<boolean> {
+  const { data } = await db
+    .from("project_members")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("role", "lead")
+    .maybeSingle();
+  return !!data;
 }
 
 function deadlineHasPassed(deadline: string | null): boolean {
@@ -190,7 +231,7 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
   // extra .in("project_id", ids) filter is needed for authorization; it's
   // still added below to keep the query scoped to exactly this page's rows.
   const [membersRes, proposalsRes] = await Promise.all([
-    db.from("project_members").select("project_id").in("project_id", ids),
+    db.from("project_members").select("project_id, user_id, role").in("project_id", ids),
     db.from("project_proposals").select("project_id, submitted_at").in("project_id", ids),
   ]);
 
@@ -204,8 +245,16 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
   }
 
   const memberCounts = new Map<string, number>();
-  for (const row of (membersRes.data ?? []) as { project_id: string }[]) {
+  // "Any lead" (project_members.role = 'lead' for the viewer) — matches
+  // is_project_lead()'s new meaning, see 2026-08-08_project_co_leads.sql.
+  const viewerIsLeadOf = new Set<string>();
+  for (const row of (membersRes.data ?? []) as {
+    project_id: string;
+    user_id: string | null;
+    role: "lead" | "member";
+  }[]) {
     memberCounts.set(row.project_id, (memberCounts.get(row.project_id) ?? 0) + 1);
+    if (row.user_id === viewer.id && row.role === "lead") viewerIsLeadOf.add(row.project_id);
   }
 
   const proposalSubmitted = new Set<string>();
@@ -218,9 +267,10 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
     name: row.name as string,
     description: (row.description as string | null) ?? null,
     member_count: memberCounts.get(row.id as string) ?? 0,
-    // Computed here, from the session — lead_id itself is never returned to
-    // the caller of this function, only this yes/no.
-    is_lead: row.lead_id === viewer.id,
+    // Computed here, from the session — never a raw id sent to the client,
+    // just this yes/no. "Any lead", not creator — see
+    // 2026-08-08_project_co_leads.sql.
+    is_lead: viewerIsLeadOf.has(row.id as string),
     deadline: (row.deadline as string | null) ?? null,
     challenge_key: (row.challenge_key as string | null) ?? null,
     proposal_submitted: proposalSubmitted.has(row.id as string),
@@ -309,7 +359,13 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       indication: (row.indication as string | null) ?? null,
       modality: (row.modality as string | null) ?? null,
       stage: (row.stage as string | null) ?? null,
-      is_lead: row.lead_id === viewer.id,
+      // "Any lead" — computed from the members list we already fetched,
+      // no extra query needed. NOT the same as is_creator below; see
+      // 2026-08-08_project_co_leads.sql for why the two diverge.
+      is_lead: ((membersRes.data ?? []) as { user_id: string | null; role: string }[]).some(
+        (m) => m.user_id === viewer.id && m.role === "lead"
+      ),
+      is_creator: row.lead_id === viewer.id,
       members: ((membersRes.data ?? []) as Record<string, unknown>[]).map((m) => {
         const userId = (m.user_id as string | null) ?? null;
         const identity = userId ? names.get(userId) : undefined;
@@ -399,11 +455,12 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
 
 // ── team ─────────────────────────────────────────────────────────────────────
 
-/** Add a member by email. LEAD ONLY — enforced twice: the
- *  "Project members: lead insert" RLS policy (the real gate) AND the
- *  explicit lead_id check below, which exists purely to return a clear
- *  { status: "forbidden" } instead of making a non-lead caller decode a raw
- *  42501 from Postgres.
+/** Add a member by email. ANY LEAD — enforced twice: the
+ *  "Project members: lead insert" RLS policy (the real gate, and now "any
+ *  lead" since is_project_lead() checks project_members.role, see
+ *  2026-08-08_project_co_leads.sql) AND the explicit isCallerLead() check
+ *  below, which exists purely to return a clear { status: "forbidden" }
+ *  instead of making a non-lead caller decode a raw 42501 from Postgres.
  *
  *  Email is lowercased before insert. The unique index is on
  *  (project_id, lower(email)) — inserting mixed-case would still collide
@@ -419,8 +476,8 @@ export async function addProjectMember(
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Project not found." };
-  if (gate.leadId !== user.id) {
-    return { status: "forbidden", error: "Only the project lead can add members." };
+  if (!(await isCallerLead(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead can add members." };
   }
 
   const normalized = email.trim().toLowerCase();
@@ -466,12 +523,17 @@ export async function addProjectMember(
   };
 }
 
-/** Remove a member. LEAD ONLY, and the lead may not remove themselves — RLS
- *  ("Project members: lead delete") enforces the first half but has no way
- *  to express the second: a lead deleting their OWN project_members row is
- *  a delete they're fully permitted to make, so "can't remove yourself" has
- *  to be a code-level check, done here by comparing the target row's
- *  user_id to the caller's own id before deleting anything. */
+/** Remove a member. ANY LEAD may remove a MEMBER; no one may remove a lead
+ *  (including themselves — that's "step down", a role UPDATE, not this).
+ *
+ *  As of 2026-08-08_project_co_leads.sql, "Project members: lead delete"
+ *  itself now enforces "never a lead row" at the database layer (its
+ *  USING clause requires role = 'member' on the TARGET row) — so the old
+ *  app-layer "lead can't remove themselves" check is no longer the only
+ *  thing stopping that; RLS backs it up structurally, for any caller, not
+ *  just a lead targeting their own row. The lookup below still runs first
+ *  so a caller gets "that member no longer exists" or a clear forbidden
+ *  reason instead of a silent zero-rows-affected delete. */
 export async function removeProjectMember(
   projectId: string,
   memberId: string
@@ -480,13 +542,13 @@ export async function removeProjectMember(
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Project not found." };
-  if (gate.leadId !== user.id) {
-    return { status: "forbidden", error: "Only the project lead can remove members." };
+  if (!(await isCallerLead(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead can remove members." };
   }
 
   const { data: member, error: memberErr } = await db
     .from("project_members")
-    .select("id, user_id")
+    .select("id, user_id, role")
     .eq("id", memberId)
     .eq("project_id", projectId)
     .maybeSingle();
@@ -497,8 +559,8 @@ export async function removeProjectMember(
   }
   if (!member) return { status: "error", error: "That member no longer exists." };
 
-  if (member.user_id === user.id) {
-    return { status: "forbidden", error: "The project lead can't remove themselves." };
+  if (member.role === "lead") {
+    return { status: "forbidden", error: "A lead can't be removed — they'd need to step down first." };
   }
 
   const { error } = await db
@@ -510,6 +572,131 @@ export async function removeProjectMember(
   if (error) {
     console.error("removeProjectMember: delete failed", error);
     return { status: "error", error: "Couldn't remove that member." };
+  }
+
+  return { status: "ok" };
+}
+
+/** Promote a member to lead. ANY LEAD may do this, to ANY member —
+ *  "Project members: promote or self-demote" RLS enforces it (its WITH
+ *  CHECK allows role = 'lead' unconditionally for any caller who is
+ *  already a lead per the USING clause). The isCallerLead() check below is
+ *  the same "clear forbidden message instead of a raw 42501" courtesy as
+ *  addProjectMember()'s.
+ *
+ *  Courtesy guard, app-layer only: refuses to promote a PENDING row
+ *  (user_id null) — nothing in RLS stops this at the SQL layer (the policy
+ *  has no opinion on it), but a person who hasn't signed up yet can't
+ *  exercise lead powers, so promoting them here would just be a role label
+ *  with nothing behind it. */
+export async function promoteProjectMember(
+  projectId: string,
+  memberId: string
+): Promise<PromoteMemberResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const gate = await loadProjectGate(db, projectId);
+  if (!gate) return { status: "error", error: "Project not found." };
+  if (!(await isCallerLead(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead can promote members." };
+  }
+
+  const { data: member, error: memberErr } = await db
+    .from("project_members")
+    .select("id, user_id, role")
+    .eq("id", memberId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+
+  if (memberErr) {
+    console.error("promoteProjectMember: lookup failed", memberErr);
+    return { status: "error", error: "Couldn't verify that member." };
+  }
+  if (!member) return { status: "error", error: "That member no longer exists." };
+  if (member.role === "lead") return { status: "ok" }; // already a lead — idempotent
+  if (!member.user_id) {
+    return {
+      status: "error",
+      error: "This person hasn't accepted their invitation yet — they can't be made a lead until they do.",
+    };
+  }
+
+  const { error } = await db
+    .from("project_members")
+    .update({ role: "lead" })
+    .eq("id", memberId)
+    .eq("project_id", projectId);
+
+  if (error) {
+    console.error("promoteProjectMember: update failed", error);
+    return { status: "error", error: "Couldn't promote that member." };
+  }
+
+  return { status: "ok" };
+}
+
+/** Step down from lead to member — the ONLY way a lead row ever becomes a
+ *  member row again; no one (not even another lead) can demote someone
+ *  else. Targets the CALLER'S OWN row, always — there is deliberately no
+ *  memberId parameter, so there's no way to even attempt this against
+ *  anyone else's row from this function's own interface.
+ *
+ *  The pre-check below (counting other leads) exists ONLY for a friendly
+ *  error message. The REAL, authoritative gate against the last lead
+ *  stepping down is the enforce_min_one_lead() trigger
+ *  (2026-08-08_project_co_leads.sql) — it fires on every UPDATE to this
+ *  table regardless of caller, so even if this pre-check raced with
+ *  another step-down and came back stale, the trigger still refuses the
+ *  write. This function's own contribution beyond the trigger is purely
+ *  UX: turning a raised-exception 500 into a clean { status: "last_lead" }
+ *  most of the time. */
+export async function stepDownFromLead(projectId: string): Promise<StepDownResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const gate = await loadProjectGate(db, projectId);
+  if (!gate) return { status: "error", error: "Project not found." };
+
+  const { data: myRow, error: myRowErr } = await db
+    .from("project_members")
+    .select("id, role")
+    .eq("project_id", projectId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (myRowErr) {
+    console.error("stepDownFromLead: lookup failed", myRowErr);
+    return { status: "error", error: "Couldn't verify your membership." };
+  }
+  if (!myRow || myRow.role !== "lead") {
+    return { status: "forbidden", error: "You're not a lead on this project." };
+  }
+
+  const { count, error: countErr } = await db
+    .from("project_members")
+    .select("id", { count: "exact", head: true })
+    .eq("project_id", projectId)
+    .eq("role", "lead");
+
+  if (countErr) {
+    console.error("stepDownFromLead: lead count failed", countErr);
+    return { status: "error", error: "Couldn't verify the project's leads." };
+  }
+  if ((count ?? 0) <= 1) {
+    return { status: "last_lead", error: "A project must always have at least one lead." };
+  }
+
+  const { error } = await db
+    .from("project_members")
+    .update({ role: "member" })
+    .eq("id", myRow.id);
+
+  if (error) {
+    // The trigger's own rejection lands here too (e.g. a race with another
+    // concurrent step-down) — Postgres reports it as a plain update error,
+    // not a distinct code worth special-casing; the message already says
+    // enough ("A project must always have at least one lead.").
+    console.error("stepDownFromLead: update failed", error);
+    return { status: "error", error: "Couldn't step down. Please try again." };
   }
 
   return { status: "ok" };
@@ -655,21 +842,26 @@ export async function upsertProposal(
   return { status: "ok" };
 }
 
-/** Submit the proposal — sets submitted_at. LEAD ONLY, and only before the
- *  deadline. Both are checked here because RLS cannot express either:
- *  "Project proposals: member update" lets any member write submitted_at
- *  just as freely as title/category/summary (it is, after all, the same
- *  UPDATE policy on the same row), and RLS has no concept of "now" to
- *  compare against projects.deadline at all. A client-side deadline check
- *  is a courtesy for the UI; this is the actual rule. */
+/** Submit the proposal — sets submitted_at. ANY LEAD, not creator-only.
+ *  Deleting a project is destructive and irreversible (everyone's work,
+ *  gone) — that stays creator-only, see deleteProject() below. Submitting
+ *  a proposal is operational, not destructive: if the creator is
+ *  unreachable the week of the deadline, a co-lead being unable to submit
+ *  is exactly the failure co-leads exist to prevent. Only before the
+ *  deadline, still. Both are checked here because RLS cannot express
+ *  either: "Project proposals: member update" lets any member write
+ *  submitted_at just as freely as title/category/summary (it is, after
+ *  all, the same UPDATE policy on the same row), and RLS has no concept of
+ *  "now" to compare against projects.deadline at all. A client-side
+ *  deadline check is a courtesy for the UI; this is the actual rule. */
 export async function submitProposal(projectId: string): Promise<SubmitProposalResult> {
   const { user, db } = await requireCurrentUser();
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Project not found." };
 
-  if (gate.leadId !== user.id) {
-    return { status: "forbidden", error: "Only the project lead can submit the proposal." };
+  if (!(await isCallerLead(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead can submit the proposal." };
   }
 
   if (deadlineHasPassed(gate.deadline)) {
@@ -741,13 +933,19 @@ export async function getProposalFileUrl(
 
 // ── delete ───────────────────────────────────────────────────────────────────
 
-/** Delete a project as its lead. Same pattern as
+/** Delete a project as its CREATOR — not any lead, even after
+ *  2026-08-08_project_co_leads.sql made everything else "any lead can".
+ *  Promoting a collaborator to co-lead must never hand them the power to
+ *  destroy a submitted proposal, so this checks projects.lead_id
+ *  specifically (via is_project_creator() in RLS, gate.creatorId here),
+ *  not is_project_lead(). Same pattern as
  *  lib/server/collab.ts:deleteCollabPost and
- *  lib/server/showcase.ts:deleteShowcaseEntry — session-derived user,
- *  .eq() on id (plus lead_id as belt-and-suspenders, matching those two's
- *  owner_id check), RLS ("Projects: lead delete", is_project_lead()) as the
- *  real gate. A non-lead's call — even a member's — matches zero rows
- *  silently, same as those two functions' own forged-caller case.
+ *  lib/server/showcase.ts:deleteShowcaseEntry otherwise — session-derived
+ *  user, .eq() on id (plus lead_id as belt-and-suspenders, matching those
+ *  two's owner_id check), RLS ("Projects: lead delete", now
+ *  is_project_creator()) as the real gate. A non-creator's call — even a
+ *  co-lead's — matches zero rows silently, same as those two functions'
+ *  own forged-caller case.
  *
  *  The database's ON DELETE CASCADE (2026-08-04_projects.sql) removes
  *  project_members, checklist_items and the project_proposals row for
@@ -764,30 +962,32 @@ export async function getProposalFileUrl(
  *  embedded IN THE PATH ITSELF and needs no such lookup. Verified this the
  *  hard way: deleting the project row first (matching showcase's order
  *  literally) cascades away every project_members row for it, including
- *  the lead's own — so by the time the storage delete ran, is_project_
- *  member() was already false for the very caller who just deleted their
- *  own project, and the storage delete silently no-op'd (no error, file
- *  left behind). Cleaning up storage FIRST, while the caller is still a
- *  real member of a project that still exists, is what makes it actually
- *  succeed. The spirit of "log rather than throw, so a cleanup failure
- *  can't block the delete" is preserved either way — only the ordering
- *  changed, and only because this bucket's policy needed it to.
+ *  the creator's own — so by the time the storage delete ran,
+ *  is_project_member() was already false for the very caller who just
+ *  deleted their own project, and the storage delete silently no-op'd (no
+ *  error, file left behind). Cleaning up storage FIRST, while the caller
+ *  is still a real member of a project that still exists, is what makes
+ *  it actually succeed. The spirit of "log rather than throw, so a
+ *  cleanup failure can't block the delete" is preserved either way — only
+ *  the ordering changed, and only because this bucket's policy needed it
+ *  to.
  *
  *  ONE MORE THING THAT ORDERING CHANGE OPENS UP: the storage delete policy
- *  checks MEMBERSHIP, not LEADERSHIP — so doing it before the projects-row
- *  delete (which is where leadership actually gets enforced, via
- *  .eq("lead_id", user.id) + RLS) would let any non-lead MEMBER delete the
- *  proposal file by calling this function, even though their attempt on
- *  the project row itself would then fail. That's a real gap a member
- *  shouldn't get just because storage now runs first — closed below with
- *  an explicit lead check (loadProjectGate) BEFORE touching storage at
- *  all, not left for the row delete to catch after the fact. */
+ *  checks MEMBERSHIP, not CREATORSHIP — so doing it before the
+ *  projects-row delete (which is where creatorship actually gets
+ *  enforced, via .eq("lead_id", user.id) + RLS) would let any non-creator
+ *  MEMBER (including a co-lead!) delete the proposal file by calling this
+ *  function, even though their attempt on the project row itself would
+ *  then fail. That's a real gap a member shouldn't get just because
+ *  storage now runs first — closed below with an explicit creator check
+ *  (loadProjectGate) BEFORE touching storage at all, not left for the row
+ *  delete to catch after the fact. */
 export async function deleteProject(projectId: string): Promise<DeleteProjectResult> {
   const { user, db } = await requireCurrentUser();
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Couldn't delete the project." };
-  if (gate.leadId !== user.id) {
+  if (gate.creatorId !== user.id) {
     return { status: "error", error: "Couldn't delete the project." };
   }
 

@@ -90,7 +90,7 @@ export default async function ProjectDetailPage({
               </p>
             )}
           </div>
-          {project.is_lead && (
+          {project.is_creator && (
             <DeleteProjectButton
               projectId={project.id}
               projectName={project.name}
@@ -114,7 +114,12 @@ export default async function ProjectDetailPage({
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
-      <TeamSection projectId={project.id} members={project.members} isLead={project.is_lead} />
+      <TeamSection
+        projectId={project.id}
+        members={project.members}
+        isLead={project.is_lead}
+        viewerUserId={user.id}
+      />
 
       {/* Only exists at all for a ColaboFest project — not merely empty or
           disabled for an ordinary one. */}
@@ -124,6 +129,10 @@ export default async function ProjectDetailPage({
           <ProposalSection
             projectId={project.id}
             proposal={project.proposal}
+            // Submission is ANY LEAD now, not creator-only — see
+            // lib/server/projects.ts:submitProposal(). Passing is_lead
+            // (not is_creator) keeps this button's visibility consistent
+            // with what the server action actually allows.
             isLead={project.is_lead}
             deadlinePassed={deadlinePassed}
             fileUrl={fileUrl}

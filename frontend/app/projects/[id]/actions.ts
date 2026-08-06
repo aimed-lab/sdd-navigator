@@ -10,7 +10,9 @@ import { UnauthorizedError } from "@/lib/auth";
 import {
   addProjectMember,
   deleteProject,
+  promoteProjectMember,
   removeProjectMember,
+  stepDownFromLead,
   submitProposal,
   upsertProposal,
 } from "@/lib/server/projects";
@@ -36,8 +38,8 @@ export async function addMemberAction(projectId: string, email: string): Promise
 }
 
 /** Remove a member. Confirmation ("are you sure?") lives in the UI —
- *  lib/server/projects.ts is what actually blocks the lead removing
- *  themselves, not this action. */
+ *  lib/server/projects.ts (backed by RLS) is what actually blocks removing
+ *  a lead at all, not this action. */
 export async function removeMemberAction(
   projectId: string,
   memberId: string
@@ -53,6 +55,44 @@ export async function removeMemberAction(
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to remove members." };
     console.error("removeMemberAction failed", e);
     return { ok: false, error: "Couldn't remove that member. Please try again." };
+  }
+}
+
+/** Promote a member to lead. Any lead may call this, on any (linked)
+ *  member — lib/server/projects.ts is the real gate. */
+export async function promoteMemberAction(
+  projectId: string,
+  memberId: string
+): Promise<ActionResult> {
+  if (!projectId || !memberId) return { ok: false, error: "Missing member." };
+
+  try {
+    const result = await promoteProjectMember(projectId, memberId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to promote members." };
+    console.error("promoteMemberAction failed", e);
+    return { ok: false, error: "Couldn't promote that member. Please try again." };
+  }
+}
+
+/** Step down from lead to member — always targets the CALLER'S OWN row.
+ *  lib/server/projects.ts is what actually blocks the last lead stepping
+ *  down (via a database trigger, not this action). */
+export async function stepDownAction(projectId: string): Promise<ActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+
+  try {
+    const result = await stepDownFromLead(projectId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to step down." };
+    console.error("stepDownAction failed", e);
+    return { ok: false, error: "Couldn't step down. Please try again." };
   }
 }
 
@@ -100,7 +140,8 @@ export async function submitProposalAction(projectId: string): Promise<ActionRes
 
 /** Delete the project. Confirmation (naming what's destroyed) lives in the
  *  UI — lib/server/projects.ts's deleteProject() is what actually gates
- *  this to the lead, via RLS ("Projects: lead delete"), not this action. */
+ *  this to the CREATOR (not any lead), via RLS ("Projects: lead delete",
+ *  now backed by is_project_creator()), not this action. */
 export async function deleteProjectAction(projectId: string): Promise<ActionResult> {
   if (!projectId) return { ok: false, error: "Missing project." };
 
