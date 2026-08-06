@@ -140,11 +140,13 @@ export default function ChecklistSection({
   projectName,
   projectDescription,
   items,
+  isColabofest,
 }: {
   projectId: string;
   projectName: string;
   projectDescription: string | null;
   items: ChecklistItem[];
+  isColabofest?: boolean;
 }) {
   const router = useRouter();
   const [list, setList] = useState<ChecklistItem[]>(items);
@@ -271,7 +273,29 @@ export default function ChecklistSection({
 
   return (
     <section className="mb-20">
-      <h2 className="font-headline-md text-headline-md text-on-background mb-8">Checklist</h2>
+      <h2
+        className={
+          "font-headline-md text-headline-md text-on-background " +
+          (isColabofest ? "mb-2" : "mb-8")
+        }
+      >
+        Checklist
+      </h2>
+
+      {isColabofest && (
+        <p className="font-body-sm text-body-sm text-secondary mb-8">
+          Section A essentials are pre-filled below.{" "}
+          <a
+            href="/colabofest-readiness-checklist.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            See the full readiness checklist (PDF)
+          </a>{" "}
+          for sections B–H.
+        </p>
+      )}
 
       {list.length === 0 ? (
         <p className="font-body-md text-body-md text-secondary mb-6">No checklist items yet.</p>

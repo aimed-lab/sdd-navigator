@@ -171,6 +171,7 @@ export default async function ProjectDetailPage({
         projectName={project.name}
         projectDescription={project.description}
         items={project.checklist}
+        isColabofest={project.challenge_key === "colabofest_2026"}
       />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
