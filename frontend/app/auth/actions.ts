@@ -19,14 +19,34 @@ import {
   deleteAccount,
   requestPasswordReset,
   signInWithEmail,
+  signInWithSSO,
   signOut,
   signUp,
   updatePassword,
   ServerConfigError,
   UnauthorizedError,
   type AuthOutcome,
+  type SSORedirectOutcome,
 } from "@/lib/auth";
 const CONFIG_ERROR = "Sign-in is not configured on this server.";
+
+/** SSO — the only reachable sign-in path. Starts the SPARC Keycloak redirect
+ *  and hands the caller the authorization URL to navigate to. `callbackUrl`
+ *  is where the user lands AFTER /auth/callback completes the exchange. */
+export async function ssoLoginAction(callbackUrl: string): Promise<SSORedirectOutcome> {
+  const origin = await requestOrigin();
+  if (!origin) return { ok: false, error: "Couldn't determine this site's URL." };
+
+  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(callbackUrl)}`;
+
+  try {
+    return await signInWithSSO(redirectTo);
+  } catch (e) {
+    if (e instanceof ServerConfigError) return { ok: false, error: CONFIG_ERROR };
+    console.error("ssoLoginAction failed", e);
+    return { ok: false, error: "Couldn't start sign-in. Please try again." };
+  }
+}
 
 /** This deployment's origin, from the request. Emailed links must point back at
  *  the host the user is actually on, so it is never hardcoded or client-supplied. */

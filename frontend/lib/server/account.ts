@@ -1,7 +1,7 @@
 // lib/server/account.ts — account settings TABLE ops (session-scoped, RLS).
 //
 // STEP 4a: the users-table reads/writes moved verbatim from settings/page.tsx.
-// All go through requireUser(), so the uid is derived from the validated session
+// All go through requireCurrentUser(), so the uid is derived from the validated session
 // and RLS scopes every op to the caller — a user can only ever read/write their
 // own row. Same table/columns/filters as before.
 //
@@ -14,7 +14,7 @@
 // the settings panel. The COLUMNS still exist in the users table — restoring the
 // feature means re-adding a writer here, not a migration.
 
-import { requireUser } from "./supabaseServer";
+import { requireCurrentUser } from "@/lib/auth";
 
 export type AccountSettings = {
   name: string | null;
@@ -33,7 +33,7 @@ export type ProfileFieldPatch = Partial<
 // `maybeSingle()` result so the page keeps its exact "no row → keep defaults"
 // behavior (it applies the same `?? fallback` mapping either way).
 export async function getAccountSettings(): Promise<AccountSettings | null> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { data, error } = await supabase
     .from("users")
     .select("name, affiliation, institution, country, is_public, profile_slug")
@@ -44,7 +44,7 @@ export async function getAccountSettings(): Promise<AccountSettings | null> {
 }
 
 export async function updateProfileFields(patch: ProfileFieldPatch): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { error } = await supabase.from("users").update(patch).eq("id", user.id);
   if (error) throw error;
 }

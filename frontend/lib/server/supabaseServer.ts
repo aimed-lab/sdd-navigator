@@ -74,24 +74,12 @@ export class UnauthorizedError extends Error {
   }
 }
 
-// requireUser — the single gateway every user-owned lib/server op goes through.
-// Builds the SESSION client from the caller's cookies and validates the JWT via
-// getUser(). Returns the authenticated user together with its client, so the
-// uid used in queries is ALWAYS derived here from the validated session, never
-// passed in by a caller or read from a request body. RLS then enforces
-// ownership at the database level on top of that.
-export async function requireUser() {
-  const supabase = await getSessionClient();
-  if (!supabase) throw new ServerConfigError();
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-  if (error || !user) throw new UnauthorizedError();
-
-  return { supabase, user };
-}
+// requireCurrentUser() (lib/auth.ts) is the single gateway every user-owned
+// lib/server op goes through — it used to be re-exported from here as
+// requireUser(), which made this file a SECOND, independent call site for
+// `supabase.auth.getUser()` alongside lib/auth.ts itself. Moved there
+// entirely so a provider swap only ever touches lib/auth.ts. Import
+// requireCurrentUser from "@/lib/auth", not from here.
 
 // Maps a lib/server error to a JSON route response with the right status code.
 // Keeps the auth/config → HTTP mapping in one place so the thin route handlers

@@ -2,11 +2,10 @@
 //
 // STEP 4a: logic moved verbatim from discovery/page.tsx. Same table/column/
 // filter; the only change is that uid is derived from the validated session
-// (requireUser) instead of a client-supplied id, so RLS scopes every op to the
+// (requireCurrentUser) instead of a client-supplied id, so RLS scopes every op to the
 // caller. See [[project-researcher-profiles]] for the users table shape.
 
-import { getSession } from "@/lib/auth";
-import { requireUser } from "./supabaseServer";
+import { getSession, requireCurrentUser } from "@/lib/auth";
 
 /**
  * The caller's interests, or [] when signed out — the read for code paths that
@@ -32,7 +31,7 @@ export async function getCurrentUserInterests(): Promise<string[]> {
 }
 
 export async function getInterests(): Promise<string[]> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { data, error } = await supabase
     .from("users")
     .select("interests")
@@ -43,7 +42,7 @@ export async function getInterests(): Promise<string[]> {
 }
 
 export async function setInterests(next: string[]): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { error } = await supabase
     .from("users")
     .update({ interests: next })

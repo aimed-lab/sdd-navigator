@@ -1,7 +1,7 @@
 // lib/server/profile.ts — profile editor read/write (session-scoped, RLS).
 //
 // STEP 4a: the users + researcher_works reads/writes moved verbatim from
-// profile/setup/page.tsx. Everything goes through requireUser(), so the uid is
+// profile/setup/page.tsx. Everything goes through requireCurrentUser(), so the uid is
 // derived from the validated session and RLS scopes every op to the caller — a
 // user can only ever read/write their OWN profile and works. See
 // [[project-researcher-profiles]] for the users/researcher_works shape.
@@ -11,7 +11,7 @@
 // profile_slug is passed in the patch and written verbatim. name→auth metadata
 // is NOT involved here (this page never called auth.updateUser).
 
-import { requireUser } from "./supabaseServer";
+import { requireCurrentUser } from "@/lib/auth";
 
 // One researcher_works row as edited in the profile setup form. No user_id here:
 // the owner is always stamped from the session in replaceResearcherWorks.
@@ -47,7 +47,7 @@ export type ProfileData = {
 // resources read is session-scoped (own rows only) and used purely to prefill the
 // editor so a re-save doesn't blindly duplicate an already-registered resource.
 export async function getProfile(): Promise<ProfileData> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
 
   const { data: profile, error: profileErr } = await supabase
     .from("users")
@@ -81,7 +81,7 @@ export async function getProfile(): Promise<ProfileData> {
 // columns, interests, is_public, profile_slug) and written verbatim; ownership
 // is enforced by the session uid + RLS.
 export async function updateProfile(patch: Record<string, unknown>): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { error } = await supabase.from("users").update(patch).eq("id", user.id);
   if (error) throw error;
 }
@@ -91,7 +91,7 @@ export async function updateProfile(patch: Record<string, unknown>): Promise<voi
 // rows never carry a user_id; it is stamped here from the session, so a caller
 // can never delete or insert another user's works. Same order as the original.
 export async function replaceResearcherWorks(rows: ResearcherWork[]): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
 
   const { error: deleteErr } = await supabase
     .from("researcher_works")

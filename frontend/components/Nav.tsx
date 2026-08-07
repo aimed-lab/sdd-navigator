@@ -128,15 +128,12 @@ export default function Nav() {
           {/* Desktop auth actions — default to logged-out until we know otherwise
               (avoids a flicker and keeps the actions in the server-rendered HTML) */}
           <div className="hidden md:flex items-center gap-2">
+            {/* One SSO button — no separate "Log in" vs "Sign up" anymore
+                (see app/signup/page.tsx and app/login/page.tsx). */}
             {!user && (
-              <>
-                <Link href="/login" className="font-label-md text-label-md text-secondary hover:text-primary px-4">
-                  Log in
-                </Link>
-                <Link href="/signup" className="btn-primary px-6 py-2 rounded-lg font-label-md text-label-md">
-                  Sign up
-                </Link>
-              </>
+              <Link href="/login" className="btn-primary px-6 py-2 rounded-lg font-label-md text-label-md">
+                Sign in
+              </Link>
             )}
             {user && (
               <Link
@@ -221,14 +218,13 @@ export default function Nav() {
           ))}
           <div className="h-px bg-surface-variant/50 my-1" />
           {!user && (
-            <>
-              <Link href="/login" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-secondary">
-                Log in
-              </Link>
-              <Link href="/signup" onClick={() => setMobileOpen(false)} className="btn-primary text-center px-6 py-2 rounded-lg font-label-md text-label-md">
-                Sign up
-              </Link>
-            </>
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="btn-primary text-center px-6 py-2 rounded-lg font-label-md text-label-md"
+            >
+              Sign in
+            </Link>
           )}
           {user && (
             <>

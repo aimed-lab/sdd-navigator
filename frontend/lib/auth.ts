@@ -15,24 +15,27 @@
 //                server-only) and no page imports Supabase.
 //
 // ┌───────────────────────────────────────────────────────────────────────────┐
-// │ SWAP POINT — Oracle / UAB SSO migration                                   │
+// │ SPARC SSO — LIVE. Supabase Auth is still the session layer; it now         │
+// │ federates identity to the lab's Keycloak (issuer                          │
+// │ auth.smartdrugdiscovery.org/realms/sdd) via a custom OIDC provider         │
+// │ registered in Supabase as `custom:sdd`. signInWithSSO() below starts that  │
+// │ redirect. auth.uid() and every RLS policy / SECURITY DEFINER function are  │
+// │ untouched — they were never coupled to *how* the session got established. │
 // │                                                                           │
-// │ When identity moves off Supabase Auth, ONLY this file changes. Reimplement │
-// │ the functions below against the new provider and every caller keeps        │
-// │ working, because callers depend on the AuthUser / AuthOutcome shapes and   │
-// │ on requireCurrentUser() throwing UnauthorizedError — not on Supabase.      │
+// │ signInWithEmail / signUp / requestPasswordReset / updatePassword /         │
+// │ confirmEmailLink still exist below and still work, but nothing in the UI   │
+// │ calls them anymore — SSO is the only reachable sign-in path. Left in place │
+// │ deliberately (not deleted) in case a break-glass path is ever needed.      │
 // │                                                                           │
-// │ Expect the SESSION group to change shape most: under SSO, signInWithEmail  │
-// │ and signUp are replaced by an IdP redirect, and email confirmation stops   │
-// │ being ours to manage. They are server-side already precisely so that       │
-// │ redirect flow drops in here without touching a single page.                │
-// │                                                                           │
-// │ The one thing a replacement MUST preserve: `getDb()` returns a client that │
-// │ carries the caller's identity, because Postgres RLS (auth.uid() = ...) is  │
-// │ the real enforcement layer. If the new provider can't produce a            │
-// │ request-scoped DB identity, the RLS policies in database/schema.sql need   │
-// │ revisiting at the same time — they are not app-level checks that can be    │
-// │ swapped independently.                                                    │
+// │ A FUTURE swap off Supabase Auth entirely still only touches this file:     │
+// │ callers depend on the AuthUser / AuthOutcome shapes and on                 │
+// │ requireCurrentUser() throwing UnauthorizedError, not on Supabase. The one  │
+// │ thing a replacement MUST preserve: `getDb()` returns a client that carries │
+// │ the caller's identity, because Postgres RLS (auth.uid() = ...) is the      │
+// │ real enforcement layer. If a new provider can't produce a request-scoped   │
+// │ DB identity, the RLS policies in database/schema.sql need revisiting at    │
+// │ the same time — they are not app-level checks that can be swapped          │
+// │ independently.                                                            │
 // └───────────────────────────────────────────────────────────────────────────┘
 
 import {
@@ -40,7 +43,6 @@ import {
   UnauthorizedError,
   getServiceRoleClient,
   getSessionClient,
-  requireUser,
 } from "@/lib/server/supabaseServer";
 
 // Re-exported so callers can catch/handle these without reaching past this file.
@@ -59,6 +61,11 @@ export type AuthUser = {
  *  (This previously carried a `needsEmailConfirmation` flag. Email confirmation
  *  was removed from signup, so every success is now immediate.) */
 export type AuthOutcome = { ok: true } | { ok: false; error: string };
+
+/** Result of starting an SSO redirect — carries the IdP authorization URL the
+ *  caller must navigate the browser to, since signInWithOAuth() cannot do
+ *  that itself from server-side code (only the browser SDK auto-redirects). */
+export type SSORedirectOutcome = { ok: true; url: string } | { ok: false; error: string };
 
 /** Supabase's raw auth errors are either too technical or too revealing to show
  *  a user verbatim. This is the ONE place that translation happens, so swapping
@@ -125,9 +132,23 @@ export async function getSession(): Promise<{ user: AuthUser; db: Db } | null> {
 
 /** Like getCurrentUser() but THROWS UnauthorizedError when signed out. The
  *  gateway for every write: the uid comes from the validated session here, never
- *  from a request body. */
+ *  from a request body.
+ *
+ *  THE single place every lib/server/* write goes through — this used to
+ *  delegate to a `requireUser()` in lib/server/supabaseServer.ts, which made
+ *  that file a second, independent call site for `supabase.auth.getUser()`.
+ *  Owning the call here instead means a provider swap only ever touches this
+ *  file, not supabaseServer.ts too — see the SWAP POINT box above. */
 export async function requireCurrentUser(): Promise<{ user: AuthUser; db: Db }> {
-  const { supabase, user } = await requireUser();
+  const supabase = await getSessionClient();
+  if (!supabase) throw new ServerConfigError();
+
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) throw new UnauthorizedError();
+
   return { user: { id: user.id, email: user.email ?? null }, db: supabase as Db };
 }
 
@@ -145,6 +166,39 @@ export async function requireCurrentUser(): Promise<{ user: AuthUser; db: Db }> 
 //
 // Pages never call these directly (they can't — this module is server-only).
 // They go through app/auth/actions.ts, which is the only caller.
+
+// ── SSO (SPARC Keycloak, `custom:sdd`) ───────────────────────────────────────
+//
+// Supabase Auth stays the SESSION layer — it federates identity to Keycloak
+// via a registered custom OIDC provider, but auth.uid() and the session
+// cookies work exactly as before. Nothing in RLS or any SECURITY DEFINER
+// function changes for this; they were never coupled to *how* the session
+// was established, only to Supabase Auth issuing it.
+
+/** Begin the SPARC SSO sign-in redirect. Returns the Keycloak authorization
+ *  URL for the caller to navigate the browser to. `redirectTo` must be this
+ *  app's own /auth/callback route (with `?next=` already appended) — Keycloak
+ *  and Supabase both need to land back on our origin before the final
+ *  destination redirect happens. */
+export async function signInWithSSO(redirectTo: string): Promise<SSORedirectOutcome> {
+  const supabase = await getSessionClient();
+  if (!supabase) throw new ServerConfigError();
+
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    // Supabase's `Provider` union predates custom OIDC providers — `custom:sdd`
+    // is a real, dashboard-registered identifier the API accepts at runtime,
+    // just not one the SDK's own type knows about yet.
+    provider: "custom:sdd" as unknown as Parameters<
+      typeof supabase.auth.signInWithOAuth
+    >[0]["provider"],
+    options: { redirectTo, skipBrowserRedirect: true },
+  });
+
+  if (error || !data?.url) {
+    return { ok: false, error: friendlyAuthError(error?.message ?? "") };
+  }
+  return { ok: true, url: data.url };
+}
 
 /** Sign in with email + password. Sets the session cookies as a side effect. */
 export async function signInWithEmail(
@@ -328,7 +382,7 @@ export async function updatePassword(newPassword: string): Promise<AuthOutcome> 
  * email, server-side — a caller cannot nominate someone else's account.
  */
 export async function deleteAccount(confirmEmail: string): Promise<AuthOutcome> {
-  const { supabase: sessionDb, user } = await requireUser();
+  const { db: sessionDb, user } = await requireCurrentUser();
 
   const typed = confirmEmail.trim().toLowerCase();
   const actual = (user.email ?? "").trim().toLowerCase();

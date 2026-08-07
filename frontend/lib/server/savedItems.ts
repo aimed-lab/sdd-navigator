@@ -1,11 +1,11 @@
 // lib/server/savedItems.ts — saved_items read/write (session-scoped, RLS).
 //
 // STEP 4a: logic moved verbatim from discovery/page.tsx. Same table/columns/
-// filters; uid comes from the validated session (requireUser), never from the
+// filters; uid comes from the validated session (requireCurrentUser), never from the
 // caller, so RLS scopes every op to the owner.
 
 import type { DiscoverItem } from "@/types/discover";
-import { requireUser } from "./supabaseServer";
+import { requireCurrentUser } from "@/lib/auth";
 
 export type SavedItem = { item_id: string; item_data: DiscoverItem };
 
@@ -15,7 +15,7 @@ export type SavedItem = { item_id: string; item_data: DiscoverItem };
 const UNIQUE_VIOLATION = "23505";
 
 export async function listSavedItems(): Promise<SavedItem[]> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { data, error } = await supabase
     .from("saved_items")
     .select("item_id, item_data")
@@ -32,7 +32,7 @@ export async function listSavedItems(): Promise<SavedItem[]> {
 }
 
 export async function addSavedItem(item: DiscoverItem): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { error } = await supabase
     .from("saved_items")
     .insert({ user_id: user.id, item_id: item.id, item_data: item });
@@ -40,7 +40,7 @@ export async function addSavedItem(item: DiscoverItem): Promise<void> {
 }
 
 export async function removeSavedItem(itemId: string): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
   const { error } = await supabase
     .from("saved_items")
     .delete()

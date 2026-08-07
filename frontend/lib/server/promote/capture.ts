@@ -2,7 +2,7 @@
 //
 // Step 3 of the "Promote" feature. After a researcher copies/opens their draft
 // post, we OPTIONALLY capture their identity (ORCID / LinkedIn) tied to the paper
-// into `promote_captures`. Unlike connections.ts (which is requireUser-scoped),
+// into `promote_captures`. Unlike connections.ts (which is requireCurrentUser-scoped),
 // this is intentionally PUBLIC: the subject is an external researcher, not the
 // logged-in caller, and the table's RLS is "anyone can insert" — so we write with
 // the anon server client, never the session client.

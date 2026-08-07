@@ -10,13 +10,14 @@
 //     session the server actions write, so the Nav updates without a reload
 //     after onAuthStateChange fires.
 //
-// The Supabase import here is therefore a session *reader*, not an auth
-// implementation. Under SSO this becomes "read the IdP session" and the
-// consumers (useAuth) do not change.
+// This file no longer touches @supabase/* directly — it reads the session
+// through lib/authClient.ts, the client-side half of the auth seam. Under
+// SSO this becomes "read the IdP session" and the consumers (useAuth) do not
+// change; only lib/authClient.ts (and lib/auth.ts, server-side) would.
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase";
+import { getClientSession, onAuthStateChange } from "@/lib/authClient";
 import { logoutAction } from "@/app/auth/actions";
 
 type AuthContextValue = {
@@ -35,18 +36,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
+    getClientSession().then((next) => {
+      setSession(next);
+      setUser(next?.user ?? null);
       setLoading(false);
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+    return onAuthStateChange((next) => {
       setSession(next);
       setUser(next?.user ?? null);
     });
-
-    return () => sub.subscription.unsubscribe();
   }, []);
 
   // Prefer the signup display name; fall back to the email prefix.

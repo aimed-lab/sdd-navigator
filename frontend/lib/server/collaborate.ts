@@ -5,17 +5,18 @@
 // public browse payload carries only the resource + a joined owner NAME (from
 // public.users, which itself exposes only is_public profiles + never email).
 //
-// WRITE (createResource) is AUTH-GATED — it goes through requireUser() so the
+// WRITE (createResource) is AUTH-GATED — it goes through requireCurrentUser() so the
 // owner (owner_id) is derived from the validated session, never the caller. RLS
 // (WITH CHECK auth.uid() = owner_id) then guarantees a user can only register
 // resources as themselves.
 //
 // CONTACT (getResourceContact) is AUTH-GATED too — the ONLY path that ever returns
-// contact_info. It requires a signed-in session (requireUser) but any signed-in
+// contact_info. It requires a signed-in session (requireCurrentUser) but any signed-in
 // user may read any resource's contact_info (the read policy is public); this is
 // the owner's explicitly-chosen contact text, not their account email.
 
-import { getAnonServerClient, requireUser, ServerConfigError } from "./supabaseServer";
+import { requireCurrentUser } from "@/lib/auth";
+import { getAnonServerClient, ServerConfigError } from "./supabaseServer";
 
 // The 8 spreadsheet categories the generic table supports. Only 'technique' has a
 // UI/flow in v1; the rest are schema-ready for later forms (no schema change).
@@ -124,9 +125,9 @@ export function parseResourceInput(body: unknown): CreateResourceInput | null {
 }
 
 // Insert one resource owned by the signed-in user. owner_id comes from the
-// validated session (requireUser), never the input. Returns the new row id.
+// validated session (requireCurrentUser), never the input. Returns the new row id.
 export async function createResource(input: CreateResourceInput): Promise<string> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("lab_resources")
@@ -148,10 +149,10 @@ export async function createResource(input: CreateResourceInput): Promise<string
 export type ResourceContact = { contact_info: string | null; owner_name: string | null };
 
 // Return ONLY the owner-chosen contact text + owner name for one resource. Auth-
-// gated (requireUser) — the whole point is that contact details are visible to
+// gated (requireCurrentUser) — the whole point is that contact details are visible to
 // signed-in members only. Returns null when the resource doesn't exist.
 export async function getResourceContact(id: string): Promise<ResourceContact | null> {
-  const { supabase } = await requireUser();
+  const { db: supabase } = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("lab_resources")

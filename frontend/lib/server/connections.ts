@@ -5,11 +5,11 @@
 // respond THROUGH the platform later (the attribution/tracking mechanism). No
 // email or external contact is exchanged or stored here.
 //
-// WRITE goes through requireUser() so the requester (user_id) is derived from the
+// WRITE goes through requireCurrentUser() so the requester (user_id) is derived from the
 // validated session, never from the caller. RLS (WITH CHECK auth.uid() = user_id)
 // then guarantees a user can only file requests as themselves.
 
-import { requireUser } from "./supabaseServer";
+import { requireCurrentUser } from "@/lib/auth";
 
 export type ConnectionRequestInput = {
   provider_name: string;          // e.g. "UAB SPARC" (from the card)
@@ -44,9 +44,9 @@ export function parseConnectionInput(body: unknown): ConnectionRequestInput | nu
 }
 
 // Insert one connection request as the signed-in user. user_id comes from the
-// validated session (requireUser), never the input. Returns the new row id.
+// validated session (requireCurrentUser), never the input. Returns the new row id.
 export async function createConnectionRequest(input: ConnectionRequestInput): Promise<string> {
-  const { supabase, user } = await requireUser();
+  const { db: supabase, user } = await requireCurrentUser();
 
   const { data, error } = await supabase
     .from("connection_requests")
