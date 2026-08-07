@@ -27,6 +27,7 @@ const ACCENT: Record<string, string> = {
   trial: "border-t-purple-500",
   grant: "border-t-amber-500",
   dataset: "border-t-emerald-500",
+  geneset: "border-t-fuchsia-500",
   episode: "border-t-primary-container",
   resource: "border-t-teal-500",
   person: "border-t-secondary",
@@ -45,6 +46,23 @@ type GeoRaw = {
 function geoFields(item: ExploreItem): GeoRaw | null {
   if (item.kind !== "dataset") return null;
   return (item.raw ?? {}) as GeoRaw;
+}
+
+// PAGER gene-set fields (backend/explore-mcp/sources/pager.py) — all in
+// `raw`, no top-level Item field for any of them. No WINNER badge here:
+// signal is always null for this kind (gene sets have no citation graph),
+// so signalBadge() falls through to the plain date badge automatically —
+// same "no fabricated ranking" idiom as GEO datasets above.
+type GenesetRaw = {
+  type_label?: string;
+  source?: string | null;
+  size?: number;
+  ncoco_score?: number;
+};
+
+function genesetFields(item: ExploreItem): GenesetRaw | null {
+  if (item.kind !== "geneset") return null;
+  return (item.raw ?? {}) as GenesetRaw;
 }
 
 function compact(n: number): string {
@@ -121,6 +139,7 @@ export default function ItemCard({
   const imageUrl =
     item.kind === "episode" ? (item.raw?.image_url as string | undefined) : undefined;
   const geo = geoFields(item);
+  const geneset = genesetFields(item);
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
@@ -266,6 +285,26 @@ export default function ItemCard({
               )}
               {geo.experiment_type && <span>{geo.experiment_type}</span>}
               {geo.platform && <span>{geo.platform}</span>}
+            </div>
+          )}
+
+          {/* PAG type, source, size and nCoCo — same at-a-glance treatment
+              as GEO's organism/sample-count above: this is what tells a
+              researcher whether the gene set is worth opening. */}
+          {geneset && (
+            <div className="mt-2 flex items-center gap-x-2 gap-y-1 flex-wrap text-secondary text-body-sm font-body-sm">
+              {geneset.type_label && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-700 font-label-md text-label-md font-semibold">
+                  {geneset.type_label}
+                </span>
+              )}
+              {geneset.source && <span>{geneset.source}</span>}
+              {typeof geneset.size === "number" && (
+                <span>{geneset.size.toLocaleString()} genes</span>
+              )}
+              {typeof geneset.ncoco_score === "number" && geneset.ncoco_score > 0 && (
+                <span>nCoCo {geneset.ncoco_score.toFixed(2)}</span>
+              )}
             </div>
           )}
         </div>

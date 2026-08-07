@@ -34,12 +34,21 @@
 import { getDb, requireCurrentUser, type Db } from "@/lib/auth";
 import type { ExploreItem } from "@/types/explore";
 
-// The five kinds STRUCTURE.md's count-tile row names, in the order they're
-// shown. Other kinds (news, resource, person, episode) can still be saved
-// (nothing stops it at the DB layer) and count toward the total, but don't
-// get a dedicated tile — there was never a "Podcast tile" or "People tile"
-// asked for here.
-const TILE_KINDS = ["paper", "dataset", "tool", "trial", "grant"] as const;
+// Every kind ExploreItem can carry (types/explore.ts), in the order tiles
+// are shown. A saved item's kind always gets a tile now — a save with no
+// matching tile was the original bug (an episode counted toward "N saved"
+// but rendered nowhere).
+const TILE_KINDS = [
+  "paper",
+  "dataset",
+  "tool",
+  "trial",
+  "grant",
+  "news",
+  "resource",
+  "person",
+  "episode",
+] as const;
 type TileKind = (typeof TILE_KINDS)[number];
 
 const TILE_LABEL: Record<TileKind, string> = {
@@ -48,6 +57,10 @@ const TILE_LABEL: Record<TileKind, string> = {
   tool: "Tools",
   trial: "Trials",
   grant: "Grants",
+  news: "News",
+  resource: "Resources",
+  person: "People",
+  episode: "Episodes",
 };
 
 export type ResourceTile = { kind: TileKind; label: string; count: number };

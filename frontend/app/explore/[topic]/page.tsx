@@ -30,6 +30,7 @@ const SECTION_TITLE: Record<string, string> = {
   news: "Industry News",
   paper: "Latest Papers",
   dataset: "Datasets",
+  geneset: "Gene sets",
   tool: "Trending Tools",
   trial: "Clinical Trials",
   grant: "Funding & Grants",

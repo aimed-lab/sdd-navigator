@@ -78,14 +78,19 @@ export type CreateProjectInput = {
   stage?: ProjectStage | null;
 };
 
-/** The "Explore for this project" query text — target + indication +
- *  modality (as its human label, not the raw enum value a search bar
- *  would be a poor match against), joined with spaces. Falls back to the
- *  project's own name when all three are empty, which is always
- *  non-blank (a project can't exist without one) — so this function
- *  always returns something searchable. */
+/** The "Explore for this project" query text. The backend's explore()
+ *  already runs LLM scope extraction over free text, so the project's own
+ *  NAME and DESCRIPTION — the richest signal available, full sentences
+ *  the extractor can actually parse — are the input, not thrown away in
+ *  favor of a bare keyword string. target/indication/modality (as its
+ *  human label, not the raw enum value) are still valuable, so they're
+ *  APPENDED as context rather than replacing the free text, in case the
+ *  description doesn't happen to mention one of them by name. Falls back
+ *  to the name alone when description is empty, which never leaves the
+ *  query blank — a project can't exist without a name. */
 export function buildProjectExploreQuery(project: {
   name: string;
+  description: string | null;
   target: string | null;
   indication: string | null;
   modality: string | null;
@@ -93,11 +98,15 @@ export function buildProjectExploreQuery(project: {
   const modalityLabel = project.modality
     ? MODALITY_LABEL[project.modality as Modality] ?? project.modality
     : null;
-  const parts = [project.target, project.indication, modalityLabel]
+  const contextParts = [project.target, project.indication, modalityLabel]
     .map((s) => s?.trim())
     .filter((s): s is string => !!s);
-  const query = parts.join(" ").trim();
-  return query || project.name;
+
+  const base = [project.name.trim(), project.description?.trim()]
+    .filter((s): s is string => !!s)
+    .join(". ");
+
+  return contextParts.length ? `${base} (${contextParts.join(", ")})` : base;
 }
 
 /** The full href for "Explore for this project" — the built query as the
@@ -107,6 +116,7 @@ export function buildProjectExploreQuery(project: {
 export function buildProjectExploreHref(project: {
   id: string;
   name: string;
+  description: string | null;
   target: string | null;
   indication: string | null;
   modality: string | null;

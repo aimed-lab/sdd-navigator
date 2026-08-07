@@ -25,6 +25,10 @@ const TILE_ICON: Record<string, string> = {
   tool: "biotech",
   trial: "vaccines",
   grant: "payments",
+  news: "newspaper",
+  resource: "link",
+  person: "person",
+  episode: "podcasts",
 };
 
 export default function ResourcesSection({

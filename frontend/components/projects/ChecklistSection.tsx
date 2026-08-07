@@ -284,7 +284,9 @@ export default function ChecklistSection({
 
       {isColabofest && (
         <p className="font-body-sm text-body-sm text-secondary mb-8">
-          Section A essentials are pre-filled below.{" "}
+          {list.length > 0
+            ? "Section A essentials are pre-filled below."
+            : "Add Section A's essentials below to get started."}{" "}
           <a
             href="/colabofest-readiness-checklist.pdf"
             target="_blank"

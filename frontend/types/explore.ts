@@ -8,7 +8,7 @@ export type Signal = {
 
 export type ExploreItem = {
   id: string;
-  kind: string; // paper | news | trial | grant | tool | dataset | resource | person | episode
+  kind: string; // paper | news | trial | grant | tool | dataset | geneset | resource | person | episode
   title: string;
   summary: string | null;
   url: string | null;
