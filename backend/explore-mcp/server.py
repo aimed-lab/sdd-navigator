@@ -18,6 +18,12 @@ episodes):
   • search_wiki          — internal podcast-derived episode wiki pages
   • explore              — orchestration: reason over free text, route to tools, group results
 
+Also exposes one plain-HTTP-only action (no MCP tool, no Supabase writes):
+  • POST /api/project-agent — the project agent. Fixed pipeline (search ->
+    relevance pass -> checklist proposal) that PROPOSES resources/checklist
+    items for a project; the frontend is what persists anything accepted. See
+    tools/project_agent.py and CLAUDE.md's "Build the project agent" note.
+
 Tool DESCRIPTIONS matter — external agents read them to decide what to call, so
 each docstring below is the tool's public contract. Read-only service: no writes
 to Supabase, and no LLM SDK is imported here (that lives only in llm.py, reached
@@ -28,6 +34,14 @@ Config (env; loaded from .env):
   LLM_PROVIDER / LLM_MODEL / LLM_API_KEY / GROQ_API_KEY  (see llm.py)
   SUPABASE_URL / SUPABASE_KEY  (read-only; search_lab_resources/people/wiki)
   GITHUB_TOKEN                 (optional; raises GitHub rate limits for search_tools)
+  EXPLORE_API_TOKEN            (optional; see BearerAuthMiddleware below — unset
+                                means every route but /health and /ready is open)
+
+MCP MOUNT PATH: FastMCP.streamable_http_app() mounts the MCP session endpoint
+at exactly `/mcp` (Starlette Route(path='/mcp', name='StreamableHTTPASGIApp') —
+confirmed by inspecting `mcp.streamable_http_app().routes` directly, not
+guessed). That is the full path to hand to another team or to protect at a
+proxy/WAF layer: <this service's origin>/mcp, no trailing slash, no prefix.
 
 Run:  python server.py      (serves MCP at /mcp, health at /health)
 """
@@ -35,6 +49,7 @@ Run:  python server.py      (serves MCP at /mcp, health at /health)
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 import sys
@@ -47,6 +62,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
+from tools.project_agent import run_project_agent_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
@@ -95,6 +111,80 @@ HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 PORT = int(os.environ.get("MCP_PORT", "8000"))
 
 mcp = FastMCP("explore-mcp", host=HOST, port=PORT)
+
+
+# ── Bearer auth ────────────────────────────────────────────────────────────────
+# This service has no auth on its own by default — before this, POST
+# /api/project-agent with an empty body ran the full six-source fanout plus two
+# Groq calls for anyone with the URL, no project, no payload, no rate limit.
+# EXPLORE_API_TOKEN gates every route except /health and /ready (see
+# _OPEN_PATHS below and BearerAuthMiddleware).
+#
+# OPTIONAL BY DESIGN, NOT A BUG: unset/empty means NO auth is enforced (with a
+# loud startup warning, right below) — this is what lets the backend and the
+# frontend's EXPLORE_API_TOKEN be deployed/rolled out in either order with no
+# window where the site itself breaks. Sourced with `or` (not the dict-style
+# `os.environ.get(KEY, default)`), deliberately: an explicitly-empty env var
+# must fall back to "no auth enforced" exactly like an unset one, not be
+# treated as "the token is the empty string" — a two-arg `.get()` would only
+# apply its default when the var is entirely ABSENT, not when a deploy sets it
+# to "". This codebase has taken a container down once already over that
+# exact absent-vs-empty distinction; don't reintroduce it here.
+EXPLORE_API_TOKEN = os.environ.get("EXPLORE_API_TOKEN") or ""
+
+# The only two routes a deploy script / uptime monitor needs to reach without
+# a token, and neither leaks anything: /health is a static liveness string,
+# /ready is warm-state booleans/counts. Every other route — every /api/*
+# action AND the MCP endpoint itself (mounted at /mcp, see streamable_http_app()
+# below) — requires the bearer token once one is configured.
+_OPEN_PATHS = {"/health", "/ready"}
+
+
+class BearerAuthMiddleware:
+    """ASGI middleware (not BaseHTTPMiddleware — this service's MCP endpoint
+    streams, and BaseHTTPMiddleware buffers the whole response body before
+    handing it back, which would break that) gating every route except
+    _OPEN_PATHS behind `Authorization: Bearer <EXPLORE_API_TOKEN>`.
+
+    Compares with hmac.compare_digest, not `==` — a plain string compare
+    short-circuits on the first mismatched byte, which leaks the token's
+    length/prefix through response-timing differences to a patient attacker;
+    compare_digest runs in constant time for that reason.
+
+    Never echoes the token back in the 401 body, and never logs it — only the
+    request path and source IP go to the WARNING log on a rejection. This
+    codebase has leaked an API key through logs once already (see the httpx
+    redaction note above); a bearer token is exactly as sensitive."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not EXPLORE_API_TOKEN or scope["path"] in _OPEN_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers") or [])
+        auth = (headers.get(b"authorization") or b"").decode("latin-1")
+        token = auth[7:] if auth.lower().startswith("bearer ") else ""
+
+        if token and hmac.compare_digest(token, EXPLORE_API_TOKEN):
+            await self.app(scope, receive, send)
+            return
+
+        client = scope.get("client")
+        source_ip = client[0] if client else "unknown"
+        logger.warning("Rejected unauthenticated request: path=%s source_ip=%s", scope["path"], source_ip)
+        response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+        await response(scope, receive, send)
+
+
+if not EXPLORE_API_TOKEN:
+    logger.warning(
+        "EXPLORE_API_TOKEN is not set — /api/* and /mcp are running WITHOUT AUTH. "
+        "Anyone with this URL can run the full pipeline. Set EXPLORE_API_TOKEN here "
+        "AND on the frontend to require a bearer token."
+    )
 
 
 # ── Limit clamping ──────────────────────────────────────────────────────────────
@@ -552,6 +642,223 @@ async def papers_http(request):
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
+def _validate_project_agent_body(body) -> str | None:
+    """Returns an error message if `body` is missing the fields the agent
+    actually reasons over, else None.
+
+    An empty {} body must NOT fall through to a default search — that was
+    exactly the abuse case a public, tokenless request could exploit for a
+    free six-source fanout plus two Groq calls. `name` is the one field every
+    real project always has (see lib/server/projects.ts: it's required at
+    creation), so it's the cheapest reliable signal that this is a genuine
+    project-agent call and not an empty/garbage probe. This is deliberately
+    NOT full schema validation — target/indication/modality/stage/
+    existing_checklist/saved_item_ids all stay optional, exactly as
+    tools/project_agent.py already treats them."""
+    if not isinstance(body, dict):
+        return "Request body must be a JSON object."
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return "Missing required field: name."
+    return None
+
+
+@mcp.custom_route("/api/project-agent", methods=["POST"])
+async def project_agent_http(request):
+    """The project agent — plain-HTTP only, no MCP tool (this is a project-scoped
+    action, not a general-purpose search tool other agents should call).
+
+    POST { name, description, target, indication, modality, stage,
+           existing_checklist: [str], saved_item_ids: [str] } -> the agent's
+    proposal: { summary, selected_items: [Item + {reason}], checklist_items:
+    [{label, rationale}], tools_called, warnings }
+
+    `name` is REQUIRED — see _validate_project_agent_body's own docstring for
+    why. A request missing it gets 400 before anything downstream (search,
+    LLM calls) ever runs.
+
+    WRITES NOTHING to Supabase — this route (and tools/project_agent.py behind
+    it) only ever returns a proposal. The frontend is the only thing that
+    persists anything, through the existing saveToProject/addChecklistItem
+    paths — see CLAUDE.md's "IT PROPOSES; THE FRONTEND PERSISTS".
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware, not here — see that class's own docstring.
+
+    Runs the fixed pipeline in tools/project_agent.py: search (reusing
+    explore_async) -> relevance pass -> checklist proposal. No timeout here on
+    purpose — this container has none, unlike the Vercel function that would
+    otherwise have to run it (see CLAUDE.md's architecture note). Never 500s
+    the caller: on total failure it returns an explained empty proposal with
+    HTTP 200, same resilience contract as /api/explore.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/project-agent: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    validation_error = _validate_project_agent_body(body)
+    if validation_error:
+        return JSONResponse({"error": validation_error}, status_code=400)
+
+    try:
+        result = await run_project_agent_async(body)
+        result["selected_items"] = trim_items(result.get("selected_items") or [])
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/project-agent failed: name=%r", body.get("name"))
+        return JSONResponse(
+            {
+                "summary": "The agent hit an unexpected error and could not complete this run.",
+                "selected_items": [],
+                "checklist_items": [],
+                "tools_called": [],
+                "warnings": [str(exc)],
+            },
+            status_code=200,
+        )
+
+
+
+# ── Project agent — job polling ───────────────────────────────────────────────
+#
+# The frontend needs REAL progress on a 20-40s run, not a bare spinner (see
+# CLAUDE.md). A single blocking POST can't report progress mid-flight, so this
+# is a tiny start/poll pair instead: POST /start kicks off the pipeline as a
+# background asyncio task and returns immediately with a job id; GET /status
+# reports which stage it's on and, once done, the same proposal shape
+# /api/project-agent returns synchronously.
+#
+# IN-MEMORY, PER-PROCESS, ON PURPOSE — same constraint as cache.py's
+# single-flight dict (see CLAUDE.md's "must stay single-worker" note): a
+# second uvicorn worker would have its own unsynchronized _JOBS dict and a
+# poll could land on the wrong process. Scale with more containers, not
+# workers=N, exactly as the rest of this service already requires.
+#
+# EVICTION: a job is small (one dict) and short-lived (30-60s to finish, plus
+# however long its poller keeps checking after), but without an eviction
+# policy this dict grows without bound exactly like cache.py's own dict would
+# without its TTL/stats — a client that starts a run and never polls it to
+# completion (tab closed, network drop) otherwise leaves an orphaned entry
+# forever. Two bounds, not one:
+#   _JOB_TTL_SECONDS — a completed job older than this is swept on the next
+#     /start call. Nothing legitimate polls minutes after the run finished
+#     (the frontend stops polling the moment it sees status="done"), so this
+#     is generous headroom for a slow poller, not a tight budget.
+#   _MAX_JOBS — a hard count backstop against a burst of /start calls
+#     outrunning the TTL sweep before it can catch up; oldest-first, which
+#     for a per-process dict with append-only insertion means oldest
+#     CREATED, not oldest completed — a pathological burst could in theory
+#     evict a still-running job, but at 500 concurrent runs this service has
+#     far bigger problems than a dropped poll.
+_JOBS: dict[str, dict] = {}
+_JOB_TTL_SECONDS = 30 * 60  # 30 minutes
+_MAX_JOBS = 500
+
+
+def _prune_jobs() -> None:
+    import time
+
+    now = time.monotonic()
+    stale = [
+        job_id
+        for job_id, job in _JOBS.items()
+        if job.get("status") == "done" and (now - job.get("created_at", now)) > _JOB_TTL_SECONDS
+    ]
+    for job_id in stale:
+        _JOBS.pop(job_id, None)
+
+    if len(_JOBS) > _MAX_JOBS:
+        # Oldest-first eviction — dict preserves insertion order in Python
+        # 3.7+, and job ids are only ever appended, never reinserted.
+        for job_id in list(_JOBS.keys())[: len(_JOBS) - _MAX_JOBS]:
+            _JOBS.pop(job_id, None)
+
+
+async def _run_job(job_id: str, body: dict) -> None:
+    def on_stage(stage: str) -> None:
+        if job_id in _JOBS:
+            _JOBS[job_id]["stage"] = stage
+
+    created_at = _JOBS[job_id]["created_at"] if job_id in _JOBS else None
+    try:
+        result = await run_project_agent_async(body, on_stage=on_stage)
+        result["selected_items"] = trim_items(result.get("selected_items") or [])
+        if job_id in _JOBS:
+            _JOBS[job_id] = {
+                "status": "done",
+                "stage": "done",
+                "result": result,
+                "created_at": created_at,
+            }
+    except Exception as exc:
+        logger.exception("project_agent job %s failed", job_id)
+        if job_id in _JOBS:
+            _JOBS[job_id] = {
+                "status": "done",
+                "stage": "done",
+                "result": {
+                    "summary": "The agent hit an unexpected error and could not complete this run.",
+                    "selected_items": [],
+                    "checklist_items": [],
+                    "tools_called": [],
+                    "warnings": [str(exc)],
+                },
+                "created_at": created_at,
+            }
+
+
+@mcp.custom_route("/api/project-agent/start", methods=["POST"])
+async def project_agent_start_http(request):
+    """Kick off a project-agent run in the background. Same body shape and
+    same `name`-required validation as POST /api/project-agent (see
+    _validate_project_agent_body) — a request missing it gets 400 before a
+    job is even created, not after it's already running in the background.
+    Returns {job_id} immediately (HTTP 202) once validation passes."""
+    import time
+    import uuid
+
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/project-agent/start: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    validation_error = _validate_project_agent_body(body)
+    if validation_error:
+        return JSONResponse({"error": validation_error}, status_code=400)
+
+    _prune_jobs()  # before inserting, so a burst can't outrun its own cleanup
+    job_id = uuid.uuid4().hex
+    _JOBS[job_id] = {
+        "status": "running",
+        "stage": "searching",
+        "result": None,
+        "created_at": time.monotonic(),
+    }
+    asyncio.create_task(_run_job(job_id, body))
+    return JSONResponse({"job_id": job_id}, status_code=202)
+
+
+@mcp.custom_route("/api/project-agent/status", methods=["GET"])
+async def project_agent_status_http(request):
+    """GET /api/project-agent/status?job_id=<id> -> {status, stage, result}.
+    `result` is null until status="done". An unknown job_id (expired, or the
+    process restarted) returns 404 rather than hanging a poller forever."""
+    job_id = request.query_params.get("job_id", "")
+    job = _JOBS.get(job_id)
+    if job is None:
+        return JSONResponse({"status": "not_found", "stage": None, "result": None}, status_code=404)
+    # created_at (a monotonic clock float, meaningless off-process) is bookkeeping
+    # for _prune_jobs() only — never shipped to the client.
+    return JSONResponse({"status": job["status"], "stage": job["stage"], "result": job["result"]})
+
+
 def _serve() -> None:
     """Serve the streamable-HTTP app with the landing-feed pre-warm attached.
 
@@ -586,6 +893,11 @@ def _serve() -> None:
                 await prewarm.stop()
 
     app.router.lifespan_context = lifespan
+
+    # Outermost wrap: BearerAuthMiddleware passes non-"http" scope types
+    # (lifespan, websocket) straight through untouched, so this doesn't
+    # interfere with the lifespan wiring just above.
+    app = BearerAuthMiddleware(app)
 
     uvicorn.Server(
         uvicorn.Config(app, host=HOST, port=PORT, log_level=mcp.settings.log_level.lower())

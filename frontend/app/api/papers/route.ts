@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ExploreItem } from "@/types/explore";
+import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
 // Proxy for the backend's live literature search (PubMed/OpenAlex/Crossref
 // fan-out) — GET /api/papers?q=<query>&limit=<n>. Backs the "Live Literature"
@@ -8,8 +9,6 @@ import type { ExploreItem } from "@/types/explore";
 // Resilience contract: mirrors the other proxies — never 500s the page. On any
 // failure it returns { items: [], error: true } with HTTP 200 so the rail can
 // render its own error state without taking the page down.
-
-const EXPLORE_API_URL = process.env.EXPLORE_API_URL ?? "http://localhost:8000";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -21,7 +20,7 @@ export async function GET(req: Request) {
   try {
     const res = await fetch(
       `${EXPLORE_API_URL}/api/papers?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(limit)}`,
-      { cache: "no-store" }
+      { cache: "no-store", headers: exploreBackendHeaders() }
     );
     if (!res.ok) throw new Error(`papers backend responded ${res.status}`);
 

@@ -160,6 +160,13 @@ export async function saveToProject(projectId: string, item: ExploreItem): Promi
   });
 
   if (error) {
+    // 23505 here can only mean this exact item is already saved into this
+    // exact project scope (see the UNIQUENESS note at the top of this file) —
+    // a real, expected outcome, not a failure worth logging or reporting as
+    // one. Anything else is a genuine write failure.
+    if (error.code === "23505") {
+      return { status: "error", error: "That item is already saved to this project." };
+    }
     console.error("saveToProject: insert failed", error);
     return { status: "error", error: "Couldn't save that item." };
   }

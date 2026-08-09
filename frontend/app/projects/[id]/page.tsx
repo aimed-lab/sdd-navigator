@@ -28,6 +28,7 @@ import ProposalSection from "@/components/projects/ProposalSection";
 import ChecklistSection from "@/components/projects/ChecklistSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ResourcesSection from "@/components/projects/ResourcesSection";
+import AgentSection from "@/components/projects/AgentSection";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -163,6 +164,10 @@ export default async function ProjectDetailPage({
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
       <ResourcesSection projectId={project.id} exploreHref={exploreHref} resources={resources} />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      <AgentSection projectId={project.id} />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
