@@ -46,7 +46,7 @@ from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
 from tools.search_pager import search_pager_async
-from tools.search_papers import search_papers_async
+from tools.search_papers import search_papers_async, search_papers_multi_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async
@@ -56,6 +56,22 @@ SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
 
 _NET_LIMIT = 10        # external-source tools (papers/trials/grants/tools)
 _INTERNAL_LIMIT = 20   # internal DB tools (lab_resources/people/wiki)
+
+# search_papers ENTITY FAN-OUT — see tools/search_papers.py's module docstring
+# for why this exists at all (the diagnosed bag-of-words dilution bug) and
+# _entity_queries_for_papers() below for the exact query-set construction.
+#
+# CAP: a project naming 8 genes must not fire 8 x 3-sources = 24 raw upstream
+# calls with no limit at all. Capped at 4 genes (+1 broad query when there's
+# more than one gene) = at most 5 sub-queries x 3 sources = 15 raw calls per
+# search_papers section, vs. 3 before fan-out — see the query builder's own
+# docstring for the full accounting. Genes beyond the cap are DROPPED, not
+# folded into a leftover query: kept in EXTRACTION ORDER (scope['genes'] is
+# already order-preserving from _extract_scope, and a scope's headline target
+# tends to be mentioned first in the source text), so the first 4 genes
+# mentioned are queried and later ones are silently skipped. A real
+# limitation for an 8-gene project, not a full fix — flagged, not solved.
+_GENE_QUERY_CAP = 4
 
 # Blank-input landing feed: a field-wide default scope + a fixed tool set (the
 # front page for an empty query). No LLM is called — we skip extraction/routing.
@@ -329,14 +345,136 @@ def _query_for(name: str, scope: dict) -> str:
     return query
 
 
+def _context_for_papers(scope: dict) -> list[str]:
+    """The single most specific available context term for a per-gene
+    fan-out query — 0 or 1 items, NEVER a join of several (that's the
+    original dilution bug at smaller scale).
+
+    Disease was the first version's default context, and the diagnostic
+    showed it's the WEAK choice: "SOS1 KRAS NSCLC" (gene + disease)
+    underperformed the hand-written "SOS1 inhibitor KRAS G12C" (gene +
+    mechanism phrase) empirically — a bare disease name carries less
+    identifying signal than a specific mechanism/drug-class phrase.
+
+    Priority, most specific first:
+      1. assets (named molecules/drugs, e.g. "adagrasib") — as specific as
+         a scope term gets, when the extraction actually found one.
+      2. topics — the single LONGEST topic phrase by word count, used as a
+         cheap proxy for specificity: a multi-word mechanism phrase like
+         "KRAS G12C inhibitors resistance" encodes more identifying context
+         than a short one, and this is exactly the kind of phrase the
+         diagnostic's successful hand-written queries used in place of a
+         disease name.
+      3. diseases — LAST resort, only when neither assets nor topics have
+         anything at all.
+    Returns [] if the scope has none of the three (a per-gene query then
+    runs on the gene name alone, which is still a real improvement over the
+    old combined string for that gene specifically).
+    """
+    candidates = list(scope.get("assets") or []) + list(scope.get("topics") or [])
+    if candidates:
+        return [max(candidates, key=len)]
+    diseases = scope.get("diseases") or []
+    return diseases[:1]
+
+
+def _entity_queries_for_papers(scope: dict) -> list[str]:
+    """Build the SET of short, entity-scoped queries search_papers fans out
+    over, instead of _query_for's single combined string — see
+    tools/search_papers.py's module docstring for the diagnosed bug this
+    fixes (a long bag-of-words query lets generic multi-term-matching
+    reviews outrank entity-specific papers in PubMed/OpenAlex's own
+    relevance ranking).
+
+    NO GENES IN SCOPE -> falls back to EXACTLY _query_for's old single
+    combined query, unchanged. There is no entity to fan out over, and this
+    is the branch a pure-topic search or the blank-input landing feed takes
+    — neither was part of the diagnosed failure (that was specifically about
+    a GENE being drowned out by disease/topic terms), so neither should see
+    any behavior change here.
+
+    ONE GENE IN SCOPE -> a single query, [gene] + context (see `context`
+    below) — e.g. "PHGDH glioblastoma". This is deliberately near-identical
+    to _query_for's old output for a single-gene scope (which already
+    performed well — see the PHGDH diagnostic: 8-9/10 relevant), and
+    search_papers_multi_async's own len(queries)<=1 branch calls
+    search_papers_async directly with no merge/re-rank machinery at all, so
+    a single-gene scope is BYTE-FOR-BYTE the pre-fan-out code path, not a
+    fan-out of one. This is what protects the simple case from regressing.
+
+    TWO OR MORE GENES -> one query per gene (capped at _GENE_QUERY_CAP,
+    dropping later-mentioned genes — see that constant's own docstring),
+    plus one broad, gene-less query so general context isn't lost when the
+    entity queries narrow things down. The PRIMARY gene (scope['genes'][0] —
+    order-preserving from extraction, so this is whichever gene the source
+    text named first) gets its own query of just [gene] + context; every
+    OTHER gene's query additionally includes the primary gene as a
+    co-occurrence anchor — e.g. genes=[KRAS, SHP2, SOS1], context="KRAS G12C
+    inhibitors" produces "KRAS KRAS G12C inhibitors", "SHP2 KRAS KRAS G12C
+    inhibitors", "SOS1 KRAS KRAS G12C inhibitors", plus the broad query
+    "KRAS G12C inhibitors". Anchoring secondary genes to the primary one
+    mirrors what the diagnostic's successful hand-written queries did
+    ("SHP2 inhibitor KRAS G12C combination") — a secondary gene searched in
+    total isolation from the primary target would find the wrong literature
+    just as easily as the old combined query found the wrong thing by
+    including too much.
+
+    TRIED AND REVERTED: dropping this anchor (reasoning that `context` often
+    already mentions the primary gene, e.g. the KRAS case above). Verified
+    that removing it cost the KRAS case a result it had with the anchor in
+    (a rank shuffle put the SHP2-specific paper one slot past that version's
+    quota cutoff) while not fixing the PHGDH/PSAT1 case it was meant to
+    help — see search_papers_multi_async's ROUND-ROBIN note for why: the
+    real constraint there was never the anchor, it was PHGDH's literature
+    volume dominating even an anchor-free "PSAT1 glioblastoma" query's own
+    internal ranking. Fixed by round-robin instead (below), so the anchor
+    goes back to doing the one thing it verifiably helped with.
+
+    `context` is the SINGLE most specific available term — see
+    `_context_for_papers` below — never the full topics list and never more
+    than one term: keeping every sub-query SHORT is exactly what the
+    diagnostic showed matters; joining several context terms together would
+    just reintroduce a smaller version of the original dilution bug.
+    """
+    genes = scope.get("genes") or []
+
+    if not genes:
+        return [_query_for("search_papers", scope)]
+
+    context = _context_for_papers(scope)
+    capped_genes = genes[:_GENE_QUERY_CAP]
+    primary = capped_genes[0]
+
+    queries: list[str] = []
+    seen_lower: set[str] = set()
+
+    def _add(q: str) -> None:
+        if q and q.lower() not in seen_lower:
+            seen_lower.add(q.lower())
+            queries.append(q)
+
+    for gene in capped_genes:
+        terms = [gene] if gene == primary else [gene, primary]
+        _add(_join_unique(terms, context))
+
+    if len(capped_genes) > 1:
+        _add(_join_unique(context))
+
+    return queries
+
+
 # ── Steps 4–5: execute chosen tools in parallel and assemble the result ───────
 
 
 def _dispatch(name: str, query: str):
     """Return an awaitable that runs `name` with `query`. Async source tools are
-    awaited directly; blocking DB tools run off the event loop via to_thread."""
-    if name == "search_papers":
-        return search_papers_async(query, _NET_LIMIT)
+    awaited directly; blocking DB tools run off the event loop via to_thread.
+
+    search_papers is NOT dispatched through here — see _execute below, which
+    calls search_papers_multi_async with the entity query SET from
+    _entity_queries_for_papers instead of a single `query` string. It stays
+    listed in _QUERY_SLICES/_KINDS/etc. (routing, kind-labeling) but this
+    function is bypassed for it specifically."""
     if name == "search_news":
         return search_news_async(query, _NET_LIMIT)
     if name == "search_trials":
@@ -360,8 +498,20 @@ def _dispatch(name: str, query: str):
 
 async def _execute(chosen: list[str], scope: dict) -> list[dict]:
     tasks = []
-    specs: list[tuple[str, str, str]] = []  # (tool, kind, query)
+    specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
     for name in chosen:
+        if name == "search_papers":
+            # Entity fan-out (see _entity_queries_for_papers) instead of one
+            # combined-string query. `display_query` joins the sub-queries
+            # with " | " purely for the section's own `query` field — the
+            # UI/API transparency string — never re-parsed as a single query
+            # anywhere.
+            queries = _entity_queries_for_papers(scope)
+            tasks.append(
+                search_papers_multi_async(queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT)
+            )
+            specs.append((name, _KINDS[name], " | ".join(queries)))
+            continue
         query = _query_for(name, scope)
         tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))

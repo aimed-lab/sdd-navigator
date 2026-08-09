@@ -17,6 +17,20 @@ the _rank_merge order stands — see ranking.py for the guard rails.
 
 Read-only. No Supabase, no writes. Never fabricates a ranking signal — a paper
 carries a Signal only when its source (OpenAlex) actually reported one.
+
+ENTITY FAN-OUT (search_papers_multi_async, below `search_papers_async`). A
+single query built by concatenating every scope term ("KRAS NSCLC KRAS G12C
+inhibitors resistance KRAS SHP2 SOS1") was diagnosed to starve out
+secondary-entity literature: PubMed/OpenAlex/Crossref's own relevance ranking
+rewards documents matching MORE of the query's terms, so a generic review
+matching "KRAS"+"resistance"+"inhibitors"+"NSCLC" outranks a SHP2-specific
+paper matching only "SHP2"+"KRAS" — confirmed empirically (see
+tools/explore.py's entity-query builder for the query-set construction this
+function consumes). search_papers_multi_async runs several SHORT,
+entity-scoped queries in parallel through the existing single-query path
+(search_papers_async) instead of one long one, then re-merges with the SAME
+dedupe/rank/WINNER pipeline _fetch already uses for one query — no second
+ranking system.
 """
 
 from __future__ import annotations
@@ -118,6 +132,139 @@ async def _fetch(query: str, limit: int) -> list[Item]:
     ranked = rank_papers_winner(ranked, seeds)
 
     return ranked[:limit]
+
+
+async def search_papers_multi_async(
+    queries: list[str], *, limit_per_query: int, final_limit: int
+) -> list[Item]:
+    """Fan-out entry point: run several entity-scoped queries in PARALLEL,
+    each through the existing single-query path (search_papers_async) — so
+    each sub-query gets its OWN cache entry and single-flight coalescing
+    (see cache.py), rather than the whole fan-out being one opaque unit. That
+    matters for cache hit rate specifically: "SHP2 KRAS NSCLC" recurs across
+    different projects/searches the way a 7-term project-specific combined
+    string never would, so per-entity queries are individually cacheable in
+    a way the old combined query wasn't.
+
+    FAILURE ISOLATION: `return_exceptions=True` means one sub-query raising
+    (e.g. every source failing for it, or — the real-world case that
+    motivated this — Crossref 429ing under the extra fan-out load) drops
+    only THAT sub-query's contribution and logs it; the rest of the merge
+    proceeds. Note search_papers_async's own _fetch already isolates
+    per-SOURCE failures within a single query (a Crossref 429 there just
+    means that query's results come from PubMed+OpenAlex) — this is the same
+    isolation principle one level up, across sub-queries instead of across
+    sources.
+
+    ROUND-ROBIN MERGE, not a fixed quota, not a global re-rank. Two earlier
+    versions of this function each threw away part of what the fan-out
+    fixed:
+      * a pure global citation-weighted rank over the deduped union buried a
+        minor-gene sub-query's genuinely relevant, low-citation paper under
+        high-citation generic reviews contributed by the OTHER sub-queries;
+      * a FIXED quota (`quota_n` per sub-query, plus a separate fill phase
+        for the rest) was still too rigid — verified two real cases (SHP2 in
+        the KRAS project, PSAT1 in a PHGDH project) where the relevant paper
+        sat JUST ONE RANK past the fixed cutoff within its own sub-query's
+        list, and the leftover "fill" phase just handed the remaining slots
+        to the same high-citation generic reviews the fan-out exists to
+        stop dominating.
+    Round-robin fixes both: no fixed per-sub-query cap, and no separate fill
+    phase handing slots back to the global rank.
+
+      1. DOI-dedupe the FULL union first (dedupe.merge_items, same as
+         always) — a paper found by two sub-queries costs one slot, not
+         two, regardless of which sub-queries found it.
+      2. ROUND-ROBIN: take item 0 from every sub-query, in sub-query order;
+         then item 1 from every sub-query; then item 2; and so on, until
+         `final_limit` is reached or every sub-query is exhausted. "Item N
+         from a sub-query" always means that sub-query's own Nth-BEST
+         paper by the existing per-query ranking (search_papers_async's own
+         _fetch already ranked each sub-query's list before this function
+         ever sees it) — round-robin decides how many slots each entity
+         gets, the existing ranking still decides WHICH papers represent
+         it. A dedupe_key some earlier sub-query already claimed this round
+         is skipped WITHOUT costing the current sub-query its turn — it
+         just contributes its own next not-yet-claimed paper instead of
+         nothing, so a duplicate never shrinks a sub-query's effective
+         share the way it would if a claimed slot were simply passed over.
+      3. NO separate fill phase. Round-robin naturally keeps rotating through
+         every sub-query until `final_limit` slots are filled or the whole
+         union is exhausted — there's nothing left over to hand to a global
+         rank, which is exactly the point: that fill phase was where the
+         two earlier versions kept losing the fix back to generic reviews.
+      4. DISPLAY ORDER: the final list is still emitted in global-rank
+         order (_rank_merge + WINNER over the full deduped pool), restricted
+         to whichever keys round-robin selected — round-robin controls
+         SELECTION, the existing ranking still controls the order results
+         are handed back in, so the output reads best-first rather than as
+         visible per-sub-query blocks.
+
+    WINNER's seeds (step 4) are picked with an empty query string, same
+    reasoning as before: relevance_seed_ids() defines that as "seed from the
+    head of the existing order" — there is no one query string representing
+    the whole fan-out to score title/summary overlap against.
+
+    `len(queries) <= 1` skips the fan-out machinery entirely and calls
+    search_papers_async directly — the ordinary single-query path, byte-for-
+    byte, so a gene-less or single-gene scope (see tools/explore.py) is
+    exactly today's behavior, not "fan-out of one." There is nothing to
+    round-robin across with one sub-query anyway.
+    """
+    if not queries:
+        return []
+    if len(queries) == 1:
+        return await search_papers_async(queries[0], final_limit)
+
+    results = await asyncio.gather(
+        *(search_papers_async(q, limit_per_query) for q in queries),
+        return_exceptions=True,
+    )
+
+    sub_lists: list[list[Item]] = []
+    all_items: list[Item] = []
+    for q, result in zip(queries, results):
+        if isinstance(result, Exception):
+            logger.exception(
+                "search_papers: fan-out sub-query %r failed entirely", q, exc_info=result
+            )
+            sub_lists.append([])
+            continue
+        sub_lists.append(result)
+        all_items.extend(result)
+
+    if not all_items:
+        return []
+
+    # Step 1 — dedupe the full union FIRST, before any round-robin accounting.
+    collapsed = merge_items(all_items)
+
+    # Global rank, computed once: this is ONLY the final display order now
+    # (step 4) — there is no fill phase left to feed from it.
+    ranked_global = _rank_merge(collapsed)
+    seeds = relevance_seed_ids(ranked_global, "", top_n=10)
+    ranked_global = rank_papers_winner(ranked_global, seeds)
+
+    # Step 2 — round-robin: per-sub-query cursor, advanced past whatever an
+    # earlier sub-query already claimed THIS round, so a duplicate costs no
+    # sub-query its turn.
+    used: set[str] = set()
+    cursors = [0] * len(sub_lists)
+    made_progress = True
+    while len(used) < final_limit and made_progress:
+        made_progress = False
+        for i, sub_items in enumerate(sub_lists):
+            if len(used) >= final_limit:
+                break
+            while cursors[i] < len(sub_items) and sub_items[cursors[i]].dedupe_key in used:
+                cursors[i] += 1
+            if cursors[i] < len(sub_items):
+                used.add(sub_items[cursors[i]].dedupe_key)
+                cursors[i] += 1
+                made_progress = True
+
+    # Step 4 — emit in global-rank order, restricted to the selected set.
+    return [item for item in ranked_global if item.dedupe_key in used][:final_limit]
 
 
 def search_papers(query: str, limit: int = 20) -> list[Item]:
