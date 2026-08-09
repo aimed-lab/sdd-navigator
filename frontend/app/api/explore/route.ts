@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUserInterests } from "@/lib/server/interests";
+import { getProject } from "@/lib/server/projects";
+import { buildProjectExploreQuery } from "@/lib/projectTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
 // Proxy for the Python explore backend. POST { input } -> the backend's
@@ -21,6 +23,23 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 // `personalize: false` opts a request out — the feed sends it when the user has
 // cleared the scope chips, which means "show me the generic feed, not mine".
 //
+// PROJECT-DERIVED SEARCH. `project_id` (from "Explore for this project" —
+// see app/explore/[topic]/page.tsx and lib/projectTypes.ts:
+// buildProjectExploreHref) asks this route to derive the FULL rich search
+// input SERVER-SIDE from that project, instead of searching whatever short
+// text the client sent. Same pattern as app/api/project-agent/start/
+// route.ts: the client supplies only an id, membership is checked via
+// getProject()'s own RLS-backed gate, and the actual free-text query
+// (name + description + target/indication/modality —
+// buildProjectExploreQuery, the same builder the OLD client-side version
+// used) is built here from data the caller is verified to belong to. This
+// is what lets the visible URL/search-box stay a short, readable string
+// (see buildProjectExploreTopic) while search QUALITY stays exactly what
+// it was — the backend still gets the rich input that beats a bare
+// keyword string. On any lookup failure (not found / not a member / db
+// error) this falls back to searching the client-sent `input` as-is —
+// degrade, don't block, same resilience stance as everything else here.
+//
 // Resilience contract: this route NEVER 500s the page. On any failure it returns
 // { sections: [], scope: {}, error: true } with HTTP 200 so the UI can render a
 // clean empty state instead of crashing.
@@ -28,12 +47,23 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 export async function POST(req: Request) {
   let input = "";
   let personalize = true;
+  let projectId: string | undefined;
   try {
     const body = await req.json();
     if (body && typeof body.input === "string") input = body.input;
     if (body && body.personalize === false) personalize = false;
+    if (body && typeof body.project_id === "string") projectId = body.project_id;
   } catch {
     // malformed body -> treat as empty input (backend serves the default feed)
+  }
+
+  if (projectId) {
+    const result = await getProject(projectId);
+    if (result.status === "ok") {
+      input = buildProjectExploreQuery(result.project);
+    }
+    // not_found / error -> input stays whatever the client sent (the short
+    // displayed topic) rather than failing the search outright.
   }
 
   // Only the blank landing feed is personalized. A real search is the user's

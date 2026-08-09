@@ -13,8 +13,16 @@
 //
 // THE BRIDGE: "Ask for help" is a plain Link to /collaborate/new with query
 // params (see app/collaborate/new/page.tsx) — the item's own label seeds
-// "needs", the project's name/description seed title/description, and the
-// item's id rides along as checklist_item_id so the new post links back.
+// BOTH the title ("Help needed: <item>", so a board reader immediately
+// reads it as a request, not a task) and "needs" (the item text alone), and
+// the item's id rides along as checklist_item_id so the new post links
+// back. The description is seeded from buildProjectContextLine — the
+// project's SHORT structured fields (target/indication/modality/stage)
+// ONLY, never the free-text project description. That description can (and
+// in real projects does) hold unpublished internal strategy; a public
+// board post must never volunteer it just because the user clicked a small
+// text link. The user can still type whatever detail they choose — this
+// only changes what's pre-filled for them, not what they're allowed to say.
 // Once collab_post_id is set (resolved server-side in getProject(), via a
 // plain query on collab_posts.checklist_item_id + the existing
 // collab_post_interest_counts RPC — no new function), the row shows
@@ -33,6 +41,7 @@ import {
   updateChecklistStatusAction,
 } from "@/app/projects/[id]/actions";
 import type { ChecklistItem, ChecklistStatus } from "@/lib/server/projects";
+import { buildProjectContextLine } from "@/lib/projectTypes";
 
 const STATUS_OPTIONS: { value: ChecklistStatus; label: string }[] = [
   { value: "not_yet", label: "Not yet" },
@@ -137,14 +146,18 @@ function DeleteItemConfirm({
 
 export default function ChecklistSection({
   projectId,
-  projectName,
-  projectDescription,
+  projectTarget,
+  projectIndication,
+  projectModality,
+  projectStage,
   items,
   isColabofest,
 }: {
   projectId: string;
-  projectName: string;
-  projectDescription: string | null;
+  projectTarget: string | null;
+  projectIndication: string | null;
+  projectModality: string | null;
+  projectStage: string | null;
   items: ChecklistItem[];
   isColabofest?: boolean;
 }) {
@@ -261,11 +274,20 @@ export default function ChecklistSection({
   };
 
   const askForHelpHref = (item: ChecklistItem) => {
+    const contextLine = buildProjectContextLine({
+      target: projectTarget,
+      indication: projectIndication,
+      modality: projectModality,
+      stage: projectStage,
+    });
     const params = new URLSearchParams({
       checklist_item_id: item.id,
       project_id: projectId,
-      title: projectName,
-      description: projectDescription ?? "",
+      // Reads as a REQUEST, not an internal task — a board reader should
+      // immediately understand someone is asking for help, not looking at
+      // a to-do list entry.
+      title: `Help needed: ${item.label}`,
+      description: contextLine,
       need: item.label,
     });
     return `/collaborate/new?${params.toString()}`;

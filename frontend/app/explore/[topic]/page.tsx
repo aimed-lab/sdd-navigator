@@ -75,9 +75,23 @@ function SearchResults() {
   const [failed, setFailed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
+  // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
+  // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
+  // the SHORT displayed string (project name, or target+indication), not
+  // the rich search text — /api/explore derives the full context
+  // server-side from projectId instead (see that route's own comment).
+  // This ref is what limits that to the FIRST fetch only: any subsequent
+  // re-search (the user edits the search box and submits — see `submit`
+  // below, which carries projectId forward in the URL for saving purposes)
+  // must search literally what they typed, not silently keep re-deriving
+  // the original project context while ignoring their edit.
+  const isFirstLoadRef = useRef(true);
+
   // (Re)fetch whenever the routed topic changes.
   useEffect(() => {
     let cancelled = false;
+    const useProjectContext = isFirstLoadRef.current && !!projectId;
+    isFirstLoadRef.current = false;
     setQuery(topic);
     setSelected(null);
     (async () => {
@@ -87,7 +101,7 @@ function SearchResults() {
         const res = await fetch("/api/explore", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ input: topic }),
+          body: JSON.stringify(useProjectContext ? { project_id: projectId } : { input: topic }),
         });
         const json = (await res.json()) as ExploreResponse;
         if (!cancelled) setData(json);
@@ -100,6 +114,8 @@ function SearchResults() {
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
+    // read once via isFirstLoadRef, not meant to re-trigger this effect
   }, [topic]);
 
   // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.

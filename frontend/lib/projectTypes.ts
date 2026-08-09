@@ -109,10 +109,35 @@ export function buildProjectExploreQuery(project: {
   return contextParts.length ? `${base} (${contextParts.join(", ")})` : base;
 }
 
-/** The full href for "Explore for this project" — the built query as the
- *  route param, plus project_id/project_name as query string so Explore
- *  knows saves from this visit belong to this project (see
- *  app/explore/[topic]/page.tsx). */
+/** The SHORT, human-readable text shown in the search box and baked into
+ *  the /explore/<topic> URL for "Explore for this project" — deliberately
+ *  NOT the same string sent to the backend (see buildProjectExploreQuery
+ *  above, still used, just no longer as the visible route param). A
+ *  project's free-text description could easily push the old combined
+ *  string past 700 characters, producing an unusable search box and an
+ *  unshareable URL; target+indication (or the project name, when neither
+ *  is set) is what a scientist would actually type. The FULL query still
+ *  reaches the backend — see app/api/explore/route.ts's project_id
+ *  handling, which derives it server-side from this same project, not
+ *  from this short string. */
+export function buildProjectExploreTopic(project: {
+  name: string;
+  target: string | null;
+  indication: string | null;
+}): string {
+  const parts = [project.target, project.indication]
+    .map((s) => s?.trim())
+    .filter((s): s is string => !!s);
+  return parts.length ? parts.join(" ") : project.name.trim();
+}
+
+/** The full href for "Explore for this project" — the SHORT topic (see
+ *  buildProjectExploreTopic) as the route param, plus project_id/
+ *  project_name as query string so Explore knows saves from this visit
+ *  belong to this project (see app/explore/[topic]/page.tsx) AND — on the
+ *  very first load only — that it should ask the backend to derive the
+ *  full rich search context from project_id server-side instead of
+ *  searching the short displayed topic literally. */
 export function buildProjectExploreHref(project: {
   id: string;
   name: string;
@@ -121,7 +146,35 @@ export function buildProjectExploreHref(project: {
   indication: string | null;
   modality: string | null;
 }): string {
-  const query = buildProjectExploreQuery(project);
+  const topic = buildProjectExploreTopic(project);
   const params = new URLSearchParams({ project_id: project.id, project_name: project.name });
-  return `/explore/${encodeURIComponent(query)}?${params.toString()}`;
+  return `/explore/${encodeURIComponent(topic)}?${params.toString()}`;
+}
+
+/** The short, factual context line prefilled into a Collaborate post's
+ *  description when "Ask for help" is clicked from a project's checklist —
+ *  see components/projects/ChecklistSection.tsx. Built ONLY from the
+ *  structured fields (target/indication/modality/stage), which are already
+ *  deliberately short and factual, NEVER from the project's free-text
+ *  description — that field can (and in real projects does) contain
+ *  unpublished internal strategy the user has not chosen to make public.
+ *  A public board post must not volunteer that on the user's behalf; they
+ *  can always type more themselves. e.g. "ATXN2 · Amyotrophic lateral
+ *  sclerosis · ASO / RNA · Preclinical". */
+export function buildProjectContextLine(project: {
+  target: string | null;
+  indication: string | null;
+  modality: string | null;
+  stage: string | null;
+}): string {
+  const modalityLabel = project.modality
+    ? MODALITY_LABEL[project.modality as Modality] ?? project.modality
+    : null;
+  const stageLabel = project.stage
+    ? PROJECT_STAGE_LABEL[project.stage as ProjectStage] ?? project.stage
+    : null;
+  return [project.target, project.indication, modalityLabel, stageLabel]
+    .map((s) => s?.trim())
+    .filter((s): s is string => !!s)
+    .join(" · ");
 }

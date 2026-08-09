@@ -173,8 +173,10 @@ export default async function ProjectDetailPage({
 
       <ChecklistSection
         projectId={project.id}
-        projectName={project.name}
-        projectDescription={project.description}
+        projectTarget={project.target}
+        projectIndication={project.indication}
+        projectModality={project.modality}
+        projectStage={project.stage}
         items={project.checklist}
         isColabofest={project.challenge_key === "colabofest_2026"}
       />
