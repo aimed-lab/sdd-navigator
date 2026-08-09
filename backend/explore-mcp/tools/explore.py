@@ -293,17 +293,38 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 #   "funding opportunities", so requiring it killed the match entirely. A
 #   free-text `topics` phrase is exactly what's unsafe to feed a strict
 #   matcher: it's whatever words the LLM extracted from the user's sentence,
-#   not a controlled vocabulary term. So trials/grants get ONLY diseases +
-#   genes — a trial record fundamentally describes a CONDITION (disease) and
-#   an INTERVENTION (a molecular target is the closest scope field to that);
-#   nothing else in scope reliably appears in a trial or funding record's own
-#   text. This also kills the duplicate for free: the reported
-#   "glioblastoma glioblastoma" happened because the disease name was ALSO
-#   embedded inside a `topics` phrase ("glioblastoma clinical trials") —
-#   _join_unique only dedupes EXACT term matches, not sub-phrase overlap, so
-#   two literally-different strings both landed in the query. Dropping
-#   `topics` from these two slices removes the phrase that carried the
-#   duplicate, rather than trying to dedupe at the word level.
+#   not a controlled vocabulary term. This also kills the duplicate for free:
+#   the reported "glioblastoma glioblastoma" happened because the disease
+#   name was ALSO embedded inside a `topics` phrase ("glioblastoma clinical
+#   trials") — _join_unique only dedupes EXACT term matches, not sub-phrase
+#   overlap, so two literally-different strings both landed in the query.
+#   Dropping `topics` removes the phrase that carried the duplicate, rather
+#   than trying to dedupe at the word level.
+#
+#   search_trials specifically is DISEASES ONLY, no genes either — a second
+#   real case (a real ALS + ATXN2 + TARDBP project) showed the SAME strict-
+#   AND behavior fires from genes just as easily as from topics. A trial
+#   record names a CONDITION and an INTERVENTION, but "intervention" does
+#   NOT mean "the gene symbol appears as a literal string in the record" —
+#   verified directly: "ALS" alone -> 10 studies, including the real BIIB105
+#   ATXN2-antisense ALS trial; adding just ONE gene ("ALS ATXN2") already
+#   drops that to 2; the real scope for that project extracted TWO genes
+#   (ATXN2 AND TARDBP), and "ALS ATXN2 TARDBP" -> 0 — even though the BIIB105
+#   trial exists and is exactly what the project needed, because ITS OWN
+#   record never mentions "TARDBP". A trial record almost never spells out
+#   every molecular target a project cares about; disease/condition names are
+#   what trial titles and summaries reliably use. Genes stay a real, useful
+#   signal for OTHER sources below (GEO, papers) — this is trials-specific.
+#
+#   search_grants KEEPS genes — checked directly for the same failure mode
+#   and did not find it: "ATXN2" alone returns 0 grants, but "Amyotrophic
+#   lateral sclerosis ATXN2" returns the SAME 10 (same top 3, same order) as
+#   "Amyotrophic lateral sclerosis" alone — Grants.gov's own matching does
+#   NOT appear to require every term, unlike ClinicalTrials.gov's query.term.
+#   Adding a gene term neither helped nor hurt in this case; NIH/DoD award
+#   text does sometimes name a target directly (unlike a trial's structured
+#   condition/intervention fields), so there's a real, if unproven here,
+#   upside to keeping it. Revisit if a grants case surfaces the same problem.
 #
 #   NOT extending this to search_tools (GitHub) — audited its existing slice
 #   (methods, genes) and it's already narrow AND GitHub's own search already
@@ -318,8 +339,9 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 #
 # search_papers intentionally gets the RICHEST slice (disease + topic + gene):
 # papers are the broadest result kind, so a gene target like PHGDH belongs in the
-# literature query even though trials/grants/datasets/pager now stay strictly
-# disease + gene. NOT touched by this round's fix — search_papers already has
+# literature query even though trials now stays disease-only and grants/
+# datasets/pager stay disease + gene. NOT touched by this round's fix —
+# search_papers already has
 # its own entity fan-out (tools/search_papers.py:search_papers_multi_async),
 # a separately verified fix for the same class of dilution problem; folding
 # it into this diseases+genes composition-only fix would be redundant at
@@ -349,8 +371,8 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind; own fan-out handles dilution separately
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
-    "search_trials":        ("diseases", "genes"),            # STRICT matcher — condition + intervention only, no free-text topics
-    "search_grants":        ("diseases", "genes"),            # same reasoning as trials — Grants.gov tolerated the old diluted string, but shorter is strictly safer and consistent
+    "search_trials":        ("diseases",),                    # STRICT matcher — condition ONLY; even one gene term can zero out a real trial (see note above)
+    "search_grants":        ("diseases", "genes"),            # checked for trials' same failure mode, did not find it — Grants.gov didn't reduce results when a gene was added (see note above); kept
     "search_tools":         ("methods", "genes"),
     "search_datasets":      ("diseases", "genes"),            # was + topics — GEO's own search proved to share trials' strict-AND behavior; genes is GEO's strongest signal (PHGDH: 8-9/10 relevant on a bare gene query)
     "search_pager":         ("diseases", "genes"),            # same fix, same reasoning as datasets — PAGER takes a single term anyway, per its own docstring
