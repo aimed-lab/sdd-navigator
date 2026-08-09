@@ -54,6 +54,20 @@ logger = logging.getLogger(__name__)
 # "glioblastoma egfr" are the same cache entry.
 
 
+def _is_empty(value: Any) -> bool:
+    """True iff `value` is a sized, zero-length result (an empty list of
+    Items, most commonly) — see TTL_EMPTY's own comment (bottom of this
+    file) for why an empty result gets a much shorter TTL than a populated
+    one. Values with no `__len__` (a bool, a non-empty dict, a single
+    object, ...) are never treated as empty here — only a genuinely empty
+    COLLECTION triggers the short TTL; get_or_compute's caller-supplied
+    ttl/stale_ttl still governs everything else exactly as before."""
+    try:
+        return len(value) == 0
+    except TypeError:
+        return False
+
+
 def normalize_key(namespace: str, terms: str | Iterable[str]) -> str:
     """Build a normalized cache key: lowercased, whitespace-split, sorted terms.
 
@@ -202,9 +216,18 @@ class Cache(ABC):
                     return entry.value
                 raise
 
+            # EMPTY-RESULT GUARD — see TTL_EMPTY's own comment. An empty
+            # collection gets a much shorter TTL than what the caller asked
+            # for: it's either a genuine (cheap, rare) no-match or a
+            # swallowed upstream failure (see e.g. tools/search_trials.py),
+            # and either way it should be re-checked in under a minute, not
+            # enshrined for the caller's normal 30-minute-to-24-hour window.
+            store_ttl, store_stale_ttl = (
+                (TTL_EMPTY, STALE_EMPTY) if _is_empty(value) else (ttl_seconds, stale_ttl)
+            )
             await self._store(
                 key, _Entry(value=value, stored_at=time.monotonic(),
-                            ttl=ttl_seconds, stale_ttl=stale_ttl)
+                            ttl=store_ttl, stale_ttl=store_stale_ttl)
             )
             return value
 
@@ -240,9 +263,12 @@ class Cache(ABC):
                         self.stats.errors += 1
                         logger.exception("background cache refresh failed: key=%r", key)
                         return
+                    store_ttl, store_stale_ttl = (
+                        (TTL_EMPTY, STALE_EMPTY) if _is_empty(value) else (ttl, stale_ttl)
+                    )
                     await self._store(
                         key, _Entry(value=value, stored_at=time.monotonic(),
-                                    ttl=ttl, stale_ttl=stale_ttl)
+                                    ttl=store_ttl, stale_ttl=store_stale_ttl)
                     )
             finally:
                 self._refreshing.discard(key)
@@ -308,6 +334,51 @@ STALE_TOOLS = 3 * 60 * 60
 # 0), so identical searches should never re-hit the LLM.
 TTL_LLM = 24 * 60 * 60
 STALE_LLM = 48 * 60 * 60
+
+# EMPTY-RESULT TTL — the cache-poisoning guard (see _is_empty and its two call
+# sites above). Every one of the six single-source fetchers (search_trials,
+# search_grants, search_tools, search_news, search_datasets, search_pager)
+# swallows its own upstream exception and returns [] — a completely ordinary-
+# looking SUCCESSFUL compute from get_or_compute's point of view, no different
+# from a genuine zero-match. Caching that at the normal TTL_SOURCE (30 min
+# fresh, 2 hr stale) means a transient upstream blip reads as "confirmed zero
+# results" for up to two hours to every user hitting that exact query — this
+# is exactly what happened live during the trials/datasets/pager composition
+# fix: one transient ClinicalTrials.gov 500 got cached as an empty success,
+# and only a fresh backend process (which happens to clear the in-memory
+# cache) cleared it.
+#
+# THE ASYMMETRY is the whole point: an empty result is either a genuine
+# no-match (cheap to recompute, and rare — most searches DO find something)
+# or a swallowed failure (which we very much want to retry soon, not
+# enshrine). A populated result is the expensive, common case and stays on
+# its caller's normal TTL — this guard touches ONLY empty results.
+#
+# 45s — the middle of the requested 30-60s range. Long enough that
+# single-flight still collapses a burst of concurrent identical searches
+# during a live outage into ONE wasted upstream call, not one per request
+# (the lock covers the full TTL window, not just the single compute).
+# Short enough that the very next distinct request after that window gets a
+# fresh shot at upstream, rather than an unrelated user waiting out a
+# 30-minute-to-24-hour cache window for something that may have already
+# recovered by the time they search.
+#
+# NO SEPARATE STALE WINDOW (stale_ttl == ttl here): an empty entry becomes a
+# hard MISS the instant it expires, forcing an inline recompute, rather than
+# being served "stale" for a while during a background revalidation — stale-
+# serving an empty result while quietly re-checking behind it would just
+# re-show the same "no results" to the user who's asking right now, which
+# defeats the purpose of a short TTL in the first place.
+#
+# THIS IS THE NARROW FIX, NOT THE PROPER ONE. It works regardless of whether
+# the six fetchers keep swallowing exceptions before tools/explore.py's
+# _execute could ever see them as real failures (see search_trials.py and its
+# five siblings) — that swallowing is deliberately UNCHANGED here. The real
+# fix is letting each fetcher distinguish "genuinely empty" from "failed" at
+# the source (e.g. re-raising, or returning a sentinel _execute can tell
+# apart); this just bounds the blast radius of not having that yet.
+TTL_EMPTY = 45
+STALE_EMPTY = TTL_EMPTY
 
 
 # ── module singleton ──────────────────────────────────────────────────────────

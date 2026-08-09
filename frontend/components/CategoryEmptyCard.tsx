@@ -7,6 +7,17 @@
 //   • EXTERNAL categories (paper, dataset, tool, trial, grant, episode) LEAD with a
 //     broaden CTA → back to All ("try a broader term / browse the full feed").
 // Both elements are always present; only the lead order changes with the type.
+//
+// FAILED vs GENUINELY EMPTY (`failed` prop): a real per-tool fetch failure
+// (tools/explore.py sets section.error when that tool's call raised — see
+// app/explore/[topic]/page.tsx, which looks this up from the raw response
+// and passes it down) must NEVER render as "try a broader term". That copy
+// tells the reader their search was the problem when the actual problem is
+// that a source never searched at all — same "failure reported as empty"
+// pattern already fixed once at the whole-page level (backendError vs
+// emptyResult), now reaching this per-category card too. `failed` always
+// wins over the internal/external branching below — a fetch failure reads
+// the same regardless of which kind of source it was.
 
 import Link from "next/link";
 
@@ -16,11 +27,15 @@ export default function CategoryEmptyCard({
   label,
   kind,
   query,
+  failed = false,
   onBrowseAll,
 }: {
   label: string;
   kind: string | null;
   query: string;
+  /** True when this category's own section came back with an error (a real
+   *  fetch failure), not just zero matches. Overrides everything else below. */
+  failed?: boolean;
   onBrowseAll: () => void;
 }) {
   const lower = label.toLowerCase();
@@ -37,6 +52,22 @@ export default function CategoryEmptyCard({
       Show all results
     </button>
   );
+
+  if (failed) {
+    return (
+      <div className="glass-card rounded-xl max-w-xl mx-auto text-center px-8 py-14">
+        <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
+        <h3 className="mt-4 font-headline-md text-headline-md text-on-background">
+          Couldn&apos;t search {lower} right now
+        </h3>
+        <p className="mt-2 text-secondary font-body-md">
+          This source didn&apos;t respond — this isn&apos;t about your search. Try again in a
+          moment.
+        </p>
+        <div className="mt-6 flex justify-center">{browse}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="glass-card rounded-xl max-w-xl mx-auto text-center px-8 py-14">

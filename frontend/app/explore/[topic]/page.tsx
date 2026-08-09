@@ -291,12 +291,22 @@ function SearchResults() {
         const showPooled = selected === null && pooledItems.length > 0;
 
         // Selected category with no results -> the A+D invitation card.
+        // FAILED vs GENUINELY EMPTY: a real per-tool failure (tools/explore.py
+        // sets section.error when that tool's call raised) must not read as
+        // "try a broader term" — that's a lie when the source never actually
+        // searched. `activeSections`/`pooledItems` above are built from
+        // `.items` alone and drop `.error`, so look it up separately, straight
+        // from the raw response, for whichever kind is selected.
         if (selected !== null && activeSections.length === 0) {
+          const failedSection = (data?.sections ?? []).find(
+            (s) => s.kind === selected && !!s.error
+          );
           return (
             <CategoryEmptyCard
               label={labelForKind(selected)}
               kind={selected}
               query={topic}
+              failed={!!failedSection}
               onBrowseAll={() => setSelected(null)}
             />
           );

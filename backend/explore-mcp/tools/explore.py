@@ -199,8 +199,16 @@ _ROUTING_SYSTEM = (
     "→ internal resources, software tools, and people who can help — not papers-first, "
     "and not search_datasets or search_pager either (both are about disease/tissue/gene "
     "targets, not the user's own method).\n"
-    "  • 'clinical trials for X' → trials (and papers).\n"
-    "  • 'funding for X' / a grant/screen to fund → grants (and relevant tools).\n"
+    "  • Whenever the scope names a DISEASE — even if the message never says 'trials' or "
+    "'funding' explicitly (e.g. 'CRISPR gene therapy for cystic fibrosis' names cystic "
+    "fibrosis; 'PHGDH in Alzheimer's' names Alzheimer's) → ALSO include search_trials "
+    "AND search_grants. Virtually every named disease has active clinical trials and "
+    "funding activity worth surfacing — same reasoning as why a disease/gene alone "
+    "already triggers datasets and pager above, not only when the user's own wording "
+    "happens to say 'clinical trials' or 'funding'.\n"
+    "  • An explicit funding ask with NO disease named ('funding for a CRISPR screen', "
+    "'grant for a high-throughput assay') → grants (and relevant tools) even though the "
+    "disease-triggered rule above doesn't apply to it.\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
     'Return ONLY a JSON object of the form '
     '{"tools": ["search_papers", ...], "reasoning": "one sentence"}. '
@@ -266,31 +274,86 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 
 
 # ── Step 3: per-tool query construction ──────────────────────────────────────
-# The RIGHT scope slice per tool. Disease-facing searches (papers/trials/grants)
-# get the disease + topic; capability searches (tools/resources) get the method +
-# gene; people get disease + method; wiki gets the topic. Never swapped.
+# The RIGHT scope slice per tool. Two different composition philosophies live
+# side by side here, and mixing them up is the bug this section exists to
+# prevent:
+#
+#   RELEVANCE-RANKED sources (papers, datasets, pager, wiki, ...) — PubMed/
+#   OpenAlex/Crossref/GEO/PAGER all rank a big candidate pool by best-match, so
+#   a longer, richer query (more terms) generally still returns SOMETHING,
+#   just possibly diluted lower down. These can afford disease + topic + gene.
+#
+#   STRICT-MATCHING sources (trials, grants) — verified live that
+#   ClinicalTrials.gov's query.term effectively requires every term to be
+#   satisfiable, not just most of them: a real diagnosed case sent
+#   "glioblastoma glioblastoma clinical trials funding opportunities" (disease
+#   + a topic phrase THAT NAMED THE DISEASE AGAIN + a second, unrelated topic
+#   phrase about funding) and got back ZERO studies, even though a bare
+#   "glioblastoma" query returns 10 — no trial record's text ever contains
+#   "funding opportunities", so requiring it killed the match entirely. A
+#   free-text `topics` phrase is exactly what's unsafe to feed a strict
+#   matcher: it's whatever words the LLM extracted from the user's sentence,
+#   not a controlled vocabulary term. So trials/grants get ONLY diseases +
+#   genes — a trial record fundamentally describes a CONDITION (disease) and
+#   an INTERVENTION (a molecular target is the closest scope field to that);
+#   nothing else in scope reliably appears in a trial or funding record's own
+#   text. This also kills the duplicate for free: the reported
+#   "glioblastoma glioblastoma" happened because the disease name was ALSO
+#   embedded inside a `topics` phrase ("glioblastoma clinical trials") —
+#   _join_unique only dedupes EXACT term matches, not sub-phrase overlap, so
+#   two literally-different strings both landed in the query. Dropping
+#   `topics` from these two slices removes the phrase that carried the
+#   duplicate, rather than trying to dedupe at the word level.
+#
+#   NOT extending this to search_tools (GitHub) — audited its existing slice
+#   (methods, genes) and it's already narrow AND GitHub's own search already
+#   proved tolerant of a multi-term query live (a 3-term "single cell rna
+#   seq" search returned 10 good results) — no evidence it has the same
+#   strict-AND behavior ClinicalTrials.gov does. Left unchanged; revisit if
+#   evidence turns up, not preemptively.
+#
+#   NOT extending the fan-out machinery (tools/search_papers.py's entity
+#   queries) to trials/grants here either — that's a separate decision once
+#   this narrower composition fix is measured on its own.
 #
 # search_papers intentionally gets the RICHEST slice (disease + topic + gene):
 # papers are the broadest result kind, so a gene target like PHGDH belongs in the
-# literature query even though trials/grants stay strictly disease + topic.
+# literature query even though trials/grants/datasets/pager now stay strictly
+# disease + gene. NOT touched by this round's fix — search_papers already has
+# its own entity fan-out (tools/search_papers.py:search_papers_multi_async),
+# a separately verified fix for the same class of dilution problem; folding
+# it into this diseases+genes composition-only fix would be redundant at
+# best and would bypass that verified machinery at worst.
 #
-# search_datasets gets disease + gene + topic (topic standing in for tissue —
-# SCOPE_KEYS has no dedicated tissue field, and the LLM's `topics` extraction
-# already captures tissue/organ phrases like "liver" or "brain tissue" when
-# they're in the message). Deliberately EXCLUDES methods: GEO's own metadata
-# already carries the assay/method (gdstype — RNA-seq vs microarray vs
-# ChIP-seq), so a method term in the query text narrows by keyword match
-# against submitter-written titles/summaries instead, which is much noisier
-# than letting disease/gene/tissue drive the search. Datasets are found BY
-# disease/tissue/gene, not by method — see tools/search_datasets.py.
+# search_datasets / search_pager: ORIGINALLY (diseases, genes, topics) with
+# `topics` standing in for tissue (no dedicated tissue field in scope) — this
+# was assumed safe because GEO/PAGER are RELEVANCE-RANKED, same class as
+# papers, not strict-matching like ClinicalTrials.gov. That assumption held
+# for search_trials/search_grants ONLY in the sense that GEO/PAGER don't 400
+# or hard-fail on a long query — but the routing fix that made these two
+# tools fire on more queries surfaced the SAME symptom trials had: a bare
+# "glioblastoma" query returns 10/10 for both, the old diluted combined
+# string ("glioblastoma glioblastoma clinical trials funding opportunities")
+# returns 0/0 for both, verified directly against search_datasets_async/
+# search_pager_async with no other code involved. So NCBI GEO's and PAGER's
+# own search endpoints turn out to have the same strict-AND-ish behavior as
+# ClinicalTrials.gov, not the OR/relevance behavior PubMed/OpenAlex have —
+# the "relevance-ranked" bucket these were filed under above was wrong for
+# these two specifically. Fixed the same way as trials/grants: dropped
+# `topics` entirely, kept (diseases, genes) — and genes is independently
+# confirmed the strong signal for GEO specifically (the PHGDH diagnostic:
+# 8-9 of 10 relevant on a bare gene query). PAGER takes a single term anyway
+# per its own tool docstring, so a shorter, gene/disease-only query can only
+# help it, never hurt it. `topics` (tissue) is lost as a dedicated signal for
+# both — a real, accepted trade-off, same one trials/grants already made.
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
-    "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind
+    "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind; own fan-out handles dilution separately
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
-    "search_trials":        ("diseases", "topics"),
-    "search_grants":        ("diseases", "topics"),
+    "search_trials":        ("diseases", "genes"),            # STRICT matcher — condition + intervention only, no free-text topics
+    "search_grants":        ("diseases", "genes"),            # same reasoning as trials — Grants.gov tolerated the old diluted string, but shorter is strictly safer and consistent
     "search_tools":         ("methods", "genes"),
-    "search_datasets":      ("diseases", "genes", "topics"),  # disease + gene + tissue(topic) — NOT method
-    "search_pager":         ("diseases", "genes", "topics"),  # same slice as datasets — PAGER keyword-matches disease/gene/tissue text, not method text
+    "search_datasets":      ("diseases", "genes"),            # was + topics — GEO's own search proved to share trials' strict-AND behavior; genes is GEO's strongest signal (PHGDH: 8-9/10 relevant on a bare gene query)
+    "search_pager":         ("diseases", "genes"),            # same fix, same reasoning as datasets — PAGER takes a single term anyway, per its own docstring
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -298,13 +361,24 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
 
 # Fallback slice used ONLY when a tool's primary slice comes out empty, so a
 # chosen tool never runs with a blank query. e.g. "funding for a CRISPR screen"
-# has no disease/topic, so grants falls back to methods+topics ("CRISPR screen").
+# has no disease/gene, so grants falls back to methods ("CRISPR screen").
 # This fixes the query STRING only; it never changes which tools were chosen.
+#
+# `topics` dropped from BOTH fallbacks (was (methods, topics) for each) —
+# same strict-matcher reasoning as the primary slices above: a free-text
+# topic phrase is exactly what's unsafe to hand ClinicalTrials.gov/Grants.gov,
+# fallback or not. `methods` alone is a real risk-reduction here since the
+# genuinely-empty-scope case (no disease, no gene, no method either) still
+# has `_query_for`'s own last-resort — joining every scope key — as the final
+# safety net; that net accepts the dilution risk only in that fully degenerate
+# case, which is the one case there's nothing better to search on anyway.
 _FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
-    "search_grants": ("methods", "topics"),
-    "search_trials": ("methods", "topics"),
+    "search_grants": ("methods",),
+    "search_trials": ("methods",),
     # method-less scopes (e.g. the default landing feed) fall back to the topic so
     # GitHub gets "drug discovery" instead of "" (which returns generic top repos).
+    # search_tools is a relevance-ranked source (see the audit note above), so a
+    # topics fallback here carries none of the strict-matcher risk trials/grants had.
     "search_tools": ("topics",),
 }
 
