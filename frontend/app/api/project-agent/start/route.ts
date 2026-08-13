@@ -40,6 +40,19 @@ export async function POST(req: Request) {
   }
   const project = result.project;
 
+  // Chen: the agent is for regular projects only, not ColaboFest — a
+  // ColaboFest team already has nine readiness items and a fixed deadline,
+  // and the agent proposing more is noise. Gated here too, not just in the
+  // UI, so a direct POST for a ColaboFest project is refused the same way
+  // every other permission check in this app is: server-enforced, not just
+  // hidden behind a client-side conditional.
+  if (project.challenge_key) {
+    return NextResponse.json(
+      { error: "The agent isn't available for ColaboFest projects." },
+      { status: 403 }
+    );
+  }
+
   // Already-saved resource ids, so the agent excludes them BEFORE its
   // relevance pass rather than re-proposing them only to have them fail as
   // duplicates on accept. Best-effort: a failed lookup here shouldn't block

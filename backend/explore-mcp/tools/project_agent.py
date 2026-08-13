@@ -230,6 +230,54 @@ def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[di
 
 # ── step 3: checklist proposal ────────────────────────────────────────────────
 
+# Chen: "make sure the checklist generated is a valid one, not some garbage."
+# A prompt instruction alone ("GROUNDED in what was actually found") is not a
+# gate — the LLM can and does ignore it under load. This is the actual gate:
+# every item the LLM proposes is checked in code, after parsing, before it
+# ever reaches the frontend. An item survives ONLY if its rationale either
+# (a) shares real vocabulary with something step 1/2 actually found (a
+# citation), or (b) names an explicit gap using one of the phrases below (no
+# in vivo model was found, evidence is unclear, etc.). Anything that's
+# neither — a plausible-sounding but unmoored sentence — is dropped, not
+# trusted. Fewer defensible items beats six plausible ones, per Chen's words.
+_GAP_PHRASES = (
+    "no evidence", "no in vivo", "no in vitro", "not found", "not identified",
+    "not addressed", "none of the", "no direct evidence", "no paper", "no dataset",
+    "no clinical trial", "no trial", "unclear whether", "unclear if", "is unclear",
+    "was not found", "were not found", "no study", "no studies", "gap in",
+    "missing from", "not available", "did not find", "we found no", "lack of",
+    "lacks", "no existing", "not yet established", "remains unclear",
+    "remains unknown", "unknown whether",
+)
+
+# Words too generic to count as a real citation match on their own (stopwords
+# plus a few domain-generic terms that show up in nearly every title/summary
+# and would let almost any sentence "match" by accident).
+_GROUNDING_STOPWORDS = {
+    "this", "that", "with", "from", "into", "using", "study", "studies",
+    "research", "project", "paper", "papers", "dataset", "datasets", "trial",
+    "trials", "grant", "grants", "about", "which", "there", "their", "these",
+    "those", "would", "could", "should", "based", "found", "relevant",
+    "related", "results", "result", "information", "provides", "provide",
+}
+
+
+def _content_words(text: str) -> set[str]:
+    return {
+        w for w in re.findall(r"[a-zA-Z][a-zA-Z0-9\-]{3,}", (text or "").lower())
+        if w not in _GROUNDING_STOPWORDS
+    }
+
+
+def _is_grounded(rationale: str, found_vocab: set[str]) -> bool:
+    """The gate itself. `found_vocab` is every content word drawn from the
+    titles/summaries of what step 1/2 actually surfaced for this run."""
+    lower = (rationale or "").lower()
+    if any(phrase in lower for phrase in _GAP_PHRASES):
+        return True
+    return bool(_content_words(rationale) & found_vocab)
+
+
 _CHECKLIST_SYSTEM = (
     "You are a research assistant proposing next steps for a lab project. You will "
     "be given the project's description, a short list of items that were actually "
@@ -247,15 +295,23 @@ _CHECKLIST_SYSTEM = (
 
 
 def _propose_checklist(
-    description: str, selected: list[dict], existing_labels: list[str]
-) -> tuple[list[dict], bool]:
-    """Returns (proposed checklist items, used_fallback). An empty result is a
-    legitimate outcome here (nothing to add) — this only "falls back" (to
-    nothing, with a note) if the call/parse itself fails, never to a filler
-    item."""
+    description: str, selected: list[dict], existing_labels: list[str], candidates: list[dict]
+) -> tuple[list[dict], bool, int]:
+    """Returns (proposed checklist items, used_fallback, dropped_ungrounded_count).
+    An empty result is a legitimate outcome here (nothing to add) — this only
+    "falls back" (to nothing, with a note) if the call/parse itself fails,
+    never to a filler item.
+
+    `candidates` (the full step-1 pool, not just the 8 selected) backs the
+    grounding gate — a valid gap item like Chen's "none of the found papers
+    address X" cites the whole search, not only what survived relevance."""
     found_summary = [
         {"kind": s.get("kind"), "title": s.get("title")} for s in selected[:MAX_SELECTED]
     ]
+    found_vocab: set[str] = set()
+    for c in candidates:
+        found_vocab |= _content_words(c.get("title"))
+        found_vocab |= _content_words(c.get("summary"))
     try:
         resp = llm.complete(
             [
@@ -277,6 +333,7 @@ def _propose_checklist(
         if isinstance(raw, list):
             existing_lower = {label.strip().lower() for label in existing_labels}
             out: list[dict] = []
+            dropped = 0
             for entry in raw:
                 if not isinstance(entry, dict):
                     continue
@@ -286,19 +343,24 @@ def _propose_checklist(
                     continue
                 if label.strip().lower() in existing_lower:
                     continue
-                out.append(
-                    {
-                        "label": label.strip()[:300],
-                        "rationale": rationale.strip() if isinstance(rationale, str) else "",
-                    }
-                )
+                rationale_text = rationale.strip() if isinstance(rationale, str) else ""
+                # THE GATE: no citation to something actually found and no
+                # named gap -> drop it, no matter how plausible it reads.
+                if not _is_grounded(rationale_text, found_vocab):
+                    dropped += 1
+                    logger.warning(
+                        "project_agent: dropped ungrounded checklist item %r (rationale=%r)",
+                        label.strip(), rationale_text,
+                    )
+                    continue
+                out.append({"label": label.strip()[:300], "rationale": rationale_text})
                 if len(out) >= MAX_CHECKLIST:
                     break
-            return out, False
+            return out, False, dropped
         logger.warning("project_agent: checklist JSON unusable")
     except Exception:
         logger.exception("project_agent: checklist LLM call failed")
-    return [], True
+    return [], True, 0
 
 
 # ── orchestration ─────────────────────────────────────────────────────────────
@@ -326,11 +388,20 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         checklist_items: [{label, rationale}],
         tools_called: [str],                # from step 1, for transparency
         warnings: [str],                    # partial-failure notes, never fatal
+        analysis_failed: bool,              # relevance pass itself failed — see below
       }
 
     Never raises for a normal upstream failure — every step degrades on its
-    own and the run still returns whatever it managed to find. The one thing
-    it will not do is come back with an empty proposal and no explanation."""
+    own and the run still returns whatever it managed to find. The one
+    exception, per Chen's review: if the RELEVANCE PASS ITSELF fails (the LLM
+    call/JSON breaks, e.g. hitting a quota), this does NOT fall back to
+    unranked search results with a quiet caveat — that is exactly the
+    "garbage" outcome Chen called out (unranked, possibly off-topic items,
+    with the caveat buried in a warnings list underneath them). Instead the
+    run proposes NOTHING and sets analysis_failed=True, which the frontend
+    renders as a prominent top-of-panel message instead of a review list.
+    Checklist proposal is skipped entirely in that case too, since step 3
+    would otherwise be "grounding" itself in an unranked, unvetted pool."""
     warnings: list[str] = []
 
     def _stage(name: str) -> None:
@@ -360,18 +431,44 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
 
     _stage("judging_relevance")
     selected, relevance_fallback = _select_relevant(goal_summary, candidates)
-    if relevance_fallback and selected:
-        warnings.append("Relevance ranking was unavailable; showing the top search results instead.")
+
+    # FAIL CLOSED: the relevance pass failing is not a "degrade gracefully"
+    # case like an empty source — it means nothing was actually judged
+    # against this project's goal, so nothing here is trustworthy enough to
+    # propose. Discard whatever _select_relevant's own fallback produced
+    # (unranked top candidates) rather than showing them.
+    if relevance_fallback:
+        _stage("done")
+        return {
+            "summary": (
+                f"Searched {len(explore_result.get('tools_called') or [])} sources for "
+                f"“{goal_summary}”, but couldn't complete the relevance analysis."
+            ),
+            "selected_items": [],
+            "checklist_items": [],
+            "tools_called": explore_result.get("tools_called") or [],
+            "warnings": [
+                "The agent could not complete its analysis this run — the relevance pass "
+                "failed, so nothing is being proposed rather than showing unranked, "
+                "unvetted results. Try again in a moment."
+            ],
+            "analysis_failed": True,
+        }
 
     existing_labels = [
         str(label).strip() for label in (project.get("existing_checklist") or []) if str(label).strip()
     ]
     _stage("proposing_checklist")
-    checklist_items, checklist_fallback = _propose_checklist(
-        project.get("description") or "", selected, existing_labels
+    checklist_items, checklist_fallback, dropped_ungrounded = _propose_checklist(
+        project.get("description") or "", selected, existing_labels, candidates
     )
     if checklist_fallback:
         warnings.append("Couldn't generate checklist suggestions this run.")
+    if dropped_ungrounded:
+        warnings.append(
+            f"Dropped {dropped_ungrounded} proposed checklist item(s) that weren't grounded in "
+            "anything this run actually found."
+        )
     _stage("done")
 
     # Honest reporting when exclusion is *why* there's nothing to propose —
@@ -416,4 +513,5 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "checklist_items": checklist_items,
         "tools_called": explore_result.get("tools_called") or [],
         "warnings": warnings,
+        "analysis_failed": False,
     }

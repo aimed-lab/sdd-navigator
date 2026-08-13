@@ -36,6 +36,11 @@ type AgentResult = {
   checklist_items: ProposedChecklistItem[];
   tools_called: string[];
   warnings: string[];
+  // Set when the relevance pass itself failed (e.g. hit a quota). Per Chen's
+  // review: the agent must NOT fall back to unranked search results with a
+  // quiet caveat in that case — it proposes nothing, and this flag is what
+  // tells the panel to say so prominently instead of rendering a review list.
+  analysis_failed?: boolean;
 };
 
 type Stage = "searching" | "judging_relevance" | "proposing_checklist" | "done" | null;
@@ -257,7 +262,33 @@ export default function AgentSection({ projectId }: { projectId: string }) {
         </p>
       )}
 
-      {result && (
+      {result && result.analysis_failed && (
+        <div className="glass-card rounded-2xl p-6 md:p-8 border border-error/40">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-error text-[22px]">error</span>
+            <div>
+              <p className="font-body-md text-body-md text-on-background font-medium">
+                The agent couldn&apos;t complete its analysis.
+              </p>
+              <p className="font-body-sm text-body-sm text-secondary mt-1">
+                {result.warnings[0] ??
+                  "The relevance pass failed, so nothing is being proposed. Try again in a moment."}
+              </p>
+            </div>
+          </div>
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={discard}
+              className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {result && !result.analysis_failed && (
         <div className="glass-card rounded-2xl p-6 md:p-8">
           <p className="font-body-md text-body-md text-on-background mb-1">{result.summary}</p>
           {result.warnings.length > 0 && (

@@ -167,9 +167,16 @@ export default async function ProjectDetailPage({
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
-      <AgentSection projectId={project.id} />
+      {/* Chen: don't overwhelm ColaboFest with agent suggestions — a
+          ColaboFest team already has nine readiness items and a fixed
+          deadline. Agent is for regular (non-challenge) projects only. */}
+      {!project.challenge_key && (
+        <>
+          <AgentSection projectId={project.id} />
 
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+          <hr className="border-t border-outline-variant/30 w-full mb-16" />
+        </>
+      )}
 
       <ChecklistSection
         projectId={project.id}
