@@ -368,6 +368,19 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 # per its own tool docstring, so a shorter, gene/disease-only query can only
 # help it, never hurt it. `topics` (tissue) is lost as a dedicated signal for
 # both — a real, accepted trade-off, same one trials/grants already made.
+#
+# search_pager: the comment above (and the tool's own docstring in
+# _TOOL_DESCRIPTIONS) already said "PAGER takes a single term anyway" but the
+# slice was never actually narrowed to match — it stayed (diseases, genes),
+# same as datasets. Confirmed the gap directly: "Amyotrophic lateral
+# sclerosis ATXN2 TARDBP" (disease + 2 genes) returns 0 from PAGER; a bare
+# "ATXN2" returns 20 real gene sets, including a TARDBP protein-interactor
+# set. So PAGER turns out to be even stricter than GEO — GEO tolerated
+# (diseases, genes), PAGER doesn't. Dropped to genes-only, the SAME fix
+# shape as search_trials being dropped to diseases-only above. `diseases` is
+# the fallback (see _FALLBACK_SLICES below) for a gene-less scope, so a
+# disease-only project still gets a real PAGER query instead of skipping the
+# tool or sending nothing.
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind; own fan-out handles dilution separately
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
@@ -375,7 +388,7 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_grants":        ("diseases", "genes"),            # checked for trials' same failure mode, did not find it — Grants.gov didn't reduce results when a gene was added (see note above); kept
     "search_tools":         ("methods", "genes"),
     "search_datasets":      ("diseases", "genes"),            # was + topics — GEO's own search proved to share trials' strict-AND behavior; genes is GEO's strongest signal (PHGDH: 8-9/10 relevant on a bare gene query)
-    "search_pager":         ("diseases", "genes"),            # same fix, same reasoning as datasets — PAGER takes a single term anyway, per its own docstring
+    "search_pager":         ("genes",),                       # STRICTER than GEO — even (diseases, genes) zeroes it out; genes-only, disease-only scope falls back below
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -402,6 +415,11 @@ _FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
     # search_tools is a relevance-ranked source (see the audit note above), so a
     # topics fallback here carries none of the strict-matcher risk trials/grants had.
     "search_tools": ("topics",),
+    # search_pager's primary slice is genes-only now (see _QUERY_SLICES above);
+    # a disease-named, gene-less scope (e.g. "glioblastoma" alone) still gets a
+    # real single-term PAGER query via this fallback, rather than falling all
+    # the way through to _query_for's last-resort join-everything net.
+    "search_pager": ("diseases",),
 }
 
 _KINDS: dict[str, str] = {
@@ -433,6 +451,21 @@ def _join_unique(*groups: list[str]) -> str:
 
 
 def _query_for(name: str, scope: dict) -> str:
+    if name == "search_pager":
+        # PAGER is stricter than the genes-only slice above assumed: verified
+        # directly that even a 2-term genes-only query ("ATXN2 TARDBP") still
+        # returns 0, while either gene ALONE returns ~20 real results. So
+        # PAGER gets a genuinely single term, not _join_unique's space-joined
+        # list — the single most specific gene if one was extracted, else the
+        # single most specific disease (same fallback intent as
+        # _FALLBACK_SLICES["search_pager"], just enforced as one term here
+        # instead of a joined list of however many diseases were extracted).
+        if scope["genes"]:
+            return scope["genes"][0].strip()
+        if scope["diseases"]:
+            return scope["diseases"][0].strip()
+        return _join_unique(*[scope[k] for k in SCOPE_KEYS])  # same last-resort net as below
+
     query = _join_unique(*[scope[k] for k in _QUERY_SLICES[name]])
     if not query and name in _FALLBACK_SLICES:   # never let a chosen tool run blank
         query = _join_unique(*[scope[k] for k in _FALLBACK_SLICES[name]])

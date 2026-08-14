@@ -105,13 +105,27 @@ async def _search(project: dict) -> dict:
     return await explore_async(goal_text)
 
 
+# Kinds excluded from the AGENT's candidate pool only — explore_async() and
+# everything in tools/explore.py stay completely untouched, this filters
+# AFTER the shared search runs, right here in project_agent.py. "episode"
+# (search_wiki, our own podcast-derived wiki pages) is dropped: on a real run
+# against the ALS project it was 20 of 51 candidates (39% of the pool) and 0
+# of them survived the relevance pass, while also eating into the
+# MAX_CANDIDATES=60 cap ahead of sources that actually convert. Episodes stay
+# genuinely useful for browsing in Explore — this exclusion is scoped to the
+# agent's own flattening step, not the shared search.
+_AGENT_EXCLUDED_KINDS = {"episode"}
+
+
 def _flatten_candidates(
     explore_result: dict, excluded_ids: set[str]
 ) -> tuple[list[dict], list[str], int]:
     """All items across every section, deduped by id, in section order, with
     anything already saved to the project (`excluded_ids`) dropped BEFORE the
     relevance pass even sees it — so the LLM's limited selection budget goes
-    on genuinely new items, not on re-proposing what's already there.
+    on genuinely new items, not on re-proposing what's already there. Kinds
+    in `_AGENT_EXCLUDED_KINDS` (currently just episodes) are dropped the same
+    way, before excluded_ids or the cap ever see them.
 
     Returns (items, failed_tool_names, excluded_count) — the count is
     reported back to the caller so the summary can say honestly how much of
@@ -123,6 +137,8 @@ def _flatten_candidates(
     excluded_count = 0
     for section in explore_result.get("sections") or []:
         if not isinstance(section, dict):
+            continue
+        if section.get("kind") in _AGENT_EXCLUDED_KINDS:
             continue
         if section.get("error"):
             failed.append(section.get("tool") or section.get("kind") or "unknown")
