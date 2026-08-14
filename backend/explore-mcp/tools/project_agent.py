@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 import llm
 from tools.explore import explore_async
@@ -42,6 +43,17 @@ logger = logging.getLogger(__name__)
 MAX_CANDIDATES = 60      # cap on how many items step 2 is asked to reason over
 MAX_SELECTED = 8         # cap on how many items the agent proposes to save
 MAX_CHECKLIST = 6        # cap on how many checklist items the agent proposes
+
+# A malformed-JSON response (the model returned prose, truncated JSON, or
+# something _loads_lenient just can't parse into the expected shape) is
+# usually a transient sampling hiccup, NOT a quota — a real 429/quota error
+# raises out of llm.complete() as an exception and is a SEPARATE code path
+# below (still not retried: hammering a quota error again immediately would
+# make it worse, not better). ONE retry, short backoff, on the JSON-unusable
+# path only. If the retry ALSO comes back unusable, this falls closed
+# exactly as before — no weakening of that guarantee, just fewer runs that
+# die to what's usually a one-off bad sample.
+_JSON_RETRY_BACKOFF_SEC = 2.0
 
 
 # ── input shaping ─────────────────────────────────────────────────────────────
@@ -186,12 +198,64 @@ def _candidate_summary(item: dict) -> dict:
     }
 
 
+def _try_select_relevant_once(
+    goal_summary: str, trimmed: list[dict], by_id: dict[str, dict]
+) -> list[dict] | None:
+    """One attempt at the relevance call + parse. Returns the selected items
+    on success, or None if the JSON came back unusable (caller decides
+    whether to retry). Raises on an actual LLM-call failure (a real
+    exception, e.g. a quota error) — that's a distinct failure class the
+    caller does NOT retry, see the module-level note on _JSON_RETRY_BACKOFF_SEC."""
+    resp = llm.complete(
+        [
+            {"role": "system", "content": _RELEVANCE_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"GOAL: {goal_summary}\n\n"
+                    f"Candidate items:\n{json.dumps(trimmed)}\n\n"
+                    'Return ONLY {"selected": [{"id": "...", "reason": "..."}]}.'
+                ),
+            },
+        ],
+        temperature=0.2,
+    )
+    data = _loads_lenient(resp.content)
+    raw = data.get("selected") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return None
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        item_id = entry.get("id")
+        reason = entry.get("reason")
+        if not isinstance(item_id, str) or item_id not in by_id or item_id in seen:
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        seen.add(item_id)
+        out.append({**by_id[item_id], "reason": reason.strip()})
+        if len(out) >= MAX_SELECTED:
+            break
+    return out or None
+
+
 def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[dict], bool]:
     """Returns (selected item dicts each carrying `reason`, used_fallback).
     Falls back to the first MAX_SELECTED candidates with a generic reason if
     the LLM call or its JSON can't be used — the proposal must never come back
     empty just because the relevance pass failed (see CLAUDE.md's partial-
-    failure requirement)."""
+    failure requirement).
+
+    RETRY: malformed JSON (the model returned something _loads_lenient can't
+    use) gets exactly ONE retry after a short backoff — that failure mode is
+    usually a one-off bad sample, not a quota, so a single retry turns most
+    of these into a ~2s delay instead of a dead run. An actual exception from
+    llm.complete() itself (the call failing outright — a real rate limit,
+    network error, etc.) is NOT retried here; that's a different failure
+    class and immediately retrying a quota error only makes it worse."""
     if not candidates:
         return [], False
 
@@ -199,41 +263,18 @@ def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[di
     trimmed = [_candidate_summary(c) for c in candidates[:MAX_CANDIDATES]]
 
     try:
-        resp = llm.complete(
-            [
-                {"role": "system", "content": _RELEVANCE_SYSTEM},
-                {
-                    "role": "user",
-                    "content": (
-                        f"GOAL: {goal_summary}\n\n"
-                        f"Candidate items:\n{json.dumps(trimmed)}\n\n"
-                        'Return ONLY {"selected": [{"id": "...", "reason": "..."}]}.'
-                    ),
-                },
-            ],
-            temperature=0.2,
+        out = _try_select_relevant_once(goal_summary, trimmed, by_id)
+        if out is not None:
+            return out, False
+        logger.warning("project_agent: relevance JSON unusable (attempt 1/2), retrying once")
+        time.sleep(_JSON_RETRY_BACKOFF_SEC)
+        out = _try_select_relevant_once(goal_summary, trimmed, by_id)
+        if out is not None:
+            logger.info("project_agent: relevance JSON usable on retry (attempt 2/2)")
+            return out, False
+        logger.warning(
+            "project_agent: relevance JSON unusable (attempt 2/2) — falling back to top candidates"
         )
-        data = _loads_lenient(resp.content)
-        raw = data.get("selected") if isinstance(data, dict) else None
-        if isinstance(raw, list):
-            out: list[dict] = []
-            seen: set[str] = set()
-            for entry in raw:
-                if not isinstance(entry, dict):
-                    continue
-                item_id = entry.get("id")
-                reason = entry.get("reason")
-                if not isinstance(item_id, str) or item_id not in by_id or item_id in seen:
-                    continue
-                if not isinstance(reason, str) or not reason.strip():
-                    continue
-                seen.add(item_id)
-                out.append({**by_id[item_id], "reason": reason.strip()})
-                if len(out) >= MAX_SELECTED:
-                    break
-            if out:
-                return out, False
-        logger.warning("project_agent: relevance JSON unusable, falling back to top candidates")
     except Exception:
         logger.exception("project_agent: relevance LLM call failed, falling back to top candidates")
 
@@ -310,6 +351,62 @@ _CHECKLIST_SYSTEM = (
 )
 
 
+def _try_propose_checklist_once(
+    description: str, found_summary: list[dict], existing_labels: list[str], found_vocab: set[str]
+) -> tuple[list[dict], int] | None:
+    """One attempt at the checklist call + parse + grounding gate. Returns
+    (items, dropped_ungrounded_count) on success — items may legitimately be
+    [] (every proposed item got filtered, or the model itself proposed
+    nothing, both real outcomes, not failures). Returns None only when the
+    JSON itself couldn't be used (caller decides whether to retry). Raises on
+    an actual LLM-call exception, same distinction as _try_select_relevant_once."""
+    resp = llm.complete(
+        [
+            {"role": "system", "content": _CHECKLIST_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"Project description: {description or '(none given)'}\n\n"
+                    f"Found items: {json.dumps(found_summary)}\n\n"
+                    f"Existing checklist items: {json.dumps(existing_labels)}\n\n"
+                    'Return ONLY {"items": [{"label": "...", "rationale": "..."}]}.'
+                ),
+            },
+        ],
+        temperature=0.3,
+    )
+    data = _loads_lenient(resp.content)
+    raw = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return None
+    existing_lower = {label.strip().lower() for label in existing_labels}
+    out: list[dict] = []
+    dropped = 0
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        label = entry.get("label")
+        rationale = entry.get("rationale")
+        if not isinstance(label, str) or not label.strip():
+            continue
+        if label.strip().lower() in existing_lower:
+            continue
+        rationale_text = rationale.strip() if isinstance(rationale, str) else ""
+        # THE GATE: no citation to something actually found and no
+        # named gap -> drop it, no matter how plausible it reads.
+        if not _is_grounded(rationale_text, found_vocab):
+            dropped += 1
+            logger.warning(
+                "project_agent: dropped ungrounded checklist item %r (rationale=%r)",
+                label.strip(), rationale_text,
+            )
+            continue
+        out.append({"label": label.strip()[:300], "rationale": rationale_text})
+        if len(out) >= MAX_CHECKLIST:
+            break
+    return out, dropped
+
+
 def _propose_checklist(
     description: str, selected: list[dict], existing_labels: list[str], candidates: list[dict]
 ) -> tuple[list[dict], bool, int]:
@@ -320,7 +417,11 @@ def _propose_checklist(
 
     `candidates` (the full step-1 pool, not just the 8 selected) backs the
     grounding gate — a valid gap item like Chen's "none of the found papers
-    address X" cites the whole search, not only what survived relevance."""
+    address X" cites the whole search, not only what survived relevance.
+
+    RETRY: same shape as _select_relevant — malformed JSON gets ONE retry
+    after a short backoff (usually a one-off bad sample); an actual
+    exception from llm.complete() itself is not retried."""
     found_summary = [
         {"kind": s.get("kind"), "title": s.get("title")} for s in selected[:MAX_SELECTED]
     ]
@@ -328,52 +429,20 @@ def _propose_checklist(
     for c in candidates:
         found_vocab |= _content_words(c.get("title"))
         found_vocab |= _content_words(c.get("summary"))
+
     try:
-        resp = llm.complete(
-            [
-                {"role": "system", "content": _CHECKLIST_SYSTEM},
-                {
-                    "role": "user",
-                    "content": (
-                        f"Project description: {description or '(none given)'}\n\n"
-                        f"Found items: {json.dumps(found_summary)}\n\n"
-                        f"Existing checklist items: {json.dumps(existing_labels)}\n\n"
-                        'Return ONLY {"items": [{"label": "...", "rationale": "..."}]}.'
-                    ),
-                },
-            ],
-            temperature=0.3,
-        )
-        data = _loads_lenient(resp.content)
-        raw = data.get("items") if isinstance(data, dict) else None
-        if isinstance(raw, list):
-            existing_lower = {label.strip().lower() for label in existing_labels}
-            out: list[dict] = []
-            dropped = 0
-            for entry in raw:
-                if not isinstance(entry, dict):
-                    continue
-                label = entry.get("label")
-                rationale = entry.get("rationale")
-                if not isinstance(label, str) or not label.strip():
-                    continue
-                if label.strip().lower() in existing_lower:
-                    continue
-                rationale_text = rationale.strip() if isinstance(rationale, str) else ""
-                # THE GATE: no citation to something actually found and no
-                # named gap -> drop it, no matter how plausible it reads.
-                if not _is_grounded(rationale_text, found_vocab):
-                    dropped += 1
-                    logger.warning(
-                        "project_agent: dropped ungrounded checklist item %r (rationale=%r)",
-                        label.strip(), rationale_text,
-                    )
-                    continue
-                out.append({"label": label.strip()[:300], "rationale": rationale_text})
-                if len(out) >= MAX_CHECKLIST:
-                    break
+        result = _try_propose_checklist_once(description, found_summary, existing_labels, found_vocab)
+        if result is not None:
+            out, dropped = result
             return out, False, dropped
-        logger.warning("project_agent: checklist JSON unusable")
+        logger.warning("project_agent: checklist JSON unusable (attempt 1/2), retrying once")
+        time.sleep(_JSON_RETRY_BACKOFF_SEC)
+        result = _try_propose_checklist_once(description, found_summary, existing_labels, found_vocab)
+        if result is not None:
+            logger.info("project_agent: checklist JSON usable on retry (attempt 2/2)")
+            out, dropped = result
+            return out, False, dropped
+        logger.warning("project_agent: checklist JSON unusable (attempt 2/2)")
     except Exception:
         logger.exception("project_agent: checklist LLM call failed")
     return [], True, 0
