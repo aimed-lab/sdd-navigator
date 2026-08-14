@@ -29,6 +29,7 @@ import ChecklistSection from "@/components/projects/ChecklistSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
+import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -210,6 +211,12 @@ export default async function ProjectDetailPage({
           />
         </>
       )}
+
+      {/* Floating, out of normal flow — available on every project,
+          including ColaboFest — unlike the agent above (hidden there
+          because it pushes proposals), this is pull-based: a member asks,
+          nothing is proposed unprompted. */}
+      <ProjectChatbot projectId={project.id} projectName={project.name} />
     </div>
   );
 }

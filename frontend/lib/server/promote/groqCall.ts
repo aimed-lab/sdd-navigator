@@ -65,9 +65,20 @@ export async function groqComplete(opts: {
   maxTokens: number;
   label: string; // for logs, e.g. "generate-posts"
   temperature?: number;
+  // JSON mode: both existing Promote callers parse structured JSON, and
+  // without response_format: json_object the model emits literal newlines
+  // inside string values, which JSON.parse rejects. Defaults to true so
+  // generatePosts.ts/generateExtras.ts need no change to keep that
+  // behaviour. Groq REJECTS json_object mode with a 400 unless the word
+  // "json" appears somewhere in the messages (a chatbot answering in plain
+  // prose won't say that) — set json: false for a prose caller instead of
+  // gaming the prompt with the word "json" just to satisfy the mode check.
+  json?: boolean;
 }): Promise<string> {
   const groqKey = process.env.GROQ_API_KEY;
   if (!groqKey) throw new ServerConfigError("GROQ_API_KEY not configured");
+
+  const useJson = opts.json ?? true;
 
   const body = JSON.stringify({
     model: MODEL,
@@ -77,9 +88,7 @@ export async function groqComplete(opts: {
     ],
     temperature: opts.temperature ?? 0.7,
     max_tokens: opts.maxTokens,
-    // JSON mode: both callers parse structured JSON, and without this the model
-    // emits literal newlines inside string values, which JSON.parse rejects.
-    response_format: { type: "json_object" },
+    ...(useJson ? { response_format: { type: "json_object" } } : {}),
   });
 
   const send = () =>

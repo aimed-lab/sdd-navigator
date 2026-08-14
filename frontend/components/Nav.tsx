@@ -1,10 +1,17 @@
 "use client";
 
 // Shared shell nav — STRUCTURE follows design/SHELL.md (wordmark left; Explore /
-// Collaborate / Promote center with active highlight; right = theme toggle +
+// Collaborate / Promote center with active highlight; right =
 // Log in/Sign up OR account menu + Settings; hamburger on mobile). VISUAL style
 // is taken from design/stitch/smartdrugdiscovery_landing_page/code.html.
 // Per SHELL.md, the nav inside individual page HTML is ignored — this is the one.
+//
+// NO THEME TOGGLE: there used to be one here (a button flipping a `dark`
+// class on <html>). Removed — the class was wired correctly, but there was
+// no `dark:` style anywhere in the app for it to affect, so it was a
+// control that visibly did nothing. `darkMode: "class"` is still set in
+// tailwind.config.ts and nothing stops a future dark theme from using it;
+// there just isn't one to toggle to yet.
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -55,29 +62,9 @@ function useUnseenInbox(signedIn: boolean, pathname: string) {
   return count;
 }
 
-function useTheme() {
-  const [dark, setDark] = useState(false);
-  useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    const isDark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
-    document.documentElement.classList.toggle("dark", isDark);
-    setDark(isDark);
-  }, []);
-  const toggle = () => {
-    setDark((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle("dark", next);
-      localStorage.setItem("theme", next ? "dark" : "light");
-      return next;
-    });
-  };
-  return { dark, toggle };
-}
-
 export default function Nav() {
   const pathname = usePathname();
   const { user, displayName, signOut } = useAuth();
-  const { dark, toggle } = useTheme();
   const unseen = useUnseenInbox(!!user, pathname);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -113,18 +100,8 @@ export default function Nav() {
           </div>
         </div>
 
-        {/* Right: theme toggle + auth */}
+        {/* Right: auth */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggle}
-            aria-label="Toggle theme"
-            className="p-2 rounded-full hover:bg-surface-container-low transition-all"
-          >
-            <span className="material-symbols-outlined text-secondary">
-              {dark ? "dark_mode" : "light_mode"}
-            </span>
-          </button>
-
           {/* Desktop auth actions — default to logged-out until we know otherwise
               (avoids a flicker and keeps the actions in the server-rendered HTML) */}
           <div className="hidden md:flex items-center gap-2">
@@ -144,7 +121,10 @@ export default function Nav() {
                   (isActive("/inbox") ? "text-primary" : "text-secondary")
                 }
               >
-                <span className="material-symbols-outlined">inbox</span>
+                {/* Bell reads as "something arrived" more immediately than the
+                    inbox-tray icon did, especially with the unread badge on
+                    it — route, label, and count are all unchanged. */}
+                <span className="material-symbols-outlined">notifications</span>
                 {unseen > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-primary text-on-primary font-label-sm text-[11px] leading-none">
                     {unseen > 99 ? "99+" : unseen}

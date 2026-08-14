@@ -98,6 +98,13 @@ export type ChecklistItem = {
   // it for the board; this is the same function, not a new one).
   collab_post_id: string | null;
   collab_post_responses: number;
+  // The post's own title (collab_posts.title, publicly selectable per
+  // "collab_posts_public_select" — not gated the way responder identity
+  // is). Null whenever collab_post_id is. Not rendered on this page today
+  // (the Checklist row only shows "Posted to Collaborate · N responses"),
+  // but resolved here anyway so any consumer of getProject() — the
+  // chatbot included — has it without a second query.
+  collab_post_title: string | null;
 };
 
 // projects.shared_folder_url/_set_by/_set_at — a team pastes a link to
@@ -375,7 +382,10 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       // Which checklist items already have a Collaborate post attached —
       // one row per post, not per item, since a post either has this
       // project's checklist_item_id or it doesn't.
-      db.from("collab_posts").select("id, checklist_item_id").not("checklist_item_id", "is", null),
+      db
+        .from("collab_posts")
+        .select("id, title, checklist_item_id")
+        .not("checklist_item_id", "is", null),
       // Same SECURITY DEFINER aggregate lib/server/collab.ts's board view
       // uses — connection_requests SELECT is own-rows-only, so counting
       // responses cannot be done with a normal query.
@@ -410,10 +420,14 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   // degrade to empty maps on failure, same reasoning as `names` above: a
   // Collaborate-bridge lookup failing should leave the checklist showing
   // plain items, not blank the whole section.
-  const postByChecklistItem = new Map<string, string>();
+  const postByChecklistItem = new Map<string, { id: string; title: string }>();
   if (!checklistPostsRes.error && Array.isArray(checklistPostsRes.data)) {
-    for (const row of checklistPostsRes.data as { id: string; checklist_item_id: string | null }[]) {
-      if (row.checklist_item_id) postByChecklistItem.set(row.checklist_item_id, row.id);
+    for (const row of checklistPostsRes.data as {
+      id: string;
+      title: string;
+      checklist_item_id: string | null;
+    }[]) {
+      if (row.checklist_item_id) postByChecklistItem.set(row.checklist_item_id, { id: row.id, title: row.title });
     }
   } else if (checklistPostsRes.error) {
     console.error("getProject: collab_posts (checklist bridge) query failed", checklistPostsRes.error);
@@ -479,15 +493,16 @@ export async function getProject(id: string): Promise<GetProjectResult> {
         : null,
       checklist: ((checklistRes.data ?? []) as Record<string, unknown>[]).map((c) => {
         const itemId = c.id as string;
-        const postId = postByChecklistItem.get(itemId) ?? null;
+        const post = postByChecklistItem.get(itemId) ?? null;
         return {
           id: itemId,
           label: c.label as string,
           status: c.status as ChecklistStatus,
           position: c.position as number,
           updated_at: c.updated_at as string,
-          collab_post_id: postId,
-          collab_post_responses: postId ? responseCounts.get(postId) ?? 0 : 0,
+          collab_post_id: post?.id ?? null,
+          collab_post_responses: post ? responseCounts.get(post.id) ?? 0 : 0,
+          collab_post_title: post?.title ?? null,
         };
       }),
       shared_folder: sharedFolderUrl
@@ -1102,6 +1117,7 @@ export async function addChecklistItem(
       // exist a moment ago.
       collab_post_id: null,
       collab_post_responses: 0,
+      collab_post_title: null,
     },
   };
 }
