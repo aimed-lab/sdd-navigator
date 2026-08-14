@@ -386,9 +386,9 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
     "search_trials":        ("diseases",),                    # STRICT matcher — condition ONLY; even one gene term can zero out a real trial (see note above)
     "search_grants":        ("diseases", "genes"),            # checked for trials' same failure mode, did not find it — Grants.gov didn't reduce results when a gene was added (see note above); kept
-    "search_tools":         ("methods", "genes"),
-    "search_datasets":      ("diseases", "genes"),            # was + topics — GEO's own search proved to share trials' strict-AND behavior; genes is GEO's strongest signal (PHGDH: 8-9/10 relevant on a bare gene query)
-    "search_pager":         ("genes",),                       # STRICTER than GEO — even (diseases, genes) zeroes it out; genes-only, disease-only scope falls back below
+    "search_tools":         ("methods", "genes"),             # VESTIGIAL — _query_for special-cases this to _single_method_query(), which drops genes entirely. Left here as a record: "RNA ASO preclinical ATXN2 TARDBP" (this slice's output) returned 0 GitHub repos; RNA/ASO/preclinical alone each returned 16-20, ATXN2/TARDBP alone each returned 0 — genes are actively harmful here, not just diluting, since GitHub indexes what a repo DOES, not what gene it studies.
+    "search_datasets":      ("diseases", "genes"),            # VESTIGIAL — _query_for's _SINGLE_TERM_TOOLS branch overrides this. Left here as a record of the slice that turned out still-too-diluted: "Amyotrophic lateral sclerosis ATXN2 TARDBP" (this slice's output) returned 1 dataset; "ATXN2"/"TARDBP"/"Amyotrophic lateral sclerosis" alone each returned 20. Same strict-AND behavior as PAGER, confirmed directly, not assumed.
+    "search_pager":         ("genes",),                       # VESTIGIAL — see _SINGLE_TERM_TOOLS in _query_for, which is what actually runs for this tool now. Left here as a record only.
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -411,15 +411,13 @@ _FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
     "search_grants": ("methods",),
     "search_trials": ("methods",),
     # method-less scopes (e.g. the default landing feed) fall back to the topic so
-    # GitHub gets "drug discovery" instead of "" (which returns generic top repos).
-    # search_tools is a relevance-ranked source (see the audit note above), so a
-    # topics fallback here carries none of the strict-matcher risk trials/grants had.
-    "search_tools": ("topics",),
-    # search_pager's primary slice is genes-only now (see _QUERY_SLICES above);
-    # a disease-named, gene-less scope (e.g. "glioblastoma" alone) still gets a
-    # real single-term PAGER query via this fallback, rather than falling all
-    # the way through to _query_for's last-resort join-everything net.
-    "search_pager": ("diseases",),
+    # search_tools is NOT looked up here anymore — it's special-cased in
+    # _query_for to _single_method_query(), which has its own topics fallback
+    # built in (most specific method, else most specific topic).
+    # search_pager and search_datasets are NOT looked up here either — both
+    # are in _SINGLE_TERM_TOOLS (see _query_for), which has its own disease
+    # fallback built in (most specific gene, else most specific disease)
+    # rather than going through this dict.
 }
 
 _KINDS: dict[str, str] = {
@@ -450,16 +448,42 @@ def _join_unique(*groups: list[str]) -> str:
     return " ".join(out)
 
 
+# Sources confirmed to have PAGER's same strict-AND behaviour rather than
+# PubMed/OpenAlex-style relevance ranking: a composed multi-term query
+# collapses to near-zero even though every individual term alone returns a
+# full page. search_pager: "ATXN2 TARDBP" -> 0, "ATXN2" alone -> 20.
+# search_datasets: "Amyotrophic lateral sclerosis ATXN2 TARDBP" -> 1,
+# each single term alone -> 20. Both get the SAME single-term treatment
+# here — most specific gene, else most specific disease, else the ordinary
+# last-resort net — rather than duplicating the branch per tool. See
+# CLAUDE.md-style audit note below `_QUERY_SLICES` for which other sources
+# were checked and found NOT to need this.
+_SINGLE_TERM_TOOLS = {"search_pager", "search_datasets"}
+
+# search_tools (GitHub) is the SAME collapse-under-composition bug, but a
+# DIFFERENT rule, not the gene-first one above — confirmed directly on the
+# ALS project: ATXN2 alone -> 0 GitHub results, TARDBP alone -> 0, while
+# RNA/ASO/preclinical (the method terms) each return a full page (16-20).
+# GitHub indexes what a repo DOES (a technique, an assay, a tool class), not
+# what gene it studies, so the single-most-specific-GENE rule that fixed
+# PAGER/GEO would zero this out on every run, not fix it. Most specific
+# METHOD instead (same "longest phrase as a specificity proxy" heuristic
+# _context_for_papers already uses), falling back to the single most
+# specific topic, genes dropped entirely from the composition.
+def _single_method_query(scope: dict) -> str:
+    methods = scope.get("methods") or []
+    if methods:
+        return max(methods, key=len).strip()
+    topics = scope.get("topics") or []
+    if topics:
+        return max(topics, key=len).strip()
+    return _join_unique(*[scope[k] for k in SCOPE_KEYS])  # same last-resort net as below
+
+
 def _query_for(name: str, scope: dict) -> str:
-    if name == "search_pager":
-        # PAGER is stricter than the genes-only slice above assumed: verified
-        # directly that even a 2-term genes-only query ("ATXN2 TARDBP") still
-        # returns 0, while either gene ALONE returns ~20 real results. So
-        # PAGER gets a genuinely single term, not _join_unique's space-joined
-        # list — the single most specific gene if one was extracted, else the
-        # single most specific disease (same fallback intent as
-        # _FALLBACK_SLICES["search_pager"], just enforced as one term here
-        # instead of a joined list of however many diseases were extracted).
+    if name == "search_tools":
+        return _single_method_query(scope)
+    if name in _SINGLE_TERM_TOOLS:
         if scope["genes"]:
             return scope["genes"][0].strip()
         if scope["diseases"]:
