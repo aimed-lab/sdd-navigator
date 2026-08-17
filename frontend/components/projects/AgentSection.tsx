@@ -34,6 +34,13 @@ type AgentResult = {
   summary: string;
   selected_items: ProposedItem[];
   checklist_items: ProposedChecklistItem[];
+  // False for a ColaboFest project — the backend skips the checklist step
+  // entirely there (see run_project_agent_async in tools/project_agent.py),
+  // so checklist_items is always []. The existing `.length > 0` guards below
+  // already keep an empty checklist section from rendering either way; this
+  // field isn't needed to suppress the heading, only to make the reason
+  // (suppressed by design vs. genuinely found nothing) inspectable here too.
+  checklist_enabled?: boolean;
   tools_called: string[];
   warnings: string[];
   // Set when the relevance pass itself failed (e.g. hit a quota). Per Chen's
@@ -54,7 +61,20 @@ const STAGE_LABEL: Record<Exclude<Stage, null>, string> = {
 
 const POLL_MS = 1500;
 
-export default function AgentSection({ projectId }: { projectId: string }) {
+export default function AgentSection({
+  projectId,
+  isChallenge = false,
+}: {
+  projectId: string;
+  // ColaboFest projects: resources only, no checklist — a ColaboFest project
+  // already comes pre-filled with SPARC's own nine readiness items, and
+  // proposing six more of ours on top is what Chen called overwhelming it.
+  // Resource discovery has no such conflict, so it's not withheld — only
+  // this component's own description text changes; the actual suppression
+  // happens server-side (the backend never runs the checklist step, and
+  // never sends checklist copy for a challenge project's summary line).
+  isChallenge?: boolean;
+}) {
   const router = useRouter();
 
   const [running, setRunning] = useState(false);
@@ -209,8 +229,9 @@ export default function AgentSection({ projectId }: { projectId: string }) {
         <div>
           <h2 className="font-headline-md text-headline-md text-on-background">Project agent</h2>
           <p className="font-body-sm text-body-sm text-secondary mt-1">
-            Searches across all our sources, judges what's relevant to this project's goal, and
-            proposes resources and checklist items for you to review.
+            {isChallenge
+              ? "Searches across all our sources, judges what's relevant to this project's goal, and proposes resources for you to review. Checklist proposals are off for ColaboFest projects — this project's checklist is SPARC's own readiness list, not ours to add to."
+              : "Searches across all our sources, judges what's relevant to this project's goal, and proposes resources and checklist items for you to review."}
           </p>
         </div>
         {!result && (

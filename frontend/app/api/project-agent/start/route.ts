@@ -40,18 +40,16 @@ export async function POST(req: Request) {
   }
   const project = result.project;
 
-  // Chen: the agent is for regular projects only, not ColaboFest — a
-  // ColaboFest team already has nine readiness items and a fixed deadline,
-  // and the agent proposing more is noise. Gated here too, not just in the
-  // UI, so a direct POST for a ColaboFest project is refused the same way
-  // every other permission check in this app is: server-enforced, not just
-  // hidden behind a client-side conditional.
-  if (project.challenge_key) {
-    return NextResponse.json(
-      { error: "The agent isn't available for ColaboFest projects." },
-      { status: 403 }
-    );
-  }
+  // The agent now runs on ColaboFest projects too — resources only, no
+  // checklist. A ColaboFest project comes pre-filled with SPARC's own nine
+  // readiness items, and proposing six more of ours on top is what Chen
+  // meant by overwhelming it; resource discovery has no such conflict, so
+  // it's no longer withheld. `challenge_key` is forwarded to the backend
+  // below, which is what actually skips the checklist step (and its LLM
+  // call) for a challenge project — see run_project_agent_async's docstring
+  // in tools/project_agent.py. Nothing is gated here anymore; the backend
+  // enforces the resources-only behavior regardless of what a forged
+  // request claims, same as every other field on this route.
 
   // Already-saved resource ids, so the agent excludes them BEFORE its
   // relevance pass rather than re-proposing them only to have them fail as
@@ -78,6 +76,7 @@ export async function POST(req: Request) {
         indication: project.indication,
         modality: project.modality,
         stage: project.stage,
+        challenge_key: project.challenge_key,
         existing_checklist: project.checklist.map((c) => c.label),
         saved_item_ids: savedItemIds,
       }),

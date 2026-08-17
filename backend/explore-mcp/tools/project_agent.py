@@ -464,13 +464,31 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     right before each step starts, purely so a caller (the job-polling HTTP
     route below) can report real progress instead of a bare spinner. A
     callback failure is swallowed; it must never break the pipeline it's
-    just observing.
+    just observing. `proposing_checklist` is never reported for a ColaboFest
+    project (see below) — there's no step to be "on."
+
+    CHALLENGE PROJECTS (project["challenge_key"] set) GET RESOURCES ONLY, NO
+    CHECKLIST. A ColaboFest project already comes pre-filled with SPARC's own
+    nine readiness items — that checklist is SPARC's, not ours, and proposing
+    six more on top of it is exactly the "overwhelming it" Chen called out
+    when the agent was first gated off ColaboFest entirely. Resource
+    discovery (step 1 + step 2) is pure value with no such conflict, so it's
+    no longer withheld — only step 3 (checklist proposal) is skipped, and
+    it's SKIPPED, not run-then-discarded: `_propose_checklist` is never
+    called, so a challenge-project run makes one fewer LLM call than a
+    regular one, not the same call with its output thrown away.
 
     Returns:
       {
         summary: str,                       # what the agent did, one paragraph
         selected_items: [Item + {reason}],  # full item shape, ready for ItemCard
-        checklist_items: [{label, rationale}],
+        checklist_items: [{label, rationale}],  # always [] for a challenge project
+        checklist_enabled: bool,            # False for a challenge project — the
+                                             # frontend's cue to not render an empty
+                                             # "Proposed checklist items (0)" heading;
+                                             # checklist_items==[] alone can't carry
+                                             # that distinction, since a regular
+                                             # project can also legitimately find zero
         tools_called: [str],                # from step 1, for transparency
         warnings: [str],                    # partial-failure notes, never fatal
         analysis_failed: bool,              # relevance pass itself failed — see below
@@ -488,6 +506,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     Checklist proposal is skipped entirely in that case too, since step 3
     would otherwise be "grounding" itself in an unranked, unvetted pool."""
     warnings: list[str] = []
+    is_challenge = bool(project.get("challenge_key"))
 
     def _stage(name: str) -> None:
         if on_stage is None:
@@ -531,6 +550,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             ),
             "selected_items": [],
             "checklist_items": [],
+            "checklist_enabled": not is_challenge,
             "tools_called": explore_result.get("tools_called") or [],
             "warnings": [
                 "The agent could not complete its analysis this run — the relevance pass "
@@ -540,15 +560,22 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             "analysis_failed": True,
         }
 
-    existing_labels = [
-        str(label).strip() for label in (project.get("existing_checklist") or []) if str(label).strip()
-    ]
-    _stage("proposing_checklist")
-    checklist_items, checklist_fallback, dropped_ungrounded = _propose_checklist(
-        project.get("description") or "", selected, existing_labels, candidates
-    )
-    if checklist_fallback:
-        warnings.append("Couldn't generate checklist suggestions this run.")
+    checklist_items: list[dict] = []
+    if is_challenge:
+        # SKIPPED, not filtered — _propose_checklist (and its LLM call) is
+        # never invoked for a challenge project. See this function's own
+        # docstring for why.
+        dropped_ungrounded = 0
+    else:
+        existing_labels = [
+            str(label).strip() for label in (project.get("existing_checklist") or []) if str(label).strip()
+        ]
+        _stage("proposing_checklist")
+        checklist_items, checklist_fallback, dropped_ungrounded = _propose_checklist(
+            project.get("description") or "", selected, existing_labels, candidates
+        )
+        if checklist_fallback:
+            warnings.append("Couldn't generate checklist suggestions this run.")
     if dropped_ungrounded:
         warnings.append(
             f"Dropped {dropped_ungrounded} proposed checklist item(s) that weren't grounded in "
@@ -562,11 +589,22 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     # reads like the search itself came up empty.
     nothing_new_due_to_exclusion = not selected and excluded_count > 0 and not candidates
 
-    if not selected and not checklist_items:
+    # For a challenge project there IS no checklist step, so "nothing to
+    # propose" must be judged on `selected` alone — checklist_items is
+    # always [] there regardless of whether the run found anything.
+    nothing_proposed = not selected if is_challenge else not selected and not checklist_items
+
+    if nothing_proposed:
         if nothing_new_due_to_exclusion:
             warnings.append(
                 "Nothing new found beyond what's already saved to this project — every "
                 "candidate the search turned up is already in Resources."
+            )
+        elif is_challenge:
+            warnings.append(
+                "No relevant resources were found for this project's stated goal — try "
+                "adding more detail to the description, or check back after the underlying "
+                "sources recover."
             )
         else:
             warnings.append(
@@ -583,9 +621,11 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         )
     if selected:
         summary_bits.append(f"Selected {len(selected)} relevant item(s) to propose saving.")
+    # checklist_items is always [] on a challenge project — never mention
+    # checklist items in the summary there, not even "proposed 0."
     if checklist_items:
         summary_bits.append(f"Proposed {len(checklist_items)} checklist item(s).")
-    if not selected and not checklist_items:
+    if nothing_proposed:
         summary_bits.append(
             "Nothing new found beyond what's already saved this run."
             if nothing_new_due_to_exclusion
@@ -596,6 +636,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "summary": " ".join(summary_bits),
         "selected_items": selected,
         "checklist_items": checklist_items,
+        "checklist_enabled": not is_challenge,
         "tools_called": explore_result.get("tools_called") or [],
         "warnings": warnings,
         "analysis_failed": False,
