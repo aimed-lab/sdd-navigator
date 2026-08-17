@@ -53,6 +53,18 @@ Two different rules, because `raw` means two different things:
     directly — nowhere else for them to live, and none of them are
     top-level Item fields. There is no large citation-graph-style blob to
     trim here either (unlike OpenAlex).
+
+  * clinicaltrials (sources/clinical_trials.py) is grouped here too, added
+    when the prior-art brief generator needed it. Its `raw` (overall_status,
+    why_stopped, phase, interventions, lead_sponsor, completion_date,
+    enrollment, results_posted) is the exact same shape as GEO's and pager's:
+    a handful of small first-party fields with nowhere else to live, not a
+    citation-graph blob. Before this was fixed, `raw` for a trial item was
+    silently reduced to {} on every HTTP response (trials carry no
+    prior_signal/sources), which would have quietly emptied whyStopped for
+    every terminated/withdrawn trial the brief generator (tools/
+    prior_art_brief.py) reads it from — the exact GEO failure mode this
+    docstring already warns about, caught before shipping instead of after.
 """
 
 from __future__ import annotations
@@ -60,7 +72,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 # Sources whose `raw` is first-party content the UI renders directly.
-_INTERNAL_SOURCES = {"internal", "geo", "pager"}
+_INTERNAL_SOURCES = {"internal", "geo", "pager", "clinicaltrials"}
 
 # For external items, the ONLY raw keys the frontend reads.
 #   prior_signal -> components/ItemCard.tsx priorCitations()

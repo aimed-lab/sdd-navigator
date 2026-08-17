@@ -18,11 +18,16 @@ episodes):
   • search_wiki          — internal podcast-derived episode wiki pages
   • explore              — orchestration: reason over free text, route to tools, group results
 
-Also exposes one plain-HTTP-only action (no MCP tool, no Supabase writes):
+Also exposes two plain-HTTP-only actions (no MCP tool, no Supabase writes):
   • POST /api/project-agent — the project agent. Fixed pipeline (search ->
     relevance pass -> checklist proposal) that PROPOSES resources/checklist
     items for a project; the frontend is what persists anything accepted. See
     tools/project_agent.py and CLAUDE.md's "Build the project agent" note.
+  • POST /api/prior-art-brief — the prior-art brief generator. Gathers papers,
+    terminated/withdrawn/recruiting trials, tools and datasets/gene sets for a
+    project's target/indication and renders a Markdown document that REPORTS
+    what the search found (never concludes anything is novel). See
+    tools/prior_art_brief.py.
 
 Tool DESCRIPTIONS matter — external agents read them to decide what to call, so
 each docstring below is the tool's public contract. Read-only service: no writes
@@ -62,6 +67,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
+from tools.prior_art_brief import generate_prior_art_brief_async
 from tools.project_agent import run_project_agent_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
@@ -857,6 +863,58 @@ async def project_agent_status_http(request):
     # created_at (a monotonic clock float, meaningless off-process) is bookkeeping
     # for _prune_jobs() only — never shipped to the client.
     return JSONResponse({"status": job["status"], "stage": job["stage"], "result": job["result"]})
+
+
+# ── Prior-art brief ────────────────────────────────────────────────────────────
+
+
+@mcp.custom_route("/api/prior-art-brief", methods=["POST"])
+async def prior_art_brief_http(request):
+    """The prior-art brief generator — plain-HTTP only, no MCP tool (project-
+    scoped, like /api/project-agent, not a general-purpose search tool).
+
+    POST { name, description, target, indication, modality, stage } ->
+    { markdown, generated_at, counts }.
+
+    `name` is required, same validation as /api/project-agent (see
+    _validate_project_agent_body).
+
+    WRITES NOTHING to Supabase — see tools/prior_art_brief.py's module
+    docstring. Unlike the project agent this has no job-polling variant: the
+    pipeline is one explore_async() call plus two direct, status-filtered
+    trial searches run in parallel (see generate_prior_art_brief_async), which
+    measured well under the project agent's own 20-40s budget in practice —
+    no LLM call reads or writes the rendered document itself, only the
+    existing explore_async() scope-extraction/routing calls it reuses.
+
+    Never 500s the caller: on total failure it returns a plain error message
+    with HTTP 200, same resilience contract as /api/explore and
+    /api/project-agent.
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware, not here.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/prior-art-brief: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    validation_error = _validate_project_agent_body(body)
+    if validation_error:
+        return JSONResponse({"error": validation_error}, status_code=400)
+
+    try:
+        result = await generate_prior_art_brief_async(body)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/prior-art-brief failed: name=%r", body.get("name"))
+        return JSONResponse(
+            {"error": f"The brief generator hit an unexpected error: {exc}"},
+            status_code=200,
+        )
 
 
 def _serve() -> None:

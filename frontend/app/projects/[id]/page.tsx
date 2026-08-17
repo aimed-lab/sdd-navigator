@@ -29,6 +29,7 @@ import ChecklistSection from "@/components/projects/ChecklistSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
+import PriorArtBriefSection from "@/components/projects/PriorArtBriefSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
@@ -165,6 +166,15 @@ export default async function ProjectDetailPage({
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
       <ResourcesSection projectId={project.id} exploreHref={exploreHref} resources={resources} />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      {/* Available on every project, including ColaboFest — unlike the agent
+          below (hidden there because it pushes proposals), this is
+          pull-based and serves a published ColaboFest review criterion
+          directly ("Rigor and innovation — differentiation from existing
+          approaches"). See PriorArtBriefSection's own comment. */}
+      <PriorArtBriefSection projectId={project.id} projectName={project.name} />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
