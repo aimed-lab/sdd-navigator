@@ -316,7 +316,7 @@ export default async function Home() {
             </div>
 
             <p className="font-body-sm text-body-sm text-secondary">
-              Questions? Contact Dr. Swathi Thaker (
+              Questions? Contact Swathi Thaker, PhD (
               <a
                 href="mailto:snthaker@uab.edu"
                 className="text-primary hover:underline underline-offset-4"
