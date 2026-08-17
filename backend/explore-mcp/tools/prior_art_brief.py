@@ -1,10 +1,23 @@
 """
-tools/prior_art_brief.py — the prior-art brief generator.
+tools/prior_art_brief.py — prior-art digest rendering.
 
-Given a project (name, description, target, indication, modality, stage),
-gathers what has already been tried against the same target/mechanism and
-renders a downloadable Markdown document. Serves ColaboFest's "Rigor and
-innovation — differentiation from existing approaches" review criterion.
+Given a project (name, description, target, indication, modality, stage) and
+search results ALREADY COLLECTED by the caller, renders a downloadable
+Markdown digest of what has already been tried against the same target/
+mechanism. Serves ColaboFest's "Rigor and innovation — differentiation from
+existing approaches" review criterion.
+
+PURE RENDERING MODULE, NO I/O. This used to also own the search (its own
+explore_async() call plus two direct trial calls) via
+generate_prior_art_brief_async(). That function is gone — the digest and the
+project agent's resource/checklist proposals were each running a SEPARATE
+explore_async() call over the SAME goal text, i.e. two full searches and two
+sets of scope-extraction/routing Groq calls to produce two outputs that both
+wanted the same candidate pool. tools/project_agent.py now runs the search
+ONCE and calls render_digest() here with what it already collected — see that
+module's run_project_agent_async for the merged pipeline. This module is left
+with exactly what has no business making a network or LLM call: string
+formatting.
 
 THE HARD CONSTRAINT — this module REPORTS, it never CONCLUDES. It must never
 write a sentence like "this is novel" or "this has not been tried before." A
@@ -12,83 +25,48 @@ missing section says the search found nothing, not that nothing exists — the
 absence of a hit is a fact about the search, not a fact about the world. Every
 factual claim in the rendered document carries an inline citation (a name, a
 sponsor, an NCT id, a URL); a sentence with no source attached does not belong
-in the generator's output. Read this docstring before touching _render() —
-that function is where the constraint actually gets enforced or violated.
+in the generator's output. Read this docstring before touching render_digest()
+— that function is where the constraint actually gets enforced or violated.
 
-NO LLM IN THE RENDER PATH. Sections 1, 3, 4, 5 and 6 are pure string
-formatting from structured data (project fields, Item fields, trial `raw`
-fields) — there is nothing for a model to phrase, and phrasing is exactly the
-surface where "reports" quietly drifts into "concludes." The one LLM use in
-this whole pipeline is indirect and reused, not new: explore_async() (see
-tools/explore.py) runs its own scope-extraction + tool-routing Groq calls to
-build the papers/tools/datasets/pager queries, the SAME machinery
-tools/project_agent.py already relies on and that's cached per goal text. No
-model call reads or writes a word of the rendered brief itself.
+NO LLM IN THE RENDER PATH. Every line below is pure string formatting from
+structured data (project fields, Item fields, trial `raw` fields) — there is
+nothing for a model to phrase, and phrasing is exactly the surface where
+"reports" quietly drifts into "concludes."
 
-GATHERING
-  * Papers  — explore_async(goal_text)'s search_papers section: the existing
-    entity fan-out over PubMed/OpenAlex/Crossref, unmodified.
-  * Tools, datasets, gene sets — the same explore_async() call's
-    search_tools/search_datasets/search_pager sections. Tools whose last push
-    (date_iso, sourced from GitHub's pushed_at) is over two years old are
-    flagged, not excluded — a stale repo is still a prior attempt worth
-    reporting.
-  * Trials — NOT taken from explore_async's own search_trials section (that
-    section carries no status filter). Two direct, disease-scoped calls to
+WHAT render_digest() EXPECTS THE CALLER TO HAVE ALREADY COLLECTED
+  * Papers, tools, datasets, gene sets — the sections of an explore_async()
+    result (search_papers/search_tools/search_datasets/search_pager). Tools
+    whose last push (date_iso, sourced from GitHub's pushed_at) is over two
+    years old are flagged, not excluded — a stale repo is still a prior
+    attempt worth reporting.
+  * Trials — NOT explore_async's own search_trials section (that section
+    carries no status filter). Two direct, disease-scoped calls to
     search_trials_async with `status_filter`: ["TERMINATED", "WITHDRAWN"] and
-    ["RECRUITING"]. The query is the project's own `indication` (falling back
-    to `target`, then the plain goal text) — never the LLM-extracted scope —
-    matching tools/explore.py's own documented finding that ClinicalTrials.gov
-    query.term is a strict-AND matcher and a disease name alone is what a
-    trial record's title/condition field reliably contains.
+    ["RECRUITING"] — trial_query() below builds the query the same way
+    project_agent.py is expected to call search_trials_async with (the
+    project's own `indication`, falling back to `target`, then the plain goal
+    text — never the LLM-extracted scope, matching tools/explore.py's own
+    documented finding that ClinicalTrials.gov query.term is a strict-AND
+    matcher and a disease name alone is what a trial record's title/condition
+    field reliably contains).
 
-WRITES NOTHING. Same contract as tools/project_agent.py: this module and the
-HTTP route in server.py that calls it never touch Supabase. Generate, return,
-done — persistence (once the project wiki exists) is a separate concern this
-explicitly does not block on.
+WRITES NOTHING. Same contract as tools/project_agent.py: nothing here (or the
+HTTP route that eventually returns it) ever touches Supabase.
 """
 
 from __future__ import annotations
 
-import asyncio
-import logging
 from datetime import datetime, timezone
 
-from models import Item
-from tools.explore import explore_async
-from tools.search_trials import search_trials_async
-
-logger = logging.getLogger(__name__)
-
-_TRIAL_LIMIT = 20        # per status-filtered trial call
-_RECRUITING_LIMIT = 10
+TRIAL_LIMIT = 20        # per status-filtered trial call
+RECRUITING_LIMIT = 10
 _STALE_TOOL_DAYS = 365 * 2   # "last push over two years old"
 
 
 # ── input shaping ────────────────────────────────────────────────────────────
 
 
-def _goal_text(project: dict) -> str:
-    """Same "name + description beats keywords" input explore_async wants —
-    see tools/project_agent.py's _project_goal_text, reused verbatim in spirit."""
-    parts = []
-    name = (project.get("name") or "").strip()
-    description = (project.get("description") or "").strip()
-    if name:
-        parts.append(name)
-    if description:
-        parts.append(description)
-    extra = [
-        (project.get(k) or "").strip()
-        for k in ("target", "indication", "modality", "stage")
-        if (project.get(k) or "").strip()
-    ]
-    if extra:
-        parts.append(" ".join(extra))
-    return ". ".join(parts)
-
-
-def _trial_query(project: dict, goal_text: str) -> str:
+def trial_query(project: dict, goal_text: str) -> str:
     """Disease-only, per tools/explore.py's documented strict-AND finding for
     ClinicalTrials.gov's query.term — never the LLM scope, never a joined
     multi-term string. indication > target > the raw goal text as a last
@@ -231,24 +209,47 @@ def _render_recruiting_trial(item: dict) -> str:
     return f"- **[{title}]({url})** ({nct_id}) — Sponsor: {sponsor} · Phase: {phase}"
 
 
-def _render(
+def section_items_and_query(sections: list[dict], tool_name: str) -> tuple[list[dict], str]:
+    """Pull one tool's (items, query) out of an explore_async() result's
+    `sections` list. Exported — project_agent.py uses this on the SAME
+    explore_result it already ran its own relevance pass over, rather than
+    running a second search to get the same data."""
+    for s in sections:
+        if isinstance(s, dict) and s.get("tool") == tool_name:
+            return (s.get("items") or []), (s.get("query") or "")
+    return [], ""
+
+
+def render_digest(
     project: dict,
-    papers: list[dict],
-    papers_query: str,
+    *,
+    goal_text: str,
+    sections: list[dict],
     stopped: list[dict],
     recruiting: list[dict],
-    trial_query: str,
-    tools_items: list[dict],
-    tools_query: str,
-    datasets_items: list[dict],
-    datasets_query: str,
-    pager_items: list[dict],
-    pager_query: str,
-) -> str:
+) -> dict:
+    """Render the digest from ALREADY-COLLECTED data — no search, no LLM call.
+    `sections` is an explore_async() result's `sections` list; `stopped` and
+    `recruiting` are already-`.model_dump()`-ed trial Items from the caller's
+    own status-filtered search_trials_async calls (see trial_query() above for
+    the query they should have been run with).
+
+    Returns {markdown, generated_at, counts} — same shape the old standalone
+    endpoint returned, so the frontend's handling of it doesn't change."""
+    papers, papers_query = section_items_and_query(sections, "search_papers")
+    tools_items, tools_query = section_items_and_query(sections, "search_tools")
+    datasets_items, datasets_query = section_items_and_query(sections, "search_datasets")
+    pager_items, pager_query = section_items_and_query(sections, "search_pager")
+    papers_query = papers_query or goal_text
+    tools_query = tools_query or goal_text
+    datasets_query = datasets_query or goal_text
+    pager_query = pager_query or goal_text
+    query = trial_query(project, goal_text)
+
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     lines: list[str] = []
 
-    lines.append(f"# Prior-art brief — {project.get('name') or 'Untitled project'}")
+    lines.append(f"# Prior-art digest — {project.get('name') or 'Untitled project'}")
     lines.append(f"*Generated {now}. This document reports search results; it draws no "
                   "conclusion about novelty. Absence of a result means the search below "
                   "did not find one, not that nothing exists.*")
@@ -300,7 +301,7 @@ def _render(
     # 3 — what has stopped
     lines.append("## 3. What has stopped")
     lines.append(
-        f"*Terminated and withdrawn trials matching “{trial_query}” on ClinicalTrials.gov. "
+        f"*Terminated and withdrawn trials matching “{query}” on ClinicalTrials.gov. "
         "Reasons are quoted directly from each record's `whyStopped` field, never paraphrased.*"
     )
     lines.append("")
@@ -308,18 +309,18 @@ def _render(
         for s in stopped:
             lines.append(_render_stopped_trial(s))
     else:
-        lines.append(f"The search for terminated/withdrawn trials matching “{trial_query}” returned none.")
+        lines.append(f"The search for terminated/withdrawn trials matching “{query}” returned none.")
     lines.append("")
 
     # 4 — what is active now
     lines.append("## 4. What is active now")
-    lines.append(f"*Currently recruiting trials matching “{trial_query}”.*")
+    lines.append(f"*Currently recruiting trials matching “{query}”.*")
     lines.append("")
     if recruiting:
         for r in recruiting:
             lines.append(_render_recruiting_trial(r))
     else:
-        lines.append(f"The search for recruiting trials matching “{trial_query}” returned none.")
+        lines.append(f"The search for recruiting trials matching “{query}” returned none.")
     lines.append("")
 
     # 5 — what the search did not find
@@ -331,8 +332,8 @@ def _render(
     lines.append("")
     not_found = [
         _not_found_line("Literature", papers_query, len(papers)),
-        _not_found_line("Terminated/withdrawn trials", trial_query, len(stopped)),
-        _not_found_line("Recruiting trials", trial_query, len(recruiting)),
+        _not_found_line("Terminated/withdrawn trials", query, len(stopped)),
+        _not_found_line("Recruiting trials", query, len(recruiting)),
         _not_found_line("Tools/repositories", tools_query, len(tools_items)),
         _not_found_line("Datasets", datasets_query, len(datasets_items)),
         _not_found_line("Gene sets", pager_query, len(pager_items)),
@@ -346,87 +347,27 @@ def _render(
 
     # 6 — sources
     lines.append("## 6. Sources")
-    lines.append("*Every query run for this brief, and how many results each returned.*")
+    lines.append("*Every query run for this digest, and how many results each returned.*")
     lines.append("")
     lines.append("| Search | Query | Results |")
     lines.append("|---|---|---|")
     lines.append(f"| Literature (PubMed/OpenAlex/Crossref) | {papers_query} | {len(papers)} |")
-    lines.append(f"| Terminated/withdrawn trials (ClinicalTrials.gov) | {trial_query} | {len(stopped)} |")
-    lines.append(f"| Recruiting trials (ClinicalTrials.gov) | {trial_query} | {len(recruiting)} |")
+    lines.append(f"| Terminated/withdrawn trials (ClinicalTrials.gov) | {query} | {len(stopped)} |")
+    lines.append(f"| Recruiting trials (ClinicalTrials.gov) | {query} | {len(recruiting)} |")
     lines.append(f"| Tools (GitHub) | {tools_query} | {len(tools_items)} |")
     lines.append(f"| Datasets (NCBI GEO) | {datasets_query} | {len(datasets_items)} |")
     lines.append(f"| Gene sets (PAGER) | {pager_query} | {len(pager_items)} |")
     lines.append("")
 
-    return "\n".join(lines)
-
-
-# ── orchestration ─────────────────────────────────────────────────────────────
-
-
-def _section_items_and_query(sections: list[dict], tool_name: str) -> tuple[list[dict], str]:
-    for s in sections:
-        if isinstance(s, dict) and s.get("tool") == tool_name:
-            return (s.get("items") or []), (s.get("query") or "")
-    return [], ""
-
-
-async def generate_prior_art_brief_async(project: dict) -> dict:
-    """Gather + render. Never raises for a normal upstream failure — each
-    source degrades to an empty section (reported honestly in sections 5/6),
-    same resilience contract as explore_async/project_agent."""
-    goal_text = _goal_text(project)
-    trial_query = _trial_query(project, goal_text)
-
-    explore_result, stopped_items, recruiting_items = await asyncio.gather(
-        explore_async(goal_text),
-        search_trials_async(trial_query, _TRIAL_LIMIT, status_filter=["TERMINATED", "WITHDRAWN"]),
-        search_trials_async(trial_query, _RECRUITING_LIMIT, status_filter=["RECRUITING"]),
-        return_exceptions=True,
-    )
-
-    if isinstance(explore_result, Exception):
-        logger.exception("prior_art_brief: explore_async failed", exc_info=explore_result)
-        explore_result = {"sections": []}
-    if isinstance(stopped_items, Exception):
-        logger.exception("prior_art_brief: stopped-trials search failed", exc_info=stopped_items)
-        stopped_items = []
-    if isinstance(recruiting_items, Exception):
-        logger.exception("prior_art_brief: recruiting-trials search failed", exc_info=recruiting_items)
-        recruiting_items = []
-
-    sections = explore_result.get("sections") or []
-    papers, papers_query = _section_items_and_query(sections, "search_papers")
-    tools_items, tools_query = _section_items_and_query(sections, "search_tools")
-    datasets_items, datasets_query = _section_items_and_query(sections, "search_datasets")
-    pager_items, pager_query = _section_items_and_query(sections, "search_pager")
-
-    stopped_dicts = [i.model_dump() if isinstance(i, Item) else i for i in stopped_items]
-    recruiting_dicts = [i.model_dump() if isinstance(i, Item) else i for i in recruiting_items]
-
-    markdown = _render(
-        project,
-        papers, papers_query or goal_text,
-        stopped_dicts, recruiting_dicts, trial_query,
-        tools_items, tools_query or goal_text,
-        datasets_items, datasets_query or goal_text,
-        pager_items, pager_query or goal_text,
-    )
-
     return {
-        "markdown": markdown,
+        "markdown": "\n".join(lines),
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "counts": {
             "papers": len(papers),
-            "stopped_trials": len(stopped_dicts),
-            "recruiting_trials": len(recruiting_dicts),
+            "stopped_trials": len(stopped),
+            "recruiting_trials": len(recruiting),
             "tools": len(tools_items),
             "datasets": len(datasets_items),
             "genesets": len(pager_items),
         },
     }
-
-
-def generate_prior_art_brief(project: dict) -> dict:
-    """Synchronous entry point (mirrors project_agent's run_project_agent)."""
-    return asyncio.run(generate_prior_art_brief_async(project))

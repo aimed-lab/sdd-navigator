@@ -175,17 +175,20 @@ export default async function ProjectDetailPage({
           which is pure value. AgentSection (and the backend pipeline behind
           it, see tools/project_agent.py) now suppresses the checklist
           proposal step specifically for a challenge project rather than
-          hiding the whole feature; resources are proposed on every project
-          the same way.
+          hiding the whole feature; resources (and the digest below) are
+          produced on every project the same way.
 
-          One section, two actions: "Run agent" (resources/checklist
-          proposals) and "Prior-art brief" (rendered, downloadable report),
-          merged from two separate sections per Chen's one-clear-purpose-
-          per-page note — see AgentSection's own module docstring. Both are
-          available here, including on ColaboFest, since the brief is
-          pull-based the same way the agent's resource proposals now are and
-          serves a published ColaboFest review criterion directly ("Rigor
-          and innovation — differentiation from existing approaches"). */}
+          ONE button, ONE search, TWO outputs: a downloadable prior-art
+          digest, and resources/checklist proposals to review — both from a
+          single "Run agent" click. This used to be two separate sections
+          ("Run agent" and "Prior-art brief," each running its own full
+          search) merged per Chen's one-clear-purpose-per-page note, and then
+          collapsed further from two actions in one section down to one
+          action producing both outputs — see AgentSection's own module
+          docstring for the full history. Available here, including on
+          ColaboFest, since the digest serves a published ColaboFest review
+          criterion directly ("Rigor and innovation — differentiation from
+          existing approaches"). */}
       <AgentSection
         projectId={project.id}
         projectName={project.name}

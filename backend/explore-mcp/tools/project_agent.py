@@ -1,26 +1,48 @@
 """
-tools/project_agent.py — the project agent: a FIXED, three-step pipeline that
-reads a project's stated goal, searches across all our sources, and proposes
-resources + checklist items for a human to review and accept.
+tools/project_agent.py — the project agent: a FIXED pipeline that reads a
+project's stated goal, searches across all our sources ONCE, and produces
+TWO outputs from that one search — resources + checklist items for a human
+to review and accept, AND a downloadable prior-art digest — in one run.
 
 WHY A FIXED PIPELINE, NOT AN AUTONOMOUS TOOL-CHOOSING LOOP: same reasoning as
 tools/explore.py's JSON routing — Groq's native function calling is unreliable
 for parallel tool calls on this model, so nothing here lets the LLM freely pick
-what to call next. The sequence is Step 1 -> Step 2 -> Step 3, always, with the
-LLM doing one bounded job per step and every step degrading independently
-rather than failing the whole run.
+what to call next. The steps below always run in the same order, with the LLM
+doing one bounded job per step and every step degrading independently rather
+than failing the whole run.
 
-THE THREE STEPS
-  1. Scope + search  — reuse explore_async() verbatim over "name. description",
+ONE RUN, TWO OUTPUTS — WHY THIS USED TO BE TWO PIPELINES. The prior-art digest
+(tools/prior_art_brief.py) and the resource/checklist proposals below both
+want the same candidate pool: papers/tools/datasets/gene sets for this
+project's target and mechanism. They used to each run their OWN
+explore_async() call over the same goal text — two full searches, two sets of
+scope-extraction/routing Groq calls, to produce two outputs a researcher asked
+for with one click. Collecting once and rendering both outputs from the same
+`explore_result` cuts that duplication; see run_project_agent_async below for
+where the single search happens and where each output branches off it.
+
+THE STEPS
+  1. Scope + search — reuse explore_async() verbatim over "name. description",
      exactly the free-text path tools/explore.py already proves works better
-     than concatenated keywords.
-  2. Relevance pass  — given the project's stated goal and the candidate items
+     than concatenated keywords. Run IN PARALLEL with the two status-filtered
+     trial searches the digest needs (TERMINATED/WITHDRAWN and RECRUITING) —
+     those are direct HTTP calls with no LLM in them, independent of scope
+     extraction, so there's no reason to serialize them after it.
+  1b. Digest render — pure string formatting (tools/prior_art_brief.py,
+      render_digest()) over what step 1 already collected. No LLM, no
+      network — see that module's own "hard constraint" docstring. Rendered
+      unconditionally whenever the search itself succeeded, independent of
+      whether steps 2/3 below succeed — a relevance-pass failure has nothing
+      to do with whether the digest (which never calls an LLM) is trustworthy.
+  2. Relevance pass — given the project's stated goal and the candidate items
      from step 1, ask the LLM to select the most relevant ones and justify each
      pick against the goal (not just topical overlap). This is the step that
      makes the output read as reasoning, not a re-sorted search page.
   3. Checklist proposal — given the project description and what step 1 & 2
      actually found, ask the LLM for concrete next steps and gaps, grounded in
-     the findings, skipping anything that duplicates an existing item.
+     the findings, skipping anything that duplicates an existing item. SKIPPED
+     entirely for a ColaboFest project — see run_project_agent_async's own
+     docstring.
 
 WRITES NOTHING. This module (and the HTTP route in server.py that calls it)
 never touches Supabase — it returns a proposal; the frontend is the only thing
@@ -30,13 +52,17 @@ paths (see CLAUDE.md's "IT PROPOSES; THE FRONTEND PERSISTS").
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import time
 
 import llm
+from models import Item
 from tools.explore import explore_async
+from tools.prior_art_brief import RECRUITING_LIMIT, TRIAL_LIMIT, render_digest, trial_query as digest_trial_query
+from tools.search_trials import search_trials_async
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +135,40 @@ def _loads_lenient(content: str | None) -> dict:
     return {}
 
 
-# ── step 1: scope + search (delegates to explore_async verbatim) ─────────────
+# ── step 1: scope + search (delegates to explore_async verbatim), plus the
+# two status-filtered trial searches the digest needs ────────────────────────
 
 
-async def _search(project: dict) -> dict:
-    goal_text = _project_goal_text(project)
-    return await explore_async(goal_text)
+async def _search(project: dict, goal_text: str) -> tuple[dict, list, list, bool]:
+    """Runs the shared explore_async() search and the digest's two direct,
+    status-filtered trial searches IN PARALLEL — the trial calls are plain
+    HTTP with no LLM in them and don't depend on explore_async's own scope
+    extraction, so there's no reason to wait for one before starting the
+    others. Returns (explore_result, stopped_trial_items, recruiting_items,
+    search_failed); each of the three searches degrades to an empty/default
+    value independently on failure. `search_failed` is True only when
+    explore_async itself failed (the resource/checklist candidate pool AND
+    the digest's papers/tools/datasets/genesets sections all come from it) —
+    a trial-search failure alone doesn't set it, since the digest can still
+    honestly report "returned none" for those two sections on its own."""
+    query = digest_trial_query(project, goal_text)
+    explore_result, stopped, recruiting = await asyncio.gather(
+        explore_async(goal_text),
+        search_trials_async(query, TRIAL_LIMIT, status_filter=["TERMINATED", "WITHDRAWN"]),
+        search_trials_async(query, RECRUITING_LIMIT, status_filter=["RECRUITING"]),
+        return_exceptions=True,
+    )
+    search_failed = isinstance(explore_result, Exception)
+    if search_failed:
+        logger.exception("project_agent: search step failed entirely", exc_info=explore_result)
+        explore_result = {"sections": [], "tools_called": [], "reasoning": None}
+    if isinstance(stopped, Exception):
+        logger.exception("project_agent: stopped-trials search failed", exc_info=stopped)
+        stopped = []
+    if isinstance(recruiting, Exception):
+        logger.exception("project_agent: recruiting-trials search failed", exc_info=recruiting)
+        recruiting = []
+    return explore_result, stopped, recruiting, search_failed
 
 
 # Kinds excluded from the AGENT's candidate pool only — explore_async() and
@@ -489,6 +543,11 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
                                              # checklist_items==[] alone can't carry
                                              # that distinction, since a regular
                                              # project can also legitimately find zero
+        digest: {markdown, generated_at, counts} | None,  # the downloadable digest
+                                             # (tools/prior_art_brief.py's
+                                             # render_digest()) — None only when the
+                                             # search itself failed entirely; NOT
+                                             # gated on the relevance pass succeeding
         tools_called: [str],                # from step 1, for transparency
         warnings: [str],                    # partial-failure notes, never fatal
         analysis_failed: bool,              # relevance pass itself failed — see below
@@ -516,13 +575,31 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         except Exception:
             logger.exception("project_agent: on_stage callback failed for stage=%r", name)
 
+    goal_text = _project_goal_text(project)
+    goal_summary = _goal_summary(project)
+
     _stage("searching")
-    try:
-        explore_result = await _search(project)
-    except Exception:
-        logger.exception("project_agent: search step failed entirely")
-        explore_result = {"sections": [], "tools_called": [], "reasoning": None}
+    explore_result, stopped_trials, recruiting_trials, search_failed = await _search(project, goal_text)
+    if search_failed:
         warnings.append("The search step failed; no candidates were found.")
+
+    # DIGEST — pure rendering over what was JUST collected, no LLM, no
+    # network. Rendered whenever the search itself succeeded, independent of
+    # whether the relevance pass below succeeds: a relevance-pass failure
+    # says nothing about whether the digest (which never calls an LLM) is
+    # trustworthy, so it must not be withheld because of it. `None` only
+    # when explore_async itself failed — there's genuinely nothing to render.
+    digest = None
+    if not search_failed:
+        stopped_dicts = [i.model_dump() if isinstance(i, Item) else i for i in stopped_trials]
+        recruiting_dicts = [i.model_dump() if isinstance(i, Item) else i for i in recruiting_trials]
+        digest = render_digest(
+            project,
+            goal_text=goal_text,
+            sections=explore_result.get("sections") or [],
+            stopped=stopped_dicts,
+            recruiting=recruiting_dicts,
+        )
 
     excluded_ids = {
         str(item_id).strip() for item_id in (project.get("saved_item_ids") or []) if str(item_id).strip()
@@ -530,8 +607,6 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     candidates, failed_tools, excluded_count = _flatten_candidates(explore_result, excluded_ids)
     if failed_tools:
         warnings.append(f"These sources didn't return results: {', '.join(failed_tools)}.")
-
-    goal_summary = _goal_summary(project)
 
     _stage("judging_relevance")
     selected, relevance_fallback = _select_relevant(goal_summary, candidates)
@@ -551,6 +626,8 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             "selected_items": [],
             "checklist_items": [],
             "checklist_enabled": not is_challenge,
+            "digest": digest,  # still rendered — it never called an LLM, so the
+                                # relevance pass failing doesn't make it untrustworthy
             "tools_called": explore_result.get("tools_called") or [],
             "warnings": [
                 "The agent could not complete its analysis this run — the relevance pass "
@@ -614,6 +691,8 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             )
 
     summary_bits = [f"Searched {len(explore_result.get('tools_called') or [])} sources for “{goal_summary}”."]
+    if digest:
+        summary_bits.append("Produced a prior-art digest.")
     if excluded_count:
         summary_bits.append(
             f"Skipped {excluded_count} already-saved item(s) so the selection budget went to "
@@ -637,6 +716,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "selected_items": selected,
         "checklist_items": checklist_items,
         "checklist_enabled": not is_challenge,
+        "digest": digest,  # {markdown, generated_at, counts} or None if the search failed entirely
         "tools_called": explore_result.get("tools_called") or [],
         "warnings": warnings,
         "analysis_failed": False,

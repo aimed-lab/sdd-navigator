@@ -18,16 +18,18 @@ episodes):
   • search_wiki          — internal podcast-derived episode wiki pages
   • explore              — orchestration: reason over free text, route to tools, group results
 
-Also exposes two plain-HTTP-only actions (no MCP tool, no Supabase writes):
-  • POST /api/project-agent — the project agent. Fixed pipeline (search ->
-    relevance pass -> checklist proposal) that PROPOSES resources/checklist
-    items for a project; the frontend is what persists anything accepted. See
-    tools/project_agent.py and CLAUDE.md's "Build the project agent" note.
-  • POST /api/prior-art-brief — the prior-art brief generator. Gathers papers,
-    terminated/withdrawn/recruiting trials, tools and datasets/gene sets for a
-    project's target/indication and renders a Markdown document that REPORTS
-    what the search found (never concludes anything is novel). See
-    tools/prior_art_brief.py.
+Also exposes one plain-HTTP-only action (no MCP tool, no Supabase writes):
+  • POST /api/project-agent — the project agent. One search, two outputs:
+    resources/checklist proposals for a human to review and accept (search ->
+    relevance pass -> checklist proposal), AND a downloadable prior-art digest
+    rendered from the SAME search (papers, terminated/withdrawn/recruiting
+    trials, tools, datasets/gene sets — pure formatting, no LLM, never
+    concludes anything is novel). These used to be two separate HTTP actions
+    (this one plus a since-removed POST /api/prior-art-brief) that each ran
+    their own full search over the same goal text; merged into one run when
+    the frontend collapsed them into one button — see tools/project_agent.py
+    and tools/prior_art_brief.py (now rendering-only, no orchestration of its
+    own).
 
 Tool DESCRIPTIONS matter — external agents read them to decide what to call, so
 each docstring below is the tool's public contract. Read-only service: no writes
@@ -67,7 +69,6 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
-from tools.prior_art_brief import generate_prior_art_brief_async
 from tools.project_agent import run_project_agent_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
@@ -677,7 +678,18 @@ async def project_agent_http(request):
     POST { name, description, target, indication, modality, stage,
            existing_checklist: [str], saved_item_ids: [str] } -> the agent's
     proposal: { summary, selected_items: [Item + {reason}], checklist_items:
-    [{label, rationale}], tools_called, warnings }
+    [{label, rationale}], checklist_enabled, digest: {markdown, generated_at,
+    counts} | None, tools_called, warnings }
+
+    ONE SEARCH, TWO OUTPUTS. `digest` is the downloadable prior-art digest —
+    pure Markdown formatting (tools/prior_art_brief.py's render_digest()) over
+    the SAME search this route already runs for selected_items/
+    checklist_items, not a second search. This used to be a separate route
+    (POST /api/prior-art-brief, since removed) that ran its own explore_async()
+    call over the same goal text; merged so one click costs one search
+    instead of two. `digest` is None only when the search itself failed
+    entirely — it does not depend on the relevance pass succeeding (it never
+    calls an LLM), so it's still returned even when analysis_failed is True.
 
     `name` is REQUIRED — see _validate_project_agent_body's own docstring for
     why. A request missing it gets 400 before anything downstream (search,
@@ -692,10 +704,12 @@ async def project_agent_http(request):
     BearerAuthMiddleware, not here — see that class's own docstring.
 
     Runs the fixed pipeline in tools/project_agent.py: search (reusing
-    explore_async) -> relevance pass -> checklist proposal. No timeout here on
-    purpose — this container has none, unlike the Vercel function that would
-    otherwise have to run it (see CLAUDE.md's architecture note). Never 500s
-    the caller: on total failure it returns an explained empty proposal with
+    explore_async, plus two direct status-filtered trial searches for the
+    digest, all in parallel) -> digest render -> relevance pass -> checklist
+    proposal (skipped for a ColaboFest project). No timeout here on purpose —
+    this container has none, unlike the Vercel function that would otherwise
+    have to run it (see CLAUDE.md's architecture note). Never 500s the
+    caller: on total failure it returns an explained empty proposal with
     HTTP 200, same resilience contract as /api/explore.
     """
     try:
@@ -863,58 +877,6 @@ async def project_agent_status_http(request):
     # created_at (a monotonic clock float, meaningless off-process) is bookkeeping
     # for _prune_jobs() only — never shipped to the client.
     return JSONResponse({"status": job["status"], "stage": job["stage"], "result": job["result"]})
-
-
-# ── Prior-art brief ────────────────────────────────────────────────────────────
-
-
-@mcp.custom_route("/api/prior-art-brief", methods=["POST"])
-async def prior_art_brief_http(request):
-    """The prior-art brief generator — plain-HTTP only, no MCP tool (project-
-    scoped, like /api/project-agent, not a general-purpose search tool).
-
-    POST { name, description, target, indication, modality, stage } ->
-    { markdown, generated_at, counts }.
-
-    `name` is required, same validation as /api/project-agent (see
-    _validate_project_agent_body).
-
-    WRITES NOTHING to Supabase — see tools/prior_art_brief.py's module
-    docstring. Unlike the project agent this has no job-polling variant: the
-    pipeline is one explore_async() call plus two direct, status-filtered
-    trial searches run in parallel (see generate_prior_art_brief_async), which
-    measured well under the project agent's own 20-40s budget in practice —
-    no LLM call reads or writes the rendered document itself, only the
-    existing explore_async() scope-extraction/routing calls it reuses.
-
-    Never 500s the caller: on total failure it returns a plain error message
-    with HTTP 200, same resilience contract as /api/explore and
-    /api/project-agent.
-
-    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
-    BearerAuthMiddleware, not here.
-    """
-    try:
-        body = await request.json()
-    except Exception:
-        logger.exception("POST /api/prior-art-brief: request body is not valid JSON")
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-
-    validation_error = _validate_project_agent_body(body)
-    if validation_error:
-        return JSONResponse({"error": validation_error}, status_code=400)
-
-    try:
-        result = await generate_prior_art_brief_async(body)
-        return JSONResponse(result)
-    except Exception as exc:
-        logger.exception("POST /api/prior-art-brief failed: name=%r", body.get("name"))
-        return JSONResponse(
-            {"error": f"The brief generator hit an unexpected error: {exc}"},
-            status_code=200,
-        )
 
 
 def _serve() -> None:

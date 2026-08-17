@@ -1,53 +1,44 @@
 "use client";
 
-// Project agent section — the project detail page's ONE "project agent"
-// heading with two actions: "Run agent" (search -> relevance -> resource/
-// checklist proposals, reviewed and accepted here) and "Prior-art brief"
-// (search -> rendered, downloadable Markdown report). These used to be two
-// separate page sections (AgentSection + PriorArtBriefSection) because the
-// agent was hidden on ColaboFest projects and the brief wasn't. Now that the
-// agent runs there too (resources-only, see `isChallenge` below), that
-// distinction is gone and two headings for closely related actions violated
-// Chen's one-clear-purpose-per-page note — merged into one section that can
-// do two things, not two sections stacked. PRESENTATION ONLY: this component
-// still calls the exact same two backend-proxy routes
-// (/api/project-agent/start + /api/project-agent/status,
-// /api/prior-art-brief) it always did, unmodified, and the two actions stay
-// two separate requests — this file never combines them into one call.
+// Project agent section — the project detail page's ONE "Run agent" button.
+// One click, one search, two outputs from it: a downloadable, dated digest
+// (papers/tools/datasets/trials found for this project's target and
+// mechanism — see MarkdownView below) rendered immediately, and the existing
+// review screen of proposed resources + checklist items below it.
 //
-// MUTUAL EXCLUSIVITY: only one result renders at a time. Starting either
-// action clears the other's output (and its own error/confirmation state) —
-// see runAgent()/generateBrief()'s own resets below. Neither action's
-// button is disabled by the OTHER one merely having a result showing (you
-// can switch straight from a shown brief to running the agent, or vice
-// versa, with no separate "discard" step) — each is only disabled while
-// ITS OWN or the OTHER action's request is actually in flight, so two
-// loading states can never show at once either.
+// This used to be TWO separate actions/buttons — "Run agent" and "Prior-art
+// brief" — each running its OWN full search (its own explore_async() call,
+// its own scope-extraction/routing Groq calls) over the same goal text to
+// produce two outputs a researcher asked for with one click. The backend
+// (tools/project_agent.py) now runs that search ONCE and returns both
+// outputs from it; POST /api/prior-art-brief no longer exists. This
+// component reflects that: one button, one request
+// (/api/project-agent/start + /api/project-agent/status poll), one `result`
+// carrying both `digest` and the resource/checklist proposals.
 //
-// Agent: this component NEVER persists anything on its own — every write
-// goes through the same saveToProjectAction/addChecklistItemAction Server
-// Actions the Resources and Checklist sections already use, and only once
-// the user hits Accept.
+// This component NEVER persists anything on its own — every write goes
+// through the same saveToProjectAction/addChecklistItemAction Server Actions
+// the Resources and Checklist sections already use, and only once the user
+// hits Accept. The digest is never persisted anywhere; Download .md is the
+// only way to keep a copy (see CLAUDE.md-adjacent note: it belongs in the
+// project wiki once that exists, not blocked on here).
 //
-// ANY MEMBER may run either action — both are read-only against Supabase
-// (neither backend route writes), and accepting reuses the same
-// any-member-gated actions Resources/Checklist already allow.
+// ANY MEMBER may run this — it's read-only against Supabase (the backend
+// route never writes), and accepting reuses the same any-member-gated
+// actions Resources/Checklist already allow.
 //
-// PROGRESS (agent only): polls /api/project-agent/status every 1.5s and
-// shows which pipeline stage is running — a 20-40s run with a bare spinner
-// reads as broken. /api/project-agent/start does the real membership check
-// (see that route's own comment) and derives every field the agent reasons
-// about server-side from the project — this component only ever sends a
-// projectId. The brief has no polling: /api/prior-art-brief is one
-// synchronous call (see that route's own comment for the measured timing).
+// PROGRESS: polls /api/project-agent/status every 1.5s and shows which
+// pipeline stage is running — a 20-40s run with a bare spinner reads as
+// broken. /api/project-agent/start does the real membership check (see that
+// route's own comment) and derives every field the agent reasons about
+// server-side from the project — this component only ever sends a
+// projectId.
 //
-// MARKDOWN RENDERING (brief only): a small hand-written renderer for exactly
-// the subset the backend generator emits (# / ## / ### headers, **bold**,
+// MARKDOWN RENDERING (digest): a small hand-written renderer for exactly the
+// subset the backend generator emits (# / ## / ### headers, **bold**,
 // [text](url) links, > blockquotes, - list items, | table |, italics
 // *text*) rather than pulling in a markdown library for one document shape
-// this codebase fully controls the format of. Absorbed from the former
-// PriorArtBriefSection.tsx, which is deleted — this is now the only
-// consumer.
+// this codebase fully controls the format of.
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -58,6 +49,12 @@ import type { ExploreItem } from "@/types/explore";
 
 type ProposedItem = ExploreItem & { reason: string };
 type ProposedChecklistItem = { label: string; rationale: string };
+
+type Digest = {
+  markdown: string;
+  generated_at: string;
+  counts: Record<string, number>;
+};
 
 type AgentResult = {
   summary: string;
@@ -70,6 +67,12 @@ type AgentResult = {
   // field isn't needed to suppress the heading, only to make the reason
   // (suppressed by design vs. genuinely found nothing) inspectable here too.
   checklist_enabled?: boolean;
+  // The downloadable digest, rendered from the SAME search as the proposals
+  // above — null only when the search itself failed entirely (see
+  // run_project_agent_async's own docstring). NOT gated on the relevance
+  // pass succeeding: it never calls an LLM, so it's still present even when
+  // analysis_failed is true.
+  digest: Digest | null;
   tools_called: string[];
   warnings: string[];
   // Set when the relevance pass itself failed (e.g. hit a quota). Per Chen's
@@ -77,12 +80,6 @@ type AgentResult = {
   // quiet caveat in that case — it proposes nothing, and this flag is what
   // tells the panel to say so prominently instead of rendering a review list.
   analysis_failed?: boolean;
-};
-
-type BriefResult = {
-  markdown: string;
-  generated_at: string;
-  counts: Record<string, number>;
 };
 
 type Stage = "searching" | "judging_relevance" | "proposing_checklist" | "done" | null;
@@ -319,11 +316,6 @@ export default function AgentSection({
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── brief state ──
-  const [briefLoading, setBriefLoading] = useState(false);
-  const [briefError, setBriefError] = useState<string | null>(null);
-  const [briefResult, setBriefResult] = useState<BriefResult | null>(null);
-
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -338,11 +330,6 @@ export default function AgentSection({
   };
 
   const runAgent = async () => {
-    // MUTUAL EXCLUSIVITY: clear the brief's output before starting — only
-    // one result renders at a time (see module docstring).
-    setBriefResult(null);
-    setBriefError(null);
-
     setStartError(null);
     setAcceptedSummary(null);
     setAcceptError(null);
@@ -397,40 +384,15 @@ export default function AgentSection({
     }, POLL_MS);
   };
 
-  const generateBrief = async () => {
-    // MUTUAL EXCLUSIVITY: clear the agent's output (and its own leftover
-    // error/confirmation state) before starting — see module docstring.
-    setResult(null);
-    setStartError(null);
-    setAcceptedSummary(null);
-    setAcceptError(null);
-
-    setBriefLoading(true);
-    setBriefError(null);
-    setBriefResult(null);
-    try {
-      const res = await fetch("/api/prior-art-brief", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
-      });
-      const data = await res.json();
-      if (!res.ok || typeof data.markdown !== "string") {
-        throw new Error(data.error || "Couldn't generate the brief right now.");
-      }
-      setBriefResult(data as BriefResult);
-    } catch (e) {
-      setBriefError(e instanceof Error ? e.message : "Couldn't generate the brief right now.");
-    } finally {
-      setBriefLoading(false);
-    }
-  };
-
-  const downloadBrief = () => {
-    if (!briefResult) return;
+  // FILENAME: {project-slug}-digest-{YYYY-MM-DD}.md — sorts chronologically
+  // within a project's own downloads folder (same project, several runs,
+  // several dates) and reads as one phrase, e.g.
+  // "atxn2-lowering-in-als-digest-2026-08-17.md".
+  const downloadDigest = () => {
+    if (!result?.digest) return;
     const date = new Date().toISOString().slice(0, 10);
-    const filename = `${slugify(projectName)}-prior-art-brief-${date}.md`;
-    const blob = new Blob([briefResult.markdown], { type: "text/markdown;charset=utf-8" });
+    const filename = `${slugify(projectName)}-digest-${date}.md`;
+    const blob = new Blob([result.digest.markdown], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -505,77 +467,30 @@ export default function AgentSection({
     }
   };
 
-  const busy = running || briefLoading;
-
   return (
     <section className="mb-20">
-      <div className="mb-6">
-        <h2 className="font-headline-md text-headline-md text-on-background">Project agent</h2>
-        <p className="font-body-sm text-body-sm text-secondary mt-1">
-          Searches across all our sources and judges what&apos;s relevant to this project&apos;s
-          goal.
-        </p>
-      </div>
-
-      {/* Two actions, one section — not two features stacked. Each keeps a
-          short line of its own next to its button rather than a full
-          paragraph. */}
-      <div className="flex flex-wrap items-start gap-x-8 gap-y-4 mb-8">
-        {!result && (
-          <div className="flex flex-col gap-1.5">
-            <button
-              type="button"
-              onClick={runAgent}
-              disabled={busy}
-              className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2 disabled:opacity-60"
-            >
-              <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-              {running ? "Running…" : "Run agent"}
-            </button>
-            <p className="font-body-sm text-body-sm text-secondary max-w-xs">
-              {isChallenge
-                ? "Proposes resources to review. Checklist proposals are off for ColaboFest projects — this project's checklist is SPARC's own readiness list."
-                : "Proposes resources and checklist items to review."}
-            </p>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={generateBrief}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low disabled:opacity-50 transition-colors"
-            >
-              {briefLoading ? (
-                <>
-                  <span className="w-3.5 h-3.5 rounded-full border-2 border-secondary/40 border-t-secondary animate-spin" />
-                  Searching…
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-[18px]">description</span>
-                  {briefResult ? "Regenerate brief" : "Prior-art brief"}
-                </>
-              )}
-            </button>
-            {briefResult && (
-              <button
-                type="button"
-                onClick={downloadBrief}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low transition-colors"
-              >
-                <span className="material-symbols-outlined text-[18px]">download</span>
-                Download .md
-              </button>
-            )}
-          </div>
-          <p className="font-body-sm text-body-sm text-secondary max-w-xs">
-            Reports what&apos;s already been tried and what&apos;s stopped — never concludes
-            anything is novel.
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h2 className="font-headline-md text-headline-md text-on-background">Project agent</h2>
+          <p className="font-body-sm text-body-sm text-secondary mt-1">
+            Searches across all our sources, judges what&apos;s relevant to this project&apos;s
+            goal, and produces a downloadable digest of what&apos;s already been tried
+            {isChallenge
+              ? " plus resources to review."
+              : " plus resources and checklist items to review."}
           </p>
         </div>
+        {!result && (
+          <button
+            type="button"
+            onClick={runAgent}
+            disabled={running}
+            className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2 shrink-0 disabled:opacity-60"
+          >
+            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+            {running ? "Running…" : "Run agent"}
+          </button>
+        )}
       </div>
 
       {running && (
@@ -612,6 +527,30 @@ export default function AgentSection({
         <p className="font-body-sm text-body-sm text-error" role="alert">
           {acceptError}
         </p>
+      )}
+
+      {/* Rendered independent of analysis_failed below — the digest never
+          calls an LLM, so a relevance-pass failure doesn't make it
+          untrustworthy. It's what a click on "Run agent" is guaranteed to
+          produce even on the one run in a hundred where the proposals can't
+          be judged this time. */}
+      {result && result.digest && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <h3 className="font-label-lg text-label-lg text-on-background">Prior-art digest</h3>
+            <button
+              type="button"
+              onClick={downloadDigest}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low transition-colors shrink-0"
+            >
+              <span className="material-symbols-outlined text-[18px]">download</span>
+              Download .md
+            </button>
+          </div>
+          <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-5 py-4 max-h-[70vh] overflow-y-auto">
+            <MarkdownView markdown={result.digest.markdown} />
+          </div>
+        </div>
       )}
 
       {result && result.analysis_failed && (
@@ -762,18 +701,6 @@ export default function AgentSection({
               Discard
             </button>
           </div>
-        </div>
-      )}
-
-      {briefError && (
-        <div className="rounded-xl border border-error/30 bg-error/5 text-error px-4 py-3 font-body-sm text-body-sm mb-3">
-          {briefError}
-        </div>
-      )}
-
-      {briefResult && (
-        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-5 py-4 max-h-[70vh] overflow-y-auto">
-          <MarkdownView markdown={briefResult.markdown} />
         </div>
       )}
     </section>
