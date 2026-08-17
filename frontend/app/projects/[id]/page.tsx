@@ -29,7 +29,6 @@ import ChecklistSection from "@/components/projects/ChecklistSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
-import PriorArtBriefSection from "@/components/projects/PriorArtBriefSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
 
@@ -169,14 +168,6 @@ export default async function ProjectDetailPage({
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
-      {/* Available on every project, including ColaboFest — this is
-          pull-based and serves a published ColaboFest review criterion
-          directly ("Rigor and innovation — differentiation from existing
-          approaches"). See PriorArtBriefSection's own comment. */}
-      <PriorArtBriefSection projectId={project.id} projectName={project.name} />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
       {/* Runs on every project now, including ColaboFest. A ColaboFest
           project comes pre-filled with SPARC's own nine readiness items —
           Chen's original "overwhelming it" concern was about proposing six
@@ -185,8 +176,21 @@ export default async function ProjectDetailPage({
           it, see tools/project_agent.py) now suppresses the checklist
           proposal step specifically for a challenge project rather than
           hiding the whole feature; resources are proposed on every project
-          the same way. */}
-      <AgentSection projectId={project.id} isChallenge={!!project.challenge_key} />
+          the same way.
+
+          One section, two actions: "Run agent" (resources/checklist
+          proposals) and "Prior-art brief" (rendered, downloadable report),
+          merged from two separate sections per Chen's one-clear-purpose-
+          per-page note — see AgentSection's own module docstring. Both are
+          available here, including on ColaboFest, since the brief is
+          pull-based the same way the agent's resource proposals now are and
+          serves a published ColaboFest review criterion directly ("Rigor
+          and innovation — differentiation from existing approaches"). */}
+      <AgentSection
+        projectId={project.id}
+        projectName={project.name}
+        isChallenge={!!project.challenge_key}
+      />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 

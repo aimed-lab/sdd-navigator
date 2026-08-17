@@ -1,24 +1,53 @@
 "use client";
 
-// Agent section — the project detail page's "Run agent" button and review
-// flow. First agentic feature in the app: a fixed pipeline running in the
-// Python backend (backend/explore-mcp/tools/project_agent.py) searches
-// across all our sources, judges relevance against the project's stated
-// goal, and proposes resources + checklist items. This component NEVER
-// persists anything on its own — every write goes through the same
-// saveToProjectAction/addChecklistItemAction Server Actions the Resources
-// and Checklist sections already use, and only once the user hits Accept.
+// Project agent section — the project detail page's ONE "project agent"
+// heading with two actions: "Run agent" (search -> relevance -> resource/
+// checklist proposals, reviewed and accepted here) and "Prior-art brief"
+// (search -> rendered, downloadable Markdown report). These used to be two
+// separate page sections (AgentSection + PriorArtBriefSection) because the
+// agent was hidden on ColaboFest projects and the brief wasn't. Now that the
+// agent runs there too (resources-only, see `isChallenge` below), that
+// distinction is gone and two headings for closely related actions violated
+// Chen's one-clear-purpose-per-page note — merged into one section that can
+// do two things, not two sections stacked. PRESENTATION ONLY: this component
+// still calls the exact same two backend-proxy routes
+// (/api/project-agent/start + /api/project-agent/status,
+// /api/prior-art-brief) it always did, unmodified, and the two actions stay
+// two separate requests — this file never combines them into one call.
 //
-// ANY MEMBER may run this — running is read-only (the backend never touches
-// Supabase) and reviewing/accepting reuses the same any-member-gated actions
-// Resources/Checklist already allow, so there's no reason to restrict
-// kicking it off to leads only.
+// MUTUAL EXCLUSIVITY: only one result renders at a time. Starting either
+// action clears the other's output (and its own error/confirmation state) —
+// see runAgent()/generateBrief()'s own resets below. Neither action's
+// button is disabled by the OTHER one merely having a result showing (you
+// can switch straight from a shown brief to running the agent, or vice
+// versa, with no separate "discard" step) — each is only disabled while
+// ITS OWN or the OTHER action's request is actually in flight, so two
+// loading states can never show at once either.
 //
-// PROGRESS: polls /api/project-agent/status every 1.5s and shows which
-// pipeline stage is running — a 20-40s run with a bare spinner reads as
-// broken. /api/project-agent/start does the real membership check (see that
-// route's own comment) and derives every field the agent reasons about
-// server-side from the project — this component only ever sends a projectId.
+// Agent: this component NEVER persists anything on its own — every write
+// goes through the same saveToProjectAction/addChecklistItemAction Server
+// Actions the Resources and Checklist sections already use, and only once
+// the user hits Accept.
+//
+// ANY MEMBER may run either action — both are read-only against Supabase
+// (neither backend route writes), and accepting reuses the same
+// any-member-gated actions Resources/Checklist already allow.
+//
+// PROGRESS (agent only): polls /api/project-agent/status every 1.5s and
+// shows which pipeline stage is running — a 20-40s run with a bare spinner
+// reads as broken. /api/project-agent/start does the real membership check
+// (see that route's own comment) and derives every field the agent reasons
+// about server-side from the project — this component only ever sends a
+// projectId. The brief has no polling: /api/prior-art-brief is one
+// synchronous call (see that route's own comment for the measured timing).
+//
+// MARKDOWN RENDERING (brief only): a small hand-written renderer for exactly
+// the subset the backend generator emits (# / ## / ### headers, **bold**,
+// [text](url) links, > blockquotes, - list items, | table |, italics
+// *text*) rather than pulling in a markdown library for one document shape
+// this codebase fully controls the format of. Absorbed from the former
+// PriorArtBriefSection.tsx, which is deleted — this is now the only
+// consumer.
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -50,6 +79,12 @@ type AgentResult = {
   analysis_failed?: boolean;
 };
 
+type BriefResult = {
+  markdown: string;
+  generated_at: string;
+  counts: Record<string, number>;
+};
+
 type Stage = "searching" | "judging_relevance" | "proposing_checklist" | "done" | null;
 
 const STAGE_LABEL: Record<Exclude<Stage, null>, string> = {
@@ -61,11 +96,203 @@ const STAGE_LABEL: Record<Exclude<Stage, null>, string> = {
 
 const POLL_MS = 1500;
 
+// ── markdown rendering (brief only) — see module docstring ───────────────────
+
+function slugify(name: string): string {
+  return (
+    name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "project"
+  );
+}
+
+function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  // [text](url) | **bold** | *italic* | `code`
+  const re = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`|\*([^*]+)\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let i = 0;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const key = `${keyPrefix}-${i++}`;
+    if (match[1] !== undefined) {
+      nodes.push(
+        <a
+          key={key}
+          href={match[2]}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary underline hover:opacity-80"
+        >
+          {match[1]}
+        </a>
+      );
+    } else if (match[3] !== undefined) {
+      nodes.push(
+        <strong key={key} className="font-semibold text-on-background">
+          {match[3]}
+        </strong>
+      );
+    } else if (match[4] !== undefined) {
+      nodes.push(
+        <code key={key} className="px-1 py-0.5 rounded bg-surface-container-low text-on-background">
+          {match[4]}
+        </code>
+      );
+    } else if (match[5] !== undefined) {
+      nodes.push(<em key={key}>{match[5]}</em>);
+    }
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function MarkdownView({ markdown }: { markdown: string }) {
+  const lines = markdown.split("\n");
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.startsWith("| ") || line.startsWith("|-")) {
+      // table: header row, separator row, body rows
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].startsWith("|")) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const rows = tableLines
+        .filter((l) => !/^\|[\s-:|]+\|$/.test(l))
+        .map((l) => l.split("|").slice(1, -1).map((c) => c.trim()));
+      const [header, ...body] = rows;
+      blocks.push(
+        <div key={`tbl-${key++}`} className="overflow-x-auto my-3">
+          <table className="min-w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-outline-variant/40">
+                {header?.map((c, ci) => (
+                  <th key={ci} className="py-1.5 pr-4 font-label-sm text-label-sm text-secondary">
+                    {renderInline(c, `th-${ci}`)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {body.map((row, ri) => (
+                <tr key={ri} className="border-b border-outline-variant/20">
+                  {row.map((c, ci) => (
+                    <td key={ci} className="py-1.5 pr-4 font-body-sm text-body-sm">
+                      {renderInline(c, `td-${ri}-${ci}`)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    if (line.startsWith("### ")) {
+      blocks.push(
+        <h3 key={key++} className="font-title-sm text-title-sm text-on-background mt-4 mb-1">
+          {renderInline(line.slice(4), `h3-${key}`)}
+        </h3>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      blocks.push(
+        <h2
+          key={key++}
+          className="font-title-md text-title-md text-on-background mt-6 mb-2 pb-1 border-b border-outline-variant/30"
+        >
+          {renderInline(line.slice(3), `h2-${key}`)}
+        </h2>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      blocks.push(
+        <h1 key={key++} className="font-title-lg text-title-lg text-on-background mb-1">
+          {renderInline(line.slice(2), `h1-${key}`)}
+        </h1>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("> ")) {
+      blocks.push(
+        <blockquote
+          key={key++}
+          className="border-l-4 border-primary/40 pl-3 my-2 italic text-on-background font-body-sm text-body-sm"
+        >
+          {renderInline(line.slice(2), `bq-${key}`)}
+        </blockquote>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("*") && line.endsWith("*") && !line.startsWith("**")) {
+      blocks.push(
+        <p key={key++} className="font-body-sm text-body-sm text-secondary italic mb-2">
+          {renderInline(line.slice(1, -1), `note-${key}`)}
+        </p>
+      );
+      i++;
+      continue;
+    }
+    if (line.startsWith("- ")) {
+      const items: string[] = [];
+      while (i < lines.length && lines[i].startsWith("- ")) {
+        items.push(lines[i].slice(2));
+        i++;
+      }
+      blocks.push(
+        <ul key={key++} className="list-disc pl-5 my-1 space-y-1 font-body-sm text-body-sm">
+          {items.map((it, ii) => (
+            <li key={ii}>{renderInline(it, `li-${key}-${ii}`)}</li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+    // plain paragraph
+    blocks.push(
+      <p key={key++} className="font-body-sm text-body-sm text-on-background mb-2">
+        {renderInline(line, `p-${key}`)}
+      </p>
+    );
+    i++;
+  }
+
+  return <div>{blocks}</div>;
+}
+
+// ── main component ───────────────────────────────────────────────────────────
+
 export default function AgentSection({
   projectId,
+  projectName,
   isChallenge = false,
 }: {
   projectId: string;
+  projectName: string;
   // ColaboFest projects: resources only, no checklist — a ColaboFest project
   // already comes pre-filled with SPARC's own nine readiness items, and
   // proposing six more of ours on top is what Chen called overwhelming it.
@@ -77,6 +304,7 @@ export default function AgentSection({
 }) {
   const router = useRouter();
 
+  // ── agent state ──
   const [running, setRunning] = useState(false);
   const [stage, setStage] = useState<Stage>(null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -90,6 +318,11 @@ export default function AgentSection({
   const [acceptedSummary, setAcceptedSummary] = useState<string | null>(null);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── brief state ──
+  const [briefLoading, setBriefLoading] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
+  const [briefResult, setBriefResult] = useState<BriefResult | null>(null);
 
   useEffect(() => {
     return () => {
@@ -105,6 +338,11 @@ export default function AgentSection({
   };
 
   const runAgent = async () => {
+    // MUTUAL EXCLUSIVITY: clear the brief's output before starting — only
+    // one result renders at a time (see module docstring).
+    setBriefResult(null);
+    setBriefError(null);
+
     setStartError(null);
     setAcceptedSummary(null);
     setAcceptError(null);
@@ -157,6 +395,50 @@ export default function AgentSection({
         setStartError(e instanceof Error ? e.message : "Lost track of the agent's progress.");
       }
     }, POLL_MS);
+  };
+
+  const generateBrief = async () => {
+    // MUTUAL EXCLUSIVITY: clear the agent's output (and its own leftover
+    // error/confirmation state) before starting — see module docstring.
+    setResult(null);
+    setStartError(null);
+    setAcceptedSummary(null);
+    setAcceptError(null);
+
+    setBriefLoading(true);
+    setBriefError(null);
+    setBriefResult(null);
+    try {
+      const res = await fetch("/api/prior-art-brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json();
+      if (!res.ok || typeof data.markdown !== "string") {
+        throw new Error(data.error || "Couldn't generate the brief right now.");
+      }
+      setBriefResult(data as BriefResult);
+    } catch (e) {
+      setBriefError(e instanceof Error ? e.message : "Couldn't generate the brief right now.");
+    } finally {
+      setBriefLoading(false);
+    }
+  };
+
+  const downloadBrief = () => {
+    if (!briefResult) return;
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `${slugify(projectName)}-prior-art-brief-${date}.md`;
+    const blob = new Blob([briefResult.markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   };
 
   const toggleResource = (id: string) => {
@@ -223,28 +505,77 @@ export default function AgentSection({
     }
   };
 
+  const busy = running || briefLoading;
+
   return (
     <section className="mb-20">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="font-headline-md text-headline-md text-on-background">Project agent</h2>
-          <p className="font-body-sm text-body-sm text-secondary mt-1">
-            {isChallenge
-              ? "Searches across all our sources, judges what's relevant to this project's goal, and proposes resources for you to review. Checklist proposals are off for ColaboFest projects — this project's checklist is SPARC's own readiness list, not ours to add to."
-              : "Searches across all our sources, judges what's relevant to this project's goal, and proposes resources and checklist items for you to review."}
+      <div className="mb-6">
+        <h2 className="font-headline-md text-headline-md text-on-background">Project agent</h2>
+        <p className="font-body-sm text-body-sm text-secondary mt-1">
+          Searches across all our sources and judges what&apos;s relevant to this project&apos;s
+          goal.
+        </p>
+      </div>
+
+      {/* Two actions, one section — not two features stacked. Each keeps a
+          short line of its own next to its button rather than a full
+          paragraph. */}
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-4 mb-8">
+        {!result && (
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={runAgent}
+              disabled={busy}
+              className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2 disabled:opacity-60"
+            >
+              <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+              {running ? "Running…" : "Run agent"}
+            </button>
+            <p className="font-body-sm text-body-sm text-secondary max-w-xs">
+              {isChallenge
+                ? "Proposes resources to review. Checklist proposals are off for ColaboFest projects — this project's checklist is SPARC's own readiness list."
+                : "Proposes resources and checklist items to review."}
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={generateBrief}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low disabled:opacity-50 transition-colors"
+            >
+              {briefLoading ? (
+                <>
+                  <span className="w-3.5 h-3.5 rounded-full border-2 border-secondary/40 border-t-secondary animate-spin" />
+                  Searching…
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[18px]">description</span>
+                  {briefResult ? "Regenerate brief" : "Prior-art brief"}
+                </>
+              )}
+            </button>
+            {briefResult && (
+              <button
+                type="button"
+                onClick={downloadBrief}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">download</span>
+                Download .md
+              </button>
+            )}
+          </div>
+          <p className="font-body-sm text-body-sm text-secondary max-w-xs">
+            Reports what&apos;s already been tried and what&apos;s stopped — never concludes
+            anything is novel.
           </p>
         </div>
-        {!result && (
-          <button
-            type="button"
-            onClick={runAgent}
-            disabled={running}
-            className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2 shrink-0 disabled:opacity-60"
-          >
-            <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-            {running ? "Running…" : "Run agent"}
-          </button>
-        )}
       </div>
 
       {running && (
@@ -431,6 +762,18 @@ export default function AgentSection({
               Discard
             </button>
           </div>
+        </div>
+      )}
+
+      {briefError && (
+        <div className="rounded-xl border border-error/30 bg-error/5 text-error px-4 py-3 font-body-sm text-body-sm mb-3">
+          {briefError}
+        </div>
+      )}
+
+      {briefResult && (
+        <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-5 py-4 max-h-[70vh] overflow-y-auto">
+          <MarkdownView markdown={briefResult.markdown} />
         </div>
       )}
     </section>
