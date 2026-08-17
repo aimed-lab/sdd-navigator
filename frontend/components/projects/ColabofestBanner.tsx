@@ -29,8 +29,16 @@ export default function ColabofestBanner() {
           Challenge
         </span>
         <h2 className="font-headline-lg text-headline-lg text-on-background">ColaboFest 2026</h2>
+        {/* Exact wording from https://2026collabofest.ubrite.org/ (fetched
+            2026-08-17): "Three teams each receive up to $40,000 in combined
+            SPARC and Southern Research services — AI design and wet-lab
+            support, plus $1,000 in prize money." Southern Research became a
+            co-sponsor in the site's July 30, 2026 update — previously this
+            said "$20,000 in SPARC services" with no mention of them. */}
         <p className="font-body-md text-body-md text-secondary">
-          Three awards of $20,000 in SPARC services. Submissions close September 30.
+          Three teams each receive up to $40,000 in combined SPARC and
+          Southern Research services — AI design and wet-lab support, plus
+          $1,000 in prize money. Submissions close September 30.
         </p>
       </div>
       <div className="flex flex-col sm:flex-row items-center gap-6 shrink-0 w-full lg:w-auto">

@@ -27,7 +27,11 @@ import collabofestGraphic from "../public/colabofest-2026.avif";
 
 const COLLABOFEST = {
   register: "https://uab.co1.qualtrics.com/jfe/form/SV_cVnlmrmShnzME86",
-  infoSession: "https://uab.zoom.us/meeting/register/vd8u1awQQ6Kqfa7d-oXoEg#/",
+  // The info session (July 31, 2026) has already happened — this is now the
+  // Zoom RECORDING the official site links, not a registration link. Fetched
+  // from https://2026collabofest.ubrite.org/ on 2026-08-17, not guessed at.
+  infoSessionRecording:
+    "https://uab.zoom.us/rec/play/9_NIQaX_8ChHkc9FSvSPBHvWPPswDmX80OK8XW5l53sZwiox-FUmCabyDQW6oH2mAtHvPle2gYYmioAT.WOdbV_UK7L49Rjzt",
   details: "https://2026collabofest.ubrite.org/",
   announcement:
     "https://www.smartdrugdiscovery.org/post/dd-collabofest-challenge",
@@ -42,7 +46,10 @@ const PROPOSAL_POINTS = [
 ] as const;
 
 const KEY_DATES = [
-  { label: "Info Session", value: "July 30, 2026 · 10:00 AM CT · Zoom" },
+  // Past tense — the session happened July 31, 2026 (not the 30th, and not
+  // upcoming). Verified against https://2026collabofest.ubrite.org/ on
+  // 2026-08-17.
+  { label: "Info Session", value: "Held 31 July 2026 — recording available" },
   { label: "Submission deadline", value: "September 30, 2026" },
 ] as const;
 
@@ -194,7 +201,9 @@ export default async function Home() {
                 What teams submit
               </h3>
               <p className="font-body-md text-body-md text-secondary">
-                UAB teams submit a short 3-page proposal describing:
+                Teams — with at least one co-investigator from UAB or the
+                CCTS Partner Network — submit a short 3-page proposal
+                describing:
               </p>
               <ul className="space-y-2">
                 {PROPOSAL_POINTS.map((point) => (
@@ -264,24 +273,26 @@ export default async function Home() {
               </a>
             </div>
 
-            {/* Info-session callout */}
+            {/* Info-session callout — the session has already happened
+                (July 31, 2026), so this reads past tense with a recording
+                link, not a registration link. Registering for a past event
+                is worse than no link at all. */}
             <div className="glass-panel rounded-xl p-6 border-l-4 border-l-primary">
               <p className="flex items-start gap-3 font-body-md text-body-md text-on-background">
                 <span className="material-symbols-outlined text-primary shrink-0">
                   videocam
                 </span>
                 <span>
-                  <span className="font-semibold">Virtual Information Session</span>{" "}
-                  — July 30, 2026 · 10:00 AM CT · via Zoom
+                  <span className="font-semibold">Information session held 31 July 2026</span>
                 </span>
               </p>
               <a
-                href={COLLABOFEST.infoSession}
+                href={COLLABOFEST.infoSessionRecording}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-block mt-3 font-label-md text-label-md text-primary hover:underline underline-offset-4"
               >
-                Register for the Info Session
+                Watch the recording
               </a>
             </div>
 
