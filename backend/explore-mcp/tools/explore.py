@@ -470,14 +470,38 @@ _SINGLE_TERM_TOOLS = {"search_pager", "search_datasets"}
 # METHOD instead (same "longest phrase as a specificity proxy" heuristic
 # _context_for_papers already uses), falling back to the single most
 # specific topic, genes dropped entirely from the composition.
+_MAX_TOPIC_FALLBACK_WORDS = 8  # see docstring below
+
+
 def _single_method_query(scope: dict) -> str:
+    """LENGTH GATE ON THE TOPIC FALLBACK: `topics` is free text extracted from
+    the user's own sentence, not a controlled vocabulary — _SCOPE_SYSTEM asks
+    the LLM for "short strings" but nothing downstream enforced that, so a
+    degenerate extraction (no methods, no clean topic segmentation) could
+    hand GitHub a near-verbatim chunk of the project description as its
+    query — a real diagnosed case sent ~400 words and got back 0 results.
+    A topic candidate only qualifies here if it reads like a phrase, at most
+    _MAX_TOPIC_FALLBACK_WORDS words; anything longer falls through to the
+    bounded last-resort join below instead of being used raw. Genes stay
+    excluded from every branch here, unchanged — see the module comment
+    above this function for why (GitHub indexes what a repo DOES, not what
+    gene it studies; a bare gene symbol alone already returns 0 on this
+    source, confirmed directly)."""
     methods = scope.get("methods") or []
     if methods:
         return max(methods, key=len).strip()
-    topics = scope.get("topics") or []
-    if topics:
-        return max(topics, key=len).strip()
-    return _join_unique(*[scope[k] for k in SCOPE_KEYS])  # same last-resort net as below
+    topics = [t.strip() for t in (scope.get("topics") or []) if t.strip()]
+    short_topics = [t for t in topics if len(t.split()) <= _MAX_TOPIC_FALLBACK_WORDS]
+    if short_topics:
+        return max(short_topics, key=len)
+    # Last resort: same bounded join as _query_for's own final line, EXCEPT
+    # `topics` is swapped for `short_topics` (empty here, since if any topic
+    # had qualified we'd have returned above) rather than the raw field —
+    # otherwise an over-long topic rejected two lines up would walk right
+    # back in through this join, since _join_unique treats each scope entry
+    # as one opaque term and never re-checks its own length.
+    safe_scope = {**scope, "topics": short_topics}
+    return _join_unique(*[safe_scope[k] for k in SCOPE_KEYS])
 
 
 def _query_for(name: str, scope: dict) -> str:

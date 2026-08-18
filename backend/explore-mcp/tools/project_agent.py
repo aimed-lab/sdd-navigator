@@ -184,23 +184,42 @@ _AGENT_EXCLUDED_KINDS = {"episode"}
 
 
 def _flatten_candidates(
-    explore_result: dict, excluded_ids: set[str]
+    explore_result: dict, excluded_ids: set[str], max_candidates: int = 0
 ) -> tuple[list[dict], list[str], int]:
-    """All items across every section, deduped by id, in section order, with
-    anything already saved to the project (`excluded_ids`) dropped BEFORE the
+    """All items across every section, deduped by id, round-robinned ACROSS
+    sections (one item from every section, then a second from every section
+    that still has one, and so on) up to `max_candidates`, with anything
+    already saved to the project (`excluded_ids`) dropped BEFORE the
     relevance pass even sees it — so the LLM's limited selection budget goes
     on genuinely new items, not on re-proposing what's already there. Kinds
     in `_AGENT_EXCLUDED_KINDS` (currently just episodes) are dropped the same
-    way, before excluded_ids or the cap ever see them.
+    way, before excluded_ids or the round-robin ever see them.
+
+    WHY ROUND-ROBIN, NOT A FLAT `items[:max_candidates]` OVER SECTIONS
+    CONCATENATED IN TOOL ORDER: tool order (`_TOOL_DESCRIPTIONS` in
+    tools/explore.py) puts search_datasets/search_pager near the END of the
+    list. A flat slice fills up on whatever ran first — papers, news,
+    trials, grants, tools can already total 50 items before datasets/pager
+    are ever appended — so on a real run those two sections were 10/10 in
+    the digest (which renders straight from `sections`, uncapped) and 0/0 in
+    the candidate pool the relevance prompt actually saw. Same disease as
+    tools/search_papers.py's own round-robin fix for one sub-query
+    dominating a shared cap (see that module's ROUND-ROBIN note); this is
+    the same shape, keyed on section kind instead of a sub-query cursor.
 
     Returns (items, failed_tool_names, excluded_count) — the count is
     reported back to the caller so the summary can say honestly how much of
     what was found was already saved, rather than silently shrinking the
-    candidate pool."""
+    candidate pool. `max_candidates <= 0` means unbounded (round-robins
+    every item, useful for tests that don't care about the cap)."""
     seen: set[str] = set()
-    items: list[dict] = []
     failed: list[str] = []
     excluded_count = 0
+
+    # Pass 1 — per-section filtered/deduped item lists, section order
+    # preserved (it becomes the round-robin's own column order below), but
+    # nothing here decides how many of each kind make the final cut.
+    per_section: list[list[dict]] = []
     for section in explore_result.get("sections") or []:
         if not isinstance(section, dict):
             continue
@@ -208,6 +227,7 @@ def _flatten_candidates(
             continue
         if section.get("error"):
             failed.append(section.get("tool") or section.get("kind") or "unknown")
+        bucket: list[dict] = []
         for item in section.get("items") or []:
             item_id = item.get("id")
             if not item_id or item_id in seen:
@@ -216,7 +236,27 @@ def _flatten_candidates(
             if item_id in excluded_ids:
                 excluded_count += 1
                 continue
-            items.append(item)
+            bucket.append(item)
+        if bucket:
+            per_section.append(bucket)
+
+    # Pass 2 — round-robin: one item from every section with anything left,
+    # repeat, until every section is exhausted or the cap is hit.
+    items: list[dict] = []
+    row = 0
+    while per_section and (max_candidates <= 0 or len(items) < max_candidates):
+        advanced = False
+        for bucket in per_section:
+            if row >= len(bucket):
+                continue
+            items.append(bucket[row])
+            advanced = True
+            if 0 < max_candidates <= len(items):
+                break
+        if not advanced:
+            break
+        row += 1
+
     return items, failed, excluded_count
 
 
@@ -232,12 +272,74 @@ _RELEVANCE_SYSTEM = (
     "keyword. Skip anything generic or tangential. For each item you select, "
     "write ONE SHORT SENTENCE explaining why it matters for THIS project's goal "
     "specifically.\n\n"
+    "PREFER A DIVERSE SELECTION when multiple kinds of candidate are genuinely "
+    "relevant — a paper, a dataset, a gene set and a tool that are each relevant "
+    "beat five relevant papers and nothing else. Do not let one kind (papers, "
+    "most often) fill every slot just because that kind happens to have the most "
+    "candidates; a candidate list dominated by papers is a fact about how the "
+    "search works, not a sign that only papers are worth proposing.\n\n"
     f"Select at most {MAX_SELECTED} items — fewer is fine if fewer are genuinely "
     "relevant. Never select an item just to fill the quota.\n\n"
     'Return ONLY a JSON object: {"selected": [{"id": "<item id>", "reason": '
     '"<one sentence>"}, ...]}. Use the exact `id` field from the candidate list. '
     "No prose, no code fences."
 )
+
+# THE GATE (same prompt-asks-code-enforces pattern as the checklist's
+# grounding gate, _is_grounded below — a prompt instruction is not a
+# guarantee, so diversity is enforced here too, not just asked for above).
+# At most 3 papers, at most 2 of any other single kind, within MAX_SELECTED
+# (=8) slots. Papers get a wider allowance because they are legitimately the
+# largest and most reliable candidate pool most runs; other kinds get a
+# smaller allowance so 2-3 crowd out one kind entirely.
+#
+# MUST NOT CREATE EMPTY SLOTS: this cap only ever applies when at least one
+# OTHER kind is present in the candidates the LLM was shown — see
+# _apply_kind_cap's own docstring for the two-pass backfill that guarantees
+# a single-kind candidate pool (e.g. only papers came back) still fills all
+# MAX_SELECTED slots with that one kind, uncapped.
+_PAPER_KIND = "paper"
+_MAX_PER_KIND = {_PAPER_KIND: 3}
+_MAX_PER_OTHER_KIND = 2
+
+
+def _apply_kind_cap(ranked: list[dict]) -> list[dict]:
+    """`ranked` is the LLM's own selection, already in its preferred order.
+    Enforces the per-kind cap ONLY when more than one kind is present in
+    `ranked` — a single-kind list (e.g. only papers were ever relevant, or
+    only papers were ever found) passes through untouched, so the cap can
+    never shrink a genuinely single-kind result below MAX_SELECTED.
+
+    Two passes: first take items respecting the cap (preserving rank order),
+    then BACKFILL any still-empty slots from whatever was skipped for
+    exceeding its cap (also in rank order) — this is what keeps a mixed pool
+    that only had, say, 3 papers + 2 datasets + 2 tools (7 total, nothing
+    else available) from being artificially thinned to fewer than the LLM
+    actually offered; the 8th slot backfills from the next-ranked skipped
+    item rather than being left empty."""
+    kinds_present = {item.get("kind") for item in ranked}
+    if len(kinds_present) <= 1:
+        return ranked[:MAX_SELECTED]
+
+    kept: list[dict] = []
+    skipped: list[dict] = []
+    counts: dict[str, int] = {}
+    for item in ranked:
+        kind = item.get("kind")
+        cap = _MAX_PER_KIND.get(kind, _MAX_PER_OTHER_KIND)
+        if counts.get(kind, 0) < cap and len(kept) < MAX_SELECTED:
+            kept.append(item)
+            counts[kind] = counts.get(kind, 0) + 1
+        else:
+            skipped.append(item)
+
+    if len(kept) < MAX_SELECTED:
+        for item in skipped:
+            if len(kept) >= MAX_SELECTED:
+                break
+            kept.append(item)
+
+    return kept
 
 
 def _candidate_summary(item: dict) -> dict:
@@ -278,6 +380,10 @@ def _try_select_relevant_once(
     raw = data.get("selected") if isinstance(data, dict) else None
     if not isinstance(raw, list):
         return None
+    # No MAX_SELECTED cutoff in this loop — _apply_kind_cap below needs the
+    # model's FULL ranked list (still capped implicitly by the model's own
+    # instruction to select at most MAX_SELECTED, but not truncated further
+    # here) to decide what to keep vs. backfill from.
     out: list[dict] = []
     seen: set[str] = set()
     for entry in raw:
@@ -291,8 +397,7 @@ def _try_select_relevant_once(
             continue
         seen.add(item_id)
         out.append({**by_id[item_id], "reason": reason.strip()})
-        if len(out) >= MAX_SELECTED:
-            break
+    out = _apply_kind_cap(out)
     return out or None
 
 
@@ -604,7 +709,9 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     excluded_ids = {
         str(item_id).strip() for item_id in (project.get("saved_item_ids") or []) if str(item_id).strip()
     }
-    candidates, failed_tools, excluded_count = _flatten_candidates(explore_result, excluded_ids)
+    candidates, failed_tools, excluded_count = _flatten_candidates(
+        explore_result, excluded_ids, max_candidates=MAX_CANDIDATES
+    )
     if failed_tools:
         warnings.append(f"These sources didn't return results: {', '.join(failed_tools)}.")
 
