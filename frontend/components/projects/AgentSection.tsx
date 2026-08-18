@@ -92,6 +92,19 @@ const STAGE_LABEL: Record<Exclude<Stage, null>, string> = {
 };
 
 const POLL_MS = 1500;
+// A single failed /status request (dropped connection between browser and
+// Vercel, a blip mid-run) must not abandon a job that's still running fine
+// server-side — new users are the most exposed to this because a cold cache
+// means a longer run and more polls, so more chances to hit one flaky
+// request. Tolerate a short run of consecutive failures before giving up:
+// 4 in a row (~6s at POLL_MS=1500) is long enough to ride out a single blip
+// or two without masking a genuinely dead job for too long. Independently,
+// cap the whole run at 3 minutes — a run that "usually takes 20-40 seconds"
+// but is allowed to run much longer on a cold cache should still surface an
+// error eventually rather than spin forever if the backend job itself is
+// stuck, not just unreachable.
+const MAX_CONSECUTIVE_POLL_FAILURES = 4;
+const MAX_POLL_MS = 3 * 60 * 1000;
 
 // ── markdown rendering (brief only) — see module docstring ───────────────────
 
@@ -356,11 +369,21 @@ export default function AgentSection({
       return;
     }
 
+    const pollStartedAt = Date.now();
+    let consecutiveFailures = 0;
+
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/project-agent/status?job_id=${encodeURIComponent(jobId!)}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Lost track of the agent's progress.");
+
+        // A poll that reached the server and got a real answer clears any
+        // error left over from prior failed polls in THIS run — the run is
+        // healthy again, and an error should only ever describe the
+        // current state, not a blip that already recovered.
+        consecutiveFailures = 0;
+        setStartError(null);
 
         if (data.stage) setStage(data.stage as Stage);
 
@@ -376,6 +399,14 @@ export default function AgentSection({
           setSelectedChecklistLabels(new Set(r.checklist_items.map((c) => c.label)));
         }
       } catch (e) {
+        consecutiveFailures += 1;
+        const timedOut = Date.now() - pollStartedAt > MAX_POLL_MS;
+        // Keep polling through transient failures — the job is very likely
+        // still running server-side (see module docstring: server logs show
+        // 200s the whole time on the run that showed this error). Only give
+        // up after several failures in a row, or an overall timeout.
+        if (consecutiveFailures < MAX_CONSECUTIVE_POLL_FAILURES && !timedOut) return;
+
         stopPolling();
         setRunning(false);
         setStage(null);
