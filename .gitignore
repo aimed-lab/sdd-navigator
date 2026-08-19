@@ -47,3 +47,5 @@ docs/
 
 # Editor / local AI context
 CLAUDE.md
+
+backend/explore-mcp/venv311/

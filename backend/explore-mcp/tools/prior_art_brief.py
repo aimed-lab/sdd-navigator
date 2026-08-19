@@ -34,11 +34,18 @@ nothing for a model to phrase, and phrasing is exactly the surface where
 "reports" quietly drifts into "concludes."
 
 WHAT render_digest() EXPECTS THE CALLER TO HAVE ALREADY COLLECTED
-  * Papers, tools, datasets, gene sets — the sections of an explore_async()
-    result (search_papers/search_tools/search_datasets/search_pager). Tools
-    whose last push (date_iso, sourced from GitHub's pushed_at) is over two
-    years old are flagged, not excluded — a stale repo is still a prior
-    attempt worth reporting.
+  * Papers, tools, datasets, gene sets, GRANTS — the sections of an
+    explore_async() result (search_papers/search_tools/search_datasets/
+    search_pager/search_grants). Tools whose last push (date_iso, sourced
+    from GitHub's pushed_at) is over two years old are flagged, not
+    excluded — a stale repo is still a prior attempt worth reporting.
+    Grants were previously missing from this list entirely — a project
+    could have a real search_grants section (this module already reads
+    `sections`, an explore_async() result that always includes whatever
+    explore's own routing chose to run) and the rendered digest would
+    silently drop the whole category. Section 5 below now covers it, same
+    shape as every other section: what was searched, what came back,
+    explicit when nothing did.
   * Trials — NOT explore_async's own search_trials section (that section
     carries no status filter). Two direct, disease-scoped calls to
     search_trials_async with `status_filter`: ["TERMINATED", "WITHDRAWN"] and
@@ -158,6 +165,20 @@ def _render_tool(item: dict) -> str:
     return line
 
 
+def _render_grant(item: dict) -> str:
+    title = item.get("title") or "(untitled)"
+    url = item.get("url")
+    # sources/grants_gov.py sets summary to "<agencyCode> — <agency>" already
+    # — restated verbatim, never re-derived from raw here.
+    summary = (item.get("summary") or "").strip()
+    date = _fmt_date(item.get("date_iso"))
+    link = f" [{title}]({url})" if url else f" {title}"
+    line = f"-{link} — open/posted {date}."
+    if summary:
+        line += f" {summary}"
+    return line
+
+
 def _render_dataset_or_geneset(item: dict) -> str:
     title = item.get("title") or "(untitled)"
     url = item.get("url")
@@ -240,10 +261,12 @@ def render_digest(
     tools_items, tools_query = section_items_and_query(sections, "search_tools")
     datasets_items, datasets_query = section_items_and_query(sections, "search_datasets")
     pager_items, pager_query = section_items_and_query(sections, "search_pager")
+    grants_items, grants_query = section_items_and_query(sections, "search_grants")
     papers_query = papers_query or goal_text
     tools_query = tools_query or goal_text
     datasets_query = datasets_query or goal_text
     pager_query = pager_query or goal_text
+    grants_query = grants_query or goal_text
     query = trial_query(project, goal_text)
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -323,8 +346,23 @@ def render_digest(
         lines.append(f"The search for recruiting trials matching “{query}” returned none.")
     lines.append("")
 
-    # 5 — what the search did not find
-    lines.append("## 5. What the search did not find")
+    # 5 — funding opportunities
+    lines.append("## 5. Funding opportunities")
+    lines.append(
+        f"*Forecasted and posted opportunities matching “{grants_query}” on Grants.gov.*"
+    )
+    lines.append("")
+    lines.append(f"### Grants (query: “{grants_query}”, {len(grants_items)} result(s))")
+    lines.append("")
+    if grants_items:
+        for g in grants_items:
+            lines.append(_render_grant(g))
+    else:
+        lines.append(f"No funding opportunities were returned for “{grants_query}”.")
+    lines.append("")
+
+    # 6 — what the search did not find
+    lines.append("## 6. What the search did not find")
     lines.append(
         "*Explicit, so this section is never read as a claim about what exists — only about "
         "what this run's queries returned.*"
@@ -337,6 +375,7 @@ def render_digest(
         _not_found_line("Tools/repositories", tools_query, len(tools_items)),
         _not_found_line("Datasets", datasets_query, len(datasets_items)),
         _not_found_line("Gene sets", pager_query, len(pager_items)),
+        _not_found_line("Funding opportunities", grants_query, len(grants_items)),
     ]
     not_found = [line for line in not_found if line]
     if not_found:
@@ -345,8 +384,8 @@ def render_digest(
         lines.append("Every query below returned at least one result.")
     lines.append("")
 
-    # 6 — sources
-    lines.append("## 6. Sources")
+    # 7 — sources
+    lines.append("## 7. Sources")
     lines.append("*Every query run for this digest, and how many results each returned.*")
     lines.append("")
     lines.append("| Search | Query | Results |")
@@ -357,6 +396,7 @@ def render_digest(
     lines.append(f"| Tools (GitHub) | {tools_query} | {len(tools_items)} |")
     lines.append(f"| Datasets (NCBI GEO) | {datasets_query} | {len(datasets_items)} |")
     lines.append(f"| Gene sets (PAGER) | {pager_query} | {len(pager_items)} |")
+    lines.append(f"| Funding opportunities (Grants.gov) | {grants_query} | {len(grants_items)} |")
     lines.append("")
 
     return {
@@ -369,5 +409,6 @@ def render_digest(
             "tools": len(tools_items),
             "datasets": len(datasets_items),
             "genesets": len(pager_items),
+            "grants": len(grants_items),
         },
     }

@@ -286,8 +286,8 @@ _RELEVANCE_SYSTEM = (
 )
 
 # THE GATE (same prompt-asks-code-enforces pattern as the checklist's
-# grounding gate, _is_grounded below — a prompt instruction is not a
-# guarantee, so diversity is enforced here too, not just asked for above).
+# grounding gate, _classify_grounding below — a prompt instruction is not
+# a guarantee, so diversity is enforced here too, not just asked for above).
 # At most 3 papers, at most 2 of any other single kind, within MAX_SELECTED
 # (=8) slots. Papers get a wider allowance because they are legitimately the
 # largest and most reliable candidate pool most runs; other kinds get a
@@ -485,24 +485,96 @@ def _content_words(text: str) -> set[str]:
     }
 
 
-def _is_grounded(rationale: str, found_vocab: set[str]) -> bool:
-    """The gate itself. `found_vocab` is every content word drawn from the
-    titles/summaries of what step 1/2 actually surfaced for this run."""
+# CAP ON "ANALYSE THE DATA WE JUST FOUND" ITEMS — same prompt-asks-code-
+# enforces pattern as the grounding gate itself. Real failure, NLRP3
+# project: of 13 proposed items, most were variations on "analyse/
+# integrate/screen the dataset we just found" — the agent proposing work
+# on its own search results (a real citation, so the grounding gate above
+# passed every one of them) rather than work the PROJECT needs. A prompt
+# instruction alone doesn't hold under load, same lesson as
+# _classify_grounding's own docstring — this caps how many surviving items may be grounded
+# ONLY in a dataset/gene-set candidate (as opposed to a genuine gap
+# statement, or grounded in a paper/trial/tool/grant, which is real
+# synthesis, not "look at this dataset"). Anything past the cap is
+# dropped, in the model's own rank order, freeing that slot for whatever
+# comes next rather than silently shrinking the proposal.
+_MAX_DATA_ANALYSIS_ITEMS = 2
+
+# Kinds whose vocabulary counts as "just a dataset/gene set we found",
+# never enough on its own to justify a checklist item under the cap above.
+_DATA_KINDS = {"dataset", "geneset"}
+
+
+def _split_vocab_by_kind(candidates: list[dict]) -> tuple[set[str], set[str]]:
+    """found_vocab, split into (dataset_vocab, other_vocab). dataset_vocab
+    is every content word from a dataset/geneset candidate's title/summary;
+    other_vocab is every content word from every OTHER kind (paper, tool,
+    trial, grant, resource, person, episode). Lets the gate below tell
+    "grounded in a dataset we found" apart from "grounded in a paper/
+    trial/tool/grant we found" — only the former is subject to the cap."""
+    dataset_vocab: set[str] = set()
+    other_vocab: set[str] = set()
+    for c in candidates:
+        words = _content_words(c.get("title")) | _content_words(c.get("summary"))
+        if c.get("kind") in _DATA_KINDS:
+            dataset_vocab |= words
+        else:
+            other_vocab |= words
+    return dataset_vocab, other_vocab
+
+
+def _classify_grounding(rationale: str, dataset_vocab: set[str], other_vocab: set[str]) -> str:
+    """The gate itself, extended to classify HOW an item is grounded, not
+    just whether it is:
+      "gap"          — names an explicit gap (a _GAP_PHRASES match). Always
+                       kept, never subject to the data-analysis cap — these
+                       are the strongest items this pipeline produces.
+      "other"        — cites real vocabulary from a paper/trial/tool/grant
+                       candidate. Real synthesis grounded in something
+                       besides a bare dataset; never capped either.
+      "dataset_only" — cites vocabulary ONLY from a dataset/geneset
+                       candidate, nothing else. This is exactly "analyse/
+                       integrate/screen the dataset we just found" —
+                       subject to _MAX_DATA_ANALYSIS_ITEMS.
+      "ungrounded"   — cites nothing real. Dropped unconditionally, as
+                       before."""
     lower = (rationale or "").lower()
     if any(phrase in lower for phrase in _GAP_PHRASES):
-        return True
-    return bool(_content_words(rationale) & found_vocab)
+        return "gap"
+    words = _content_words(rationale)
+    if words & other_vocab:
+        return "other"
+    if words & dataset_vocab:
+        return "dataset_only"
+    return "ungrounded"
 
 
 _CHECKLIST_SYSTEM = (
     "You are a research assistant proposing next steps for a lab project. You will "
     "be given the project's description, a short list of items that were actually "
-    "found for it (papers, datasets, tools, trials, grants, etc.), and the "
-    "checklist items the team already has.\n\n"
-    "Propose concrete next steps and gaps, GROUNDED in what was actually found — "
-    "e.g. 'no in vivo validation model identified in the literature we found' is "
-    "useful, 'do more research' is not. Do not repeat or rephrase an existing "
-    "checklist item.\n\n"
+    "found for it (papers, datasets, tools, trials, grants, etc. — each described by "
+    "its KIND and TITLE, not material the team already possesses), and the checklist "
+    "items the team already has.\n\n"
+    "NEVER quote a found item's title as if it names a study, cohort, or resource the "
+    "team can go and use. A GEO dataset's title is a description written by whoever "
+    "deposited it — it is not a named study or cohort the team has access to. Refer "
+    "to what the item IS, in your own words, never its title in quotes: write "
+    '"a published scRNA-seq dataset of diabetic kidney biopsies", never \'the '
+    "\\\"Tubular epithelial cells promote macrophage pyroptosis\\\" dataset'. Do not "
+    "put quotation marks around a found item's title anywhere in a label or "
+    "rationale.\n\n"
+    "Propose steps the PROJECT needs — grounded in what was found, but not merely "
+    "'analyse this dataset' or 'integrate this result'. The strongest items are GAP "
+    "statements: something the search did NOT find that the project needs in order to "
+    "proceed — e.g. 'No found paper links PANX1-P2X7 signaling to GSDMD-mediated "
+    "pyroptosis in kidney tissue, which this project needs to establish.' Prefer a gap "
+    "statement over a to-do about a found item whenever the found items support one.\n\n"
+    f"AT MOST {_MAX_DATA_ANALYSIS_ITEMS} of your proposed items may be about "
+    "analysing, integrating, or screening a dataset or gene set the search found — if "
+    "half the checklist is 'look at this dataset', the proposal is thin. Spend the "
+    "rest of your budget on gap statements and on steps grounded in papers, trials, "
+    "tools, or grants.\n\n"
+    "Do not repeat or rephrase an existing checklist item.\n\n"
     f"Propose at most {MAX_CHECKLIST} items — fewer is fine.\n\n"
     'Return ONLY a JSON object: {"items": [{"label": "<short actionable label>", '
     '"rationale": "<one sentence tying it to what was found>"}, ...]}. No prose, '
@@ -511,14 +583,20 @@ _CHECKLIST_SYSTEM = (
 
 
 def _try_propose_checklist_once(
-    description: str, found_summary: list[dict], existing_labels: list[str], found_vocab: set[str]
+    description: str,
+    found_summary: list[dict],
+    existing_labels: list[str],
+    dataset_vocab: set[str],
+    other_vocab: set[str],
 ) -> tuple[list[dict], int] | None:
-    """One attempt at the checklist call + parse + grounding gate. Returns
-    (items, dropped_ungrounded_count) on success — items may legitimately be
-    [] (every proposed item got filtered, or the model itself proposed
-    nothing, both real outcomes, not failures). Returns None only when the
-    JSON itself couldn't be used (caller decides whether to retry). Raises on
-    an actual LLM-call exception, same distinction as _try_select_relevant_once."""
+    """One attempt at the checklist call + parse + grounding gate + the
+    data-analysis cap. Returns (items, dropped_count) on success — items may
+    legitimately be [] (every proposed item got filtered, or the model
+    itself proposed nothing, both real outcomes, not failures). `dropped`
+    counts BOTH ungrounded drops and cap-exceeded drops (see the per-item
+    logging below for which is which). Returns None only when the JSON
+    itself couldn't be used (caller decides whether to retry). Raises on an
+    actual LLM-call exception, same distinction as _try_select_relevant_once."""
     resp = llm.complete(
         [
             {"role": "system", "content": _CHECKLIST_SYSTEM},
@@ -541,6 +619,7 @@ def _try_propose_checklist_once(
     existing_lower = {label.strip().lower() for label in existing_labels}
     out: list[dict] = []
     dropped = 0
+    data_analysis_count = 0
     for entry in raw:
         if not isinstance(entry, dict):
             continue
@@ -551,15 +630,37 @@ def _try_propose_checklist_once(
         if label.strip().lower() in existing_lower:
             continue
         rationale_text = rationale.strip() if isinstance(rationale, str) else ""
-        # THE GATE: no citation to something actually found and no
-        # named gap -> drop it, no matter how plausible it reads.
-        if not _is_grounded(rationale_text, found_vocab):
+
+        # THE GATE: no citation to something actually found and no named
+        # gap -> drop it, no matter how plausible it reads.
+        kind = _classify_grounding(rationale_text, dataset_vocab, other_vocab)
+        if kind == "ungrounded":
             dropped += 1
             logger.warning(
                 "project_agent: dropped ungrounded checklist item %r (rationale=%r)",
                 label.strip(), rationale_text,
             )
             continue
+
+        # THE CAP: "grounded ONLY in a dataset/geneset we found" is exactly
+        # "analyse the data we just found" — real per the gate above, but
+        # capped at _MAX_DATA_ANALYSIS_ITEMS so it can't crowd out gap
+        # statements and paper/trial/tool/grant-grounded items the way it
+        # did on the NLRP3 project (most of 13 proposed items were this
+        # shape). Dropped in the model's own rank order once the cap is
+        # hit — not retried, not backfilled from elsewhere; the model just
+        # gets fewer of this one kind of slot.
+        if kind == "dataset_only":
+            if data_analysis_count >= _MAX_DATA_ANALYSIS_ITEMS:
+                dropped += 1
+                logger.info(
+                    "project_agent: dropped checklist item %r past the "
+                    "data-analysis cap (%d already kept)",
+                    label.strip(), data_analysis_count,
+                )
+                continue
+            data_analysis_count += 1
+
         out.append({"label": label.strip()[:300], "rationale": rationale_text})
         if len(out) >= MAX_CHECKLIST:
             break
@@ -569,14 +670,16 @@ def _try_propose_checklist_once(
 def _propose_checklist(
     description: str, selected: list[dict], existing_labels: list[str], candidates: list[dict]
 ) -> tuple[list[dict], bool, int]:
-    """Returns (proposed checklist items, used_fallback, dropped_ungrounded_count).
+    """Returns (proposed checklist items, used_fallback, dropped_count).
     An empty result is a legitimate outcome here (nothing to add) — this only
     "falls back" (to nothing, with a note) if the call/parse itself fails,
     never to a filler item.
 
     `candidates` (the full step-1 pool, not just the 8 selected) backs the
-    grounding gate — a valid gap item like Chen's "none of the found papers
-    address X" cites the whole search, not only what survived relevance.
+    grounding gate AND the data-analysis cap — a valid gap item like Chen's
+    "none of the found papers address X" cites the whole search, not only
+    what survived relevance, and the cap needs to tell a dataset/geneset
+    candidate apart from every other kind across that same full pool.
 
     RETRY: same shape as _select_relevant — malformed JSON gets ONE retry
     after a short backoff (usually a one-off bad sample); an actual
@@ -584,19 +687,20 @@ def _propose_checklist(
     found_summary = [
         {"kind": s.get("kind"), "title": s.get("title")} for s in selected[:MAX_SELECTED]
     ]
-    found_vocab: set[str] = set()
-    for c in candidates:
-        found_vocab |= _content_words(c.get("title"))
-        found_vocab |= _content_words(c.get("summary"))
+    dataset_vocab, other_vocab = _split_vocab_by_kind(candidates)
 
     try:
-        result = _try_propose_checklist_once(description, found_summary, existing_labels, found_vocab)
+        result = _try_propose_checklist_once(
+            description, found_summary, existing_labels, dataset_vocab, other_vocab
+        )
         if result is not None:
             out, dropped = result
             return out, False, dropped
         logger.warning("project_agent: checklist JSON unusable (attempt 1/2), retrying once")
         time.sleep(_JSON_RETRY_BACKOFF_SEC)
-        result = _try_propose_checklist_once(description, found_summary, existing_labels, found_vocab)
+        result = _try_propose_checklist_once(
+            description, found_summary, existing_labels, dataset_vocab, other_vocab
+        )
         if result is not None:
             logger.info("project_agent: checklist JSON usable on retry (attempt 2/2)")
             out, dropped = result
@@ -761,9 +865,15 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         if checklist_fallback:
             warnings.append("Couldn't generate checklist suggestions this run.")
     if dropped_ungrounded:
+        # The count covers two distinct drop reasons (see _try_propose_
+        # checklist_once) — ungrounded (cited nothing real) and over-cap
+        # (a valid dataset/geneset-grounded item past
+        # _MAX_DATA_ANALYSIS_ITEMS). Worded to cover both honestly rather
+        # than implying every dropped item was groundless.
         warnings.append(
             f"Dropped {dropped_ungrounded} proposed checklist item(s) that weren't grounded in "
-            "anything this run actually found."
+            "anything this run actually found, or were about analysing already-found data beyond "
+            "this run's cap on that kind of item."
         )
     _stage("done")
 
