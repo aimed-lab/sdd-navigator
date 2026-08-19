@@ -1,0 +1,46 @@
+-- =============================================================================
+-- Migration: checklist_matched_capabilities  (2026-08-19)
+-- =============================================================================
+-- Adds checklist_items.matched_capabilities — the STORED result of mapping
+-- an item's free text onto the provider catalog's fixed capability
+-- vocabulary (backend/explore-mcp/tools/find_provider.py). Backs "Find a
+-- service provider" vs "Ask for help": an item shows the service action iff
+-- this array is non-empty.
+--
+-- WHY STORED, NOT COMPUTED PER RENDER. The mapping is an LLM call. Two
+-- alternatives were considered and rejected:
+--   - one LLM call per item on every checklist page load — the literal
+--     thing the feature spec forbids;
+--   - one BATCHED LLM call for the whole checklist on every page load —
+--     still non-zero on every view, adds real latency to a page that's
+--     opened far more often than a checklist item is added or renamed.
+-- Storing the result at ADD/EDIT time (addChecklistItem /
+-- updateChecklistItemLabel in frontend/lib/server/projects.ts) means a
+-- checklist page load costs ZERO LLM calls — a plain column read — and a
+-- "Find a service provider" click costs zero too (it queries the catalog
+-- with the terms already sitting in this column, see
+-- POST /api/find-provider's new contract). The one-time classification cost
+-- is paid once per add/edit, which happens far less often than a project's
+-- checklist is viewed.
+--
+-- NOT NULL DEFAULT '{}' (not nullable) so every row — including every
+-- EXISTING item from before this migration, which has never been
+-- classified — reads as "no capabilities matched" and therefore renders
+-- Ask for help. That is exactly the safe fallback the feature spec calls
+-- for ("If mapping fails or is unavailable, default to Ask for help") and
+-- it falls out of the column's own default with no backfill job required:
+-- an old item simply gets classified the next time someone edits its
+-- label, same as everything else here.
+--
+-- No CHECK on the array's contents — matched_capabilities is meant to hold
+-- verbatim terms from the catalog's list_capabilities() vocabulary, but
+-- that vocabulary is fetched live and may grow (see find_provider.py), so
+-- pinning it to a fixed CHECK list here would drift out of sync with the
+-- catalog and start rejecting valid writes. The classification code path
+-- is what's trusted to only ever produce real vocabulary terms.
+--
+-- Run once in the Supabase SQL editor. Idempotent — safe to re-run.
+-- =============================================================================
+
+ALTER TABLE public.checklist_items
+    ADD COLUMN IF NOT EXISTS matched_capabilities TEXT[] NOT NULL DEFAULT '{}';

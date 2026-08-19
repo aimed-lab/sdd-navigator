@@ -27,6 +27,7 @@
 
 import { getCurrentUser, getDb, requireCurrentUser, type Db } from "@/lib/auth";
 import type { CreateProjectInput, MyProjectSummary } from "@/lib/projectTypes";
+import { classifyChecklistItem } from "@/lib/server/checklistClassify";
 
 const PROJECT_SELECT =
   "id, name, description, lead_id, deadline, challenge_key, created_at";
@@ -105,6 +106,17 @@ export type ChecklistItem = {
   // but resolved here anyway so any consumer of getProject() — the
   // chatbot included — has it without a second query.
   collab_post_title: string | null;
+  // The STORED result of classifying this item's label against the
+  // provider catalog's capability vocabulary (see
+  // lib/server/checklistClassify.ts and
+  // database/migrations/2026-08-19_checklist_matched_capabilities.sql).
+  // Computed once, at add/edit time — never here at read time, and never
+  // per-render — so a checklist page load costs zero LLM calls. Non-empty
+  // -> the item shows "Find a service provider"; empty (including every
+  // item from before this column existed, and any item whose
+  // classification failed) -> "Ask for help". Exactly one of those two
+  // ever renders for a given item — see ChecklistSection.tsx.
+  matched_capabilities: string[];
 };
 
 // projects.shared_folder_url/_set_by/_set_at — a team pastes a link to
@@ -203,6 +215,15 @@ export type AddChecklistItemResult =
   | { status: "error"; error: string };
 
 export type ChecklistWriteResult = { status: "ok" } | { status: "error"; error: string };
+
+// A label edit can change which action a checklist item should show (a
+// re-worded item might now — or no longer — map to a service capability),
+// so this carries the freshly re-classified matched_capabilities back to
+// the client rather than the client guessing/keeping the stale value from
+// before the edit. See updateChecklistItemLabel below.
+export type UpdateChecklistLabelResult =
+  | { status: "ok"; matched_capabilities: string[] }
+  | { status: "error"; error: string };
 
 export type SetSharedFolderResult =
   | { status: "ok"; shared_folder: SharedFolder }
@@ -376,7 +397,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       db.rpc("project_member_names", { project_ids: [id] }),
       db
         .from("checklist_items")
-        .select("id, label, status, position, created_at, updated_at")
+        .select("id, label, status, position, created_at, updated_at, matched_capabilities")
         .eq("project_id", id)
         .order("position", { ascending: true }),
       // Which checklist items already have a Collaborate post attached —
@@ -503,6 +524,9 @@ export async function getProject(id: string): Promise<GetProjectResult> {
           collab_post_id: post?.id ?? null,
           collab_post_responses: post ? responseCounts.get(post.id) ?? 0 : 0,
           collab_post_title: post?.title ?? null,
+          matched_capabilities: Array.isArray(c.matched_capabilities)
+            ? (c.matched_capabilities as string[])
+            : [],
         };
       }),
       shared_folder: sharedFolderUrl
@@ -1089,15 +1113,24 @@ export async function addChecklistItem(
   }
   const nextPosition = ((lastRow?.position as number | undefined) ?? -1) + 1;
 
+  // Classify BEFORE the insert so matched_capabilities can ride along in
+  // one write, rather than an insert followed by a second update. Never
+  // throws — see classifyChecklistItem's own "safe fallback" contract: a
+  // classification hiccup here degrades to [] (Ask for help), it never
+  // blocks or fails the add itself.
+  const trimmedLabel = trimmed.slice(0, 300);
+  const matchedCapabilities = await classifyChecklistItem(trimmedLabel);
+
   const { data, error } = await db
     .from("checklist_items")
     .insert({
       project_id: projectId,
-      label: trimmed.slice(0, 300),
+      label: trimmedLabel,
       position: nextPosition,
       updated_by: user.id,
+      matched_capabilities: matchedCapabilities,
     })
-    .select("id, label, status, position, updated_at")
+    .select("id, label, status, position, updated_at, matched_capabilities")
     .single();
 
   if (error || !data) {
@@ -1118,6 +1151,9 @@ export async function addChecklistItem(
       collab_post_id: null,
       collab_post_responses: 0,
       collab_post_title: null,
+      matched_capabilities: Array.isArray(data.matched_capabilities)
+        ? (data.matched_capabilities as string[])
+        : [],
     },
   };
 }
@@ -1149,20 +1185,33 @@ export async function updateChecklistItemStatus(
   return { status: "ok" };
 }
 
-/** Edit an item's label. */
+/** Edit an item's label. Re-classifies against the capability vocabulary
+ *  (same as addChecklistItem — see classifyChecklistItem's own docstring
+ *  for why this runs here, once, rather than at read/click time): a
+ *  re-worded item may now match a service capability it didn't before, or
+ *  stop matching one it used to. Never blocks the rename on a
+ *  classification failure — that degrades to [] (Ask for help), same safe
+ *  fallback as everywhere else in this feature. */
 export async function updateChecklistItemLabel(
   projectId: string,
   itemId: string,
   label: string
-): Promise<ChecklistWriteResult> {
+): Promise<UpdateChecklistLabelResult> {
   const { user, db } = await requireCurrentUser();
 
   const trimmed = label.trim();
   if (!trimmed) return { status: "error", error: "A checklist item needs a label." };
 
+  const trimmedLabel = trimmed.slice(0, 300);
+  const matchedCapabilities = await classifyChecklistItem(trimmedLabel);
+
   const { error } = await db
     .from("checklist_items")
-    .update({ label: trimmed.slice(0, 300), updated_by: user.id })
+    .update({
+      label: trimmedLabel,
+      updated_by: user.id,
+      matched_capabilities: matchedCapabilities,
+    })
     .eq("id", itemId)
     .eq("project_id", projectId);
 
@@ -1170,7 +1219,7 @@ export async function updateChecklistItemLabel(
     console.error("updateChecklistItemLabel: update failed", error);
     return { status: "error", error: "Couldn't rename that item." };
   }
-  return { status: "ok" };
+  return { status: "ok", matched_capabilities: matchedCapabilities };
 }
 
 /** Move an item up or down one position, swapping with its neighbor. Moving

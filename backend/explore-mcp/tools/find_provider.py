@@ -1,13 +1,34 @@
 """
-tools/find_provider.py — "Find a provider" bridge (checklist item -> a
-teammate's external provider-catalog MCP server).
+tools/find_provider.py — checklist item <-> a teammate's external
+provider-catalog MCP server.
 
 Deliberately NOT registered as an @mcp.tool() and NOT reachable through
 explore()'s routing (see server.py) — this is a project-checklist-scoped
-action a human triggers explicitly ("Find a provider" beside "Ask for
-help"), not a general research tool other agents or explore() should ever
+action, not a general research tool other agents or explore() should ever
 reach for. A lit-search query like "PHGDH glioblastoma" wants papers, not
 a CRO.
+
+TWO SEPARATE OPERATIONS, ON PURPOSE — the classification LLM call and the
+catalog search are no longer one pipeline:
+
+  classify_checklist_item_async(item_text)
+    Free text -> 0-3 capability terms (the ONE place an LLM runs in this
+    module). Called ONCE per item, when it's created or its label is
+    edited (see frontend/lib/server/projects.ts) — the result is stored on
+    the checklist_items row (matched_capabilities column,
+    2026-08-19_checklist_matched_capabilities.sql) and reused from there
+    for the item's entire lifetime between edits. This is what keeps a
+    checklist page — and a "Find a service provider" click — at ZERO LLM
+    calls: the classification already happened at write time, not at
+    read/click time. See that migration's own comment for why store-once
+    beats "one LLM call per item on every page load" or "one batched LLM
+    call on every load" — both cost far more over a project's lifetime
+    than one call per add/edit.
+
+  find_providers_for_item_async(item_text, capabilities)
+    Given ALREADY-KNOWN capability terms (read from the stored column, not
+    computed here), queries the catalog. Zero LLM calls — pure catalog
+    search + trim + log.
 
 CATALOG SERVER CONTRACT — verified against the live server, not assumed:
   https://xazpggbzzclubdfjldam.supabase.co/functions/v1/catalog-mcp
@@ -32,17 +53,16 @@ CATALOG SERVER CONTRACT — verified against the live server, not assumed:
     from this module — see the feature's own spec: certification claims
     are self-reported and never registry-verified, and search_text only
     reaches name/description, not capabilities.
+  - `description` is forwarded VERBATIM in _format_provider below — never
+    generated, never rewritten. An invented sentence about a real company
+    under this platform's branding would be a liability; the catalog's own
+    words are the only words shown.
 
-ONE LLM CALL: only the free-text -> capability-terms mapping below runs a
-model. If nothing maps confidently, this returns matched_capabilities=[]
-and the frontend shows the Ask-for-help fallback instead of a guess.
-
-LOGGING IS THE ONLY PERSISTENCE HERE. This service writes nothing to
-Supabase (see server.py's own "read-only service" stance) and a provider
-catalog lookup isn't worth introducing a new table for on day one, so each
-lookup's item text, matched capability terms, and result count go to
-stdout at INFO — the one thing that's cheap now and impossible to
-backfill later.
+LOGGING IS THE ONLY PERSISTENCE HERE beyond the stored column above. This
+service writes nothing else to Supabase (see server.py's own "read-only
+service" stance), so each classification (item text, matched terms) and
+each provider lookup (item text, capability terms, result count) go to
+stdout at INFO — cheap now, impossible to backfill later.
 """
 
 from __future__ import annotations
@@ -150,8 +170,9 @@ async def list_capabilities_async() -> list[str]:
     stale-while-revalidate — the same "slowly-changing curated list" policy
     already used elsewhere in this service). Cached rather than hardcoded
     because the list is explicitly allowed to grow. A failed fetch with no
-    cached value propagates; find_provider_async treats that as "capability
-    mapping unavailable" and the HTTP route degrades to an empty result,
+    cached value propagates; classify_checklist_item_async treats that as
+    "capability mapping unavailable" and the HTTP route degrades to an
+    empty result (matched_capabilities=[], the safe Ask-for-help fallback),
     same resilience contract as the rest of this service."""
     return await cache.get_or_compute(
         "catalog:capabilities", _fetch_capabilities, TTL_TOOLS, STALE_TOOLS
@@ -254,14 +275,17 @@ _VERIFICATION_LABELS = {
 
 def _format_provider(raw: dict) -> dict:
     """Trim one catalog entity down to what the panel actually renders: name,
-    business type(s), capability tags, country/countries served, an honest
-    verification label, and the website link. Never forwards
-    certifications, products/services, evidence_urls, etc. — the panel
-    doesn't show them, and trimming here keeps this module the one place
-    that has to change if the catalog adds fields the panel doesn't want."""
+    ONE line of description taken VERBATIM from the catalog (never
+    generated, never rewritten — see module docstring), business type(s),
+    capability tags, country/countries served, an honest verification
+    label, and the website link. Never forwards certifications, products/
+    services, evidence_urls, etc. — the panel doesn't show them, and
+    trimming here keeps this module the one place that has to change if the
+    catalog adds fields the panel doesn't want."""
     verification = raw.get("verification")
     return {
         "name": raw.get("name"),
+        "description": raw.get("description"),
         "business_types": raw.get("business_types") or [],
         "capability_tags": raw.get("capability_tags") or [],
         "countries_served": raw.get("countries_served") or [],
@@ -297,40 +321,63 @@ async def find_providers_for_capabilities(
     return [_format_provider(r) for r in results if isinstance(r, dict)]
 
 
-async def find_provider_async(item_text: str) -> dict:
-    """Full pipeline for one checklist item: fetch/cached vocab -> map item
-    text to capability terms -> query the catalog -> trim results.
+async def classify_checklist_item_async(item_text: str) -> dict:
+    """Free text -> 0-3 capability terms. THE ONE place this module calls an
+    LLM. Called once, at checklist-item create/edit time (see
+    frontend/lib/server/projects.ts) — never at page-load or click time.
 
-    Returns {item_text, matched_capabilities, providers, count}.
-    matched_capabilities == [] IS the "nothing mapped confidently" signal —
-    never raises for that normal outcome, so the frontend can render the
-    Ask-for-help fallback rather than an error state.
+    Returns {item_text, matched_capabilities}. matched_capabilities == [] IS
+    the "needs a person / an internal task, not a service" signal — never
+    raises for that normal outcome. DOES raise on a genuine service failure
+    (vocab fetch failed, the LLM call itself failing outright) — the HTTP
+    route in server.py turns that into a degraded (matched_capabilities=[],
+    the safe fallback) response, same resilience contract as the rest of
+    this service.
 
-    DOES raise on a genuine service failure (catalog unreachable, vocab
-    fetch failed, the LLM call itself failing outright) — the HTTP route in
-    server.py is what turns that into a degraded-but-200 response, same
-    resilience contract as /api/explore and /api/project-agent.
-
-    Logs exactly once per lookup: item text, matched terms, result count —
-    the only persistence this feature has (see module docstring)."""
+    Logs once: item text, matched terms."""
     text = (item_text or "").strip()
     if not text:
-        return {"item_text": item_text, "matched_capabilities": [], "providers": [], "count": 0}
+        return {"item_text": item_text, "matched_capabilities": []}
 
     vocab = await list_capabilities_async()
     matched = _map_item_to_capabilities(text, vocab)
+    logger.info("find_provider classify: item=%r matched=%r", text, matched)
+    return {"item_text": item_text, "matched_capabilities": matched}
 
-    if not matched:
-        logger.info("find_provider lookup: item=%r matched=[] results=0", text)
+
+async def find_providers_for_item_async(item_text: str, capabilities: list[str]) -> dict:
+    """Given ALREADY-KNOWN capability terms (read from the checklist item's
+    stored matched_capabilities column, not computed here), query the
+    catalog. Zero LLM calls — this is what makes a "Find a service
+    provider" click cost nothing beyond a plain catalog search.
+
+    `item_text` is carried through for the one log line only (see below);
+    it plays no role in the search itself. `capabilities` is trusted as
+    already-vocabulary-valid (it was classified once by
+    classify_checklist_item_async and never hand-edited), but an empty list
+    short-circuits to zero results without even calling the catalog — the
+    frontend shouldn't be showing "Find a service provider" for an item
+    with no matched capabilities in the first place, so this is a defensive
+    backstop, not the primary gate.
+
+    Returns {item_text, matched_capabilities, providers, count}. Never
+    raises for the normal "no capabilities to search" case; DOES raise on a
+    genuine catalog failure, same resilience contract as everywhere else in
+    this service (the HTTP route degrades it to a 200).
+
+    Logs exactly once: item text, capability terms, result count — the
+    other half of this feature's only persistence (see module docstring)."""
+    if not capabilities:
+        logger.info("find_provider lookup: item=%r capabilities=[] results=0 (nothing to search)", item_text)
         return {"item_text": item_text, "matched_capabilities": [], "providers": [], "count": 0}
 
-    providers = await find_providers_for_capabilities(matched)
+    providers = await find_providers_for_capabilities(capabilities)
     logger.info(
-        "find_provider lookup: item=%r matched=%r results=%d", text, matched, len(providers)
+        "find_provider lookup: item=%r capabilities=%r results=%d", item_text, capabilities, len(providers)
     )
     return {
         "item_text": item_text,
-        "matched_capabilities": matched,
+        "matched_capabilities": capabilities,
         "providers": providers,
         "count": len(providers),
     }

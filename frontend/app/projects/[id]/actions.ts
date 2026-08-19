@@ -217,18 +217,26 @@ export async function updateChecklistStatusAction(
   }
 }
 
+// A rename re-classifies the item (see updateChecklistItemLabel's own
+// docstring) — matched_capabilities comes back so the client can update
+// which action (Ask for help / Find a service provider) it shows without a
+// full page reload.
+export type UpdateChecklistLabelActionResult =
+  | { ok: true; matched_capabilities: string[] }
+  | { ok: false; error: string };
+
 export async function updateChecklistLabelAction(
   projectId: string,
   itemId: string,
   label: string
-): Promise<ActionResult> {
+): Promise<UpdateChecklistLabelActionResult> {
   if (!projectId || !itemId) return { ok: false, error: "Missing item." };
 
   try {
     const result = await updateChecklistItemLabel(projectId, itemId, label);
     if (result.status !== "ok") return { ok: false, error: result.error };
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true };
+    return { ok: true, matched_capabilities: result.matched_capabilities };
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to edit the checklist." };
     console.error("updateChecklistLabelAction failed", e);

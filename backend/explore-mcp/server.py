@@ -19,11 +19,14 @@ episodes):
   • explore              — orchestration: reason over free text, route to tools, group results
 
 Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
-  • POST /api/find-provider — checklist item text -> capability terms (via a
-    small LLM mapping call, restricted to a fixed vocabulary) -> providers
-    from a teammate's external provider-catalog MCP server. Deliberately NOT
-    an MCP tool and NOT reachable through explore()'s routing — see
-    tools/find_provider.py's module docstring for why.
+  • POST /api/classify-checklist-item — checklist item text -> capability
+    terms (the ONE LLM call in this feature, restricted to a fixed
+    vocabulary). Called once at item create/edit time, not at page-load or
+    click time — see tools/find_provider.py's module docstring.
+  • POST /api/find-provider — ALREADY-KNOWN capability terms -> providers
+    from a teammate's external provider-catalog MCP server. Zero LLM calls.
+    Deliberately NOT an MCP tool and NOT reachable through explore()'s
+    routing — see tools/find_provider.py's module docstring for why.
   • POST /api/project-agent — the project agent. One search, two outputs:
     resources/checklist proposals for a human to review and accept (search ->
     relevance pass -> checklist proposal), AND a downloadable prior-art digest
@@ -74,7 +77,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
-from tools.find_provider import find_provider_async
+from tools.find_provider import classify_checklist_item_async, find_providers_for_item_async
 from tools.project_agent import run_project_agent_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
@@ -655,48 +658,100 @@ async def papers_http(request):
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
-@mcp.custom_route("/api/find-provider", methods=["POST"])
-async def find_provider_http(request):
-    """Plain-HTTP-only bridge for the checklist's "Find a provider" action —
-    see tools/find_provider.py's module docstring for the full pipeline and
-    the external catalog server's contract.
+@mcp.custom_route("/api/classify-checklist-item", methods=["POST"])
+async def classify_checklist_item_http(request):
+    """Plain-HTTP-only bridge to classify_checklist_item_async() — see
+    tools/find_provider.py's module docstring for why classification is its
+    own step, called once at checklist-item create/edit time, not at page-
+    load or click time.
 
     Deliberately NOT an MCP tool and NOT registered in explore()'s routing:
-    this is a project-checklist-scoped lookup a human triggers explicitly,
-    not a general research tool other agents or explore() should reach for.
+    this is a project-checklist-scoped classification a Server Action
+    triggers on write, not a general research tool other agents or
+    explore() should reach for.
 
       POST { "item_text": "<checklist item label>" } ->
-        { item_text, matched_capabilities, providers: [...], count }
+        { item_text, matched_capabilities }
 
     Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
-    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js proxy
-    route BEFORE it ever calls this route (getProject()'s RLS-backed gate) —
-    this service has no notion of Supabase sessions and cannot check
-    membership itself.
+    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js
+    Server Action BEFORE it ever calls this route (the write already went
+    through getProject()'s/requireCurrentUser()'s RLS-backed gate to get
+    this far) — this service has no notion of Supabase sessions and cannot
+    check membership itself.
 
-    Resilience: this sits someone else's uptime (a Supabase Edge Function
-    that cold-starts) in the request path. Never 500s the caller — on any
-    failure (catalog unreachable/slow, vocab fetch failed, LLM call failed)
-    this returns HTTP 200 with an explained-empty result, so the checklist
-    item and its Ask-for-help fallback keep working regardless."""
+    Resilience: never 500s the caller. On any failure (vocab fetch failed,
+    LLM call failed) this returns HTTP 200 with matched_capabilities=[] —
+    the SAFE FALLBACK the spec calls for: an item that fails to classify
+    reads as "needs a person", i.e. Ask for help, which always works."""
     try:
         body = await request.json()
     except Exception:
-        logger.exception("POST /api/find-provider: request body is not valid JSON")
+        logger.exception("POST /api/classify-checklist-item: request body is not valid JSON")
         body = {}
     item_text = body.get("item_text", "") if isinstance(body, dict) else ""
     if not isinstance(item_text, str) or not item_text.strip():
         return JSONResponse({"error": "Missing required field: item_text."}, status_code=400)
 
     try:
-        result = await find_provider_async(item_text)
+        result = await classify_checklist_item_async(item_text)
         return JSONResponse(result)
     except Exception as exc:
-        logger.exception("POST /api/find-provider failed: item_text=%r", item_text)
+        logger.exception("POST /api/classify-checklist-item failed: item_text=%r", item_text)
+        return JSONResponse(
+            {"item_text": item_text, "matched_capabilities": [], "error": str(exc)},
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/find-provider", methods=["POST"])
+async def find_provider_http(request):
+    """Plain-HTTP-only bridge to find_providers_for_item_async() — a pure
+    catalog search over ALREADY-KNOWN capability terms, zero LLM calls. See
+    tools/find_provider.py's module docstring for why this is split from
+    classification.
+
+    Deliberately NOT an MCP tool and NOT registered in explore()'s routing:
+    this is a project-checklist-scoped lookup a human triggers explicitly
+    ("Find a service provider"), not a general research tool other agents
+    or explore() should reach for.
+
+      POST { "item_text": "<checklist item label>", "capabilities": [...] } ->
+        { item_text, matched_capabilities, providers: [...], count }
+
+    `capabilities` comes from the checklist item's STORED
+    matched_capabilities column (see frontend/lib/server/projects.ts) —
+    this route does not classify, it only searches.
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js
+    proxy route BEFORE it ever calls this route (getProject()'s RLS-backed
+    gate) — this service has no notion of Supabase sessions and cannot
+    check membership itself.
+
+    Resilience: this sits someone else's uptime (a Supabase Edge Function
+    that cold-starts) in the request path. Never 500s the caller — on any
+    failure (catalog unreachable/slow) this returns HTTP 200 with an
+    explained-empty result, so the checklist item and its Ask-for-help
+    fallback keep working regardless."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/find-provider: request body is not valid JSON")
+        body = {}
+    item_text = body.get("item_text", "") if isinstance(body, dict) else ""
+    raw_caps = body.get("capabilities") if isinstance(body, dict) else None
+    capabilities = [c for c in raw_caps if isinstance(c, str)] if isinstance(raw_caps, list) else []
+
+    try:
+        result = await find_providers_for_item_async(item_text, capabilities)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/find-provider failed: item_text=%r capabilities=%r", item_text, capabilities)
         return JSONResponse(
             {
                 "item_text": item_text,
-                "matched_capabilities": [],
+                "matched_capabilities": capabilities,
                 "providers": [],
                 "count": 0,
                 "error": str(exc),

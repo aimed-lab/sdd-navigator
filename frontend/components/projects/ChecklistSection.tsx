@@ -42,7 +42,9 @@ import {
 } from "@/app/projects/[id]/actions";
 import type { ChecklistItem, ChecklistStatus } from "@/lib/server/projects";
 import { buildProjectContextLine } from "@/lib/projectTypes";
-import FindProviderPanel from "@/components/projects/FindProviderPanel";
+import ServiceProvidersSection, {
+  type SelectedServiceItem,
+} from "@/components/projects/ServiceProvidersSection";
 
 const STATUS_OPTIONS: { value: ChecklistStatus; label: string }[] = [
   { value: "not_yet", label: "Not yet" },
@@ -178,10 +180,13 @@ export default function ChecklistSection({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
 
-  // "Find a provider" — the second door beside "Ask for help" (see
-  // FindProviderPanel.tsx). At most one open at a time; toggling the same
-  // item closes it.
-  const [providerPanelItemId, setProviderPanelItemId] = useState<string | null>(null);
+  // ONE action per item (see the module-level rule below): the currently
+  // selected item for the shared Service providers section further down
+  // the page — never an inline per-item panel. Selecting a different item
+  // re-targets the same section rather than opening a second one.
+  const [selectedServiceItem, setSelectedServiceItem] = useState<SelectedServiceItem | null>(
+    null
+  );
 
   const setBusy = (id: string, busy: boolean) => {
     setBusyIds((prev) => {
@@ -273,7 +278,17 @@ export default function ChecklistSection({
     const res = await updateChecklistLabelAction(projectId, item.id, trimmed);
     setBusy(item.id, false);
 
-    if (!res.ok) {
+    if (res.ok) {
+      // The rename may have changed which action this item shows (a
+      // re-worded item can start or stop matching a service capability) —
+      // apply the freshly re-classified result rather than keeping the
+      // stale value from before the edit.
+      setList((prev) =>
+        prev.map((i) =>
+          i.id === item.id ? { ...i, matched_capabilities: res.matched_capabilities } : i
+        )
+      );
+    } else {
       setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, label: previous } : i)));
       setRowErrors((prev) => ({ ...prev, [item.id]: res.error }));
     }
@@ -300,6 +315,7 @@ export default function ChecklistSection({
   };
 
   return (
+    <>
     <section className="mb-20">
       <h2
         className={
@@ -337,9 +353,11 @@ export default function ChecklistSection({
             return (
               <div
                 key={item.id}
-                className={idx < list.length - 1 ? "border-b border-outline-variant/20" : ""}
+                className={
+                  "flex flex-col md:flex-row md:items-start gap-4 p-6 hover:bg-surface-container-low/30 transition-colors" +
+                  (idx < list.length - 1 ? " border-b border-outline-variant/20" : "")
+                }
               >
-              <div className="flex flex-col md:flex-row md:items-start gap-4 p-6 hover:bg-surface-container-low/30 transition-colors">
                 <StatusControl
                   status={item.status}
                   disabled={busy}
@@ -395,24 +413,40 @@ export default function ChecklistSection({
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
-                  {!ready && (
-                    <Link
-                      href={askForHelpHref(item)}
-                      className="font-label-sm text-label-sm text-primary hover:underline"
-                    >
-                      Ask for help
-                    </Link>
-                  )}
-                  {!ready && (
+                  {/* ONE action per item, chosen by what it actually needs —
+                      never both. matched_capabilities is the STORED result
+                      of classifying this item's label against the provider
+                      catalog's vocabulary (computed once at add/edit time,
+                      see lib/server/checklistClassify.ts): non-empty means
+                      this item needs a SERVICE (something you'd buy from a
+                      provider) → "Find a service provider"; empty — either
+                      because it needs a PERSON/internal task, or because
+                      classification hasn't run or failed (the safe
+                      fallback) — → "Ask for help". */}
+                  {!ready && item.matched_capabilities.length > 0 ? (
                     <button
                       type="button"
                       onClick={() =>
-                        setProviderPanelItemId((prev) => (prev === item.id ? null : item.id))
+                        setSelectedServiceItem({
+                          id: item.id,
+                          label: item.label,
+                          matchedCapabilities: item.matched_capabilities,
+                          askForHelpHref: askForHelpHref(item),
+                        })
                       }
                       className="font-label-sm text-label-sm text-primary hover:underline"
                     >
-                      Find a provider
+                      Find a service provider
                     </button>
+                  ) : (
+                    !ready && (
+                      <Link
+                        href={askForHelpHref(item)}
+                        className="font-label-sm text-label-sm text-primary hover:underline"
+                      >
+                        Ask for help
+                      </Link>
+                    )
                   )}
                   <div className="flex flex-col">
                     <button
@@ -446,19 +480,6 @@ export default function ChecklistSection({
                     <span className="material-symbols-outlined text-[18px]">delete</span>
                   </button>
                 </div>
-              </div>
-
-              {providerPanelItemId === item.id && (
-                <div className="px-6 pb-6">
-                  <FindProviderPanel
-                    projectId={projectId}
-                    itemId={item.id}
-                    itemLabel={item.label}
-                    askForHelpHref={askForHelpHref(item)}
-                    onClose={() => setProviderPanelItemId(null)}
-                  />
-                </div>
-              )}
               </div>
             );
           })}
@@ -505,5 +526,13 @@ export default function ChecklistSection({
         />
       )}
     </section>
+
+    {/* Dedicated, page-level results section — see ServiceProvidersSection's
+        own docstring for why this is one shared section, not a per-item
+        inline panel: only one item's results ever show at a time, and
+        clicking "Find a service provider" smooth-scrolls here rather than
+        expanding anything in place. */}
+    <ServiceProvidersSection projectId={projectId} selectedItem={selectedServiceItem} />
+    </>
   );
 }

@@ -1,5 +1,6 @@
-// Shapes returned by the Python backend's checklist "Find a provider" action
-// (via /api/find-provider -> backend/explore-mcp/tools/find_provider.py).
+// Shapes returned by the Python backend's checklist "Find a service
+// provider" action (via /api/find-provider ->
+// backend/explore-mcp/tools/find_provider.py).
 
 /** The catalog's own three verification states — "verified" means every
  *  claim was corroborated on the ENTITY'S OWN SITE, never independently
@@ -11,6 +12,10 @@ export type ProviderVerification = "verified" | "partially_verified" | "not_yet_
 
 export type Provider = {
   name: string | null;
+  // ONE line, taken VERBATIM from the catalog's own description field —
+  // never generated, never rewritten (see backend/explore-mcp/tools/
+  // find_provider.py's _format_provider). Render exactly as received.
+  description: string | null;
   business_types: string[];
   capability_tags: string[];
   countries_served: string[];
