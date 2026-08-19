@@ -18,7 +18,12 @@ episodes):
   • search_wiki          — internal podcast-derived episode wiki pages
   • explore              — orchestration: reason over free text, route to tools, group results
 
-Also exposes one plain-HTTP-only action (no MCP tool, no Supabase writes):
+Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
+  • POST /api/find-provider — checklist item text -> capability terms (via a
+    small LLM mapping call, restricted to a fixed vocabulary) -> providers
+    from a teammate's external provider-catalog MCP server. Deliberately NOT
+    an MCP tool and NOT reachable through explore()'s routing — see
+    tools/find_provider.py's module docstring for why.
   • POST /api/project-agent — the project agent. One search, two outputs:
     resources/checklist proposals for a human to review and accept (search ->
     relevance pass -> checklist proposal), AND a downloadable prior-art digest
@@ -69,6 +74,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
+from tools.find_provider import find_provider_async
 from tools.project_agent import run_project_agent_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
@@ -647,6 +653,56 @@ async def papers_http(request):
     except Exception as exc:
         logger.exception("GET /api/papers failed: query=%r limit=%r", query, limit)
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
+
+
+@mcp.custom_route("/api/find-provider", methods=["POST"])
+async def find_provider_http(request):
+    """Plain-HTTP-only bridge for the checklist's "Find a provider" action —
+    see tools/find_provider.py's module docstring for the full pipeline and
+    the external catalog server's contract.
+
+    Deliberately NOT an MCP tool and NOT registered in explore()'s routing:
+    this is a project-checklist-scoped lookup a human triggers explicitly,
+    not a general research tool other agents or explore() should reach for.
+
+      POST { "item_text": "<checklist item label>" } ->
+        { item_text, matched_capabilities, providers: [...], count }
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js proxy
+    route BEFORE it ever calls this route (getProject()'s RLS-backed gate) —
+    this service has no notion of Supabase sessions and cannot check
+    membership itself.
+
+    Resilience: this sits someone else's uptime (a Supabase Edge Function
+    that cold-starts) in the request path. Never 500s the caller — on any
+    failure (catalog unreachable/slow, vocab fetch failed, LLM call failed)
+    this returns HTTP 200 with an explained-empty result, so the checklist
+    item and its Ask-for-help fallback keep working regardless."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/find-provider: request body is not valid JSON")
+        body = {}
+    item_text = body.get("item_text", "") if isinstance(body, dict) else ""
+    if not isinstance(item_text, str) or not item_text.strip():
+        return JSONResponse({"error": "Missing required field: item_text."}, status_code=400)
+
+    try:
+        result = await find_provider_async(item_text)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/find-provider failed: item_text=%r", item_text)
+        return JSONResponse(
+            {
+                "item_text": item_text,
+                "matched_capabilities": [],
+                "providers": [],
+                "count": 0,
+                "error": str(exc),
+            },
+            status_code=200,
+        )
 
 
 def _validate_project_agent_body(body) -> str | None:

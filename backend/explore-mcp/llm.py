@@ -8,7 +8,7 @@ providers never touches call sites.
 
 Configuration (env):
     LLM_PROVIDER   provider id — "groq" (default) | "openai"
-    LLM_MODEL      model id     — default "llama-3.3-70b-versatile"
+    LLM_MODEL      model id     — default "openai/gpt-oss-120b"
     LLM_API_KEY    API key      — falls back to GROQ_API_KEY when unset
 
 groq and openai share the OpenAI chat-completions wire format (same request
@@ -19,12 +19,29 @@ one normalization path covers both. Any other provider raises NotImplementedErro
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_PROVIDER = "groq"
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
+# Groq retired llama-3.3-70b-versatile on 2026-08-16 — was the default here
+# and took down production plus a local test run until it was caught.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+
+# openai/gpt-oss-120b is a REASONING model: it spends hidden "thinking"
+# tokens before it writes the visible answer — billed the same as any other
+# completion token, on a service that's on a daily token cap. Confirmed by
+# direct measurement against the real explore() prompts: reasoning was ~30%
+# of total tokens per call at the default effort. reasoning_effort: "low"
+# cuts that sharply (measured ~90% reduction in reasoning tokens on the same
+# prompts) with no loss of JSON validity, for every call site here — scope
+# extraction, tool routing, the project agent's relevance/checklist passes,
+# and find_provider's capability mapping are all short, structurally simple
+# JSON-shaped tasks that never needed deep reasoning.
+REASONING_EFFORT = "low"
 
 
 # ── Normalized response types ────────────────────────────────────────────────
@@ -102,20 +119,54 @@ def complete(
     and tool messages on follow-up turns). When `tools` is provided the model may
     emit parallel tool calls; they arrive normalized on `LLMResponse.tool_calls`.
     """
-    provider = os.environ.get("LLM_PROVIDER", DEFAULT_PROVIDER).lower()
-    model = os.environ.get("LLM_MODEL", DEFAULT_MODEL)
+    # Sourced with `or`, not the two-arg os.environ.get(KEY, default) form:
+    # an explicitly-empty env var (LLM_PROVIDER="" / LLM_MODEL="") must fall
+    # back to the default exactly like an unset one. The two-arg .get() only
+    # applies its default when the var is entirely ABSENT — an empty string
+    # is still "set" as far as it's concerned, so it would pass "" straight
+    # through to the SDK/API call. This exact absent-vs-empty distinction
+    # already took the container down once via MCP_PORT; don't reintroduce
+    # it here (see server.py's EXPLORE_API_TOKEN for the same fix pattern).
+    provider = (os.environ.get("LLM_PROVIDER") or DEFAULT_PROVIDER).lower()
+    model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
     client = _build_client(provider, _resolve_api_key())
 
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-    if tools:
-        kwargs["tools"] = tools
-        kwargs["tool_choice"] = tool_choice
+    def build_kwargs(with_reasoning_effort: bool) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice
+        if with_reasoning_effort:
+            kwargs["reasoning_effort"] = REASONING_EFFORT
+        return kwargs
 
-    resp = client.chat.completions.create(**kwargs)
+    try:
+        resp = client.chat.completions.create(**build_kwargs(True))
+    except Exception as exc:
+        # MODEL-DOESN'T-SUPPORT-reasoning_effort FALLBACK — same self-healing
+        # retry as frontend/lib/server/promote/groqCall.ts. Confirmed
+        # directly against Groq: a non-reasoning model 400s this exact param
+        # with "reasoning_effort is not supported with this model" rather
+        # than ignoring it. If LLM_MODEL is ever swapped to a non-reasoning
+        # model (the same kind of unannounced-deprecation swap that broke
+        # this file once already — see DEFAULT_MODEL's own history above),
+        # sending reasoning_effort unconditionally would turn every call
+        # into a hard failure instead of degrading. One silent retry without
+        # the param — never a loop, and only for this specific rejection;
+        # any other exception (quota, network, a real bad request) still
+        # propagates unchanged.
+        status = getattr(exc, "status_code", None)
+        if status == 400 and "reasoning_effort" in str(exc):
+            logger.info(
+                "llm.complete: model=%r rejected reasoning_effort, retrying without it", model
+            )
+            resp = client.chat.completions.create(**build_kwargs(False))
+        else:
+            raise
     return _normalize(resp)
 
 

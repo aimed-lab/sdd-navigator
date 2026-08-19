@@ -1,7 +1,7 @@
 """
 extract.py
 ──────────
-Send transcript to Groq (llama-3.3-70b-versatile) and return structured JSON.
+Send transcript to Groq (openai/gpt-oss-120b) and return structured JSON.
 Retries once automatically if required fields are missing.
 
 Exposes:
@@ -13,6 +13,18 @@ import os
 import re
 
 from groq import Groq
+
+# openai/gpt-oss-120b is a REASONING model: it spends hidden "thinking"
+# tokens before writing the visible answer, and those tokens count against
+# the SAME max_tokens budget as the answer (confirmed by direct
+# reproduction against Groq: at the default reasoning effort, a
+# structurally similar JSON-extraction prompt burned its whole max_tokens
+# budget on reasoning alone, produced no content, and Groq's own validator
+# rejected the empty result). reasoning_effort="low" cuts reasoning token
+# usage sharply (measured ~90% reduction on a comparable prompt) and leaves
+# max_tokens=4_096 comfortably enough for this extraction task, which was
+# never reasoning-heavy to begin with.
+_REASONING_EFFORT = "low"
 
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -153,18 +165,43 @@ def extract_knowledge(transcript: str, metadata: dict, _retry: bool = True) -> d
         f"TRANSCRIPT:\n{trimmed}"
     )
 
-    print(f"   🤖 Sending to Groq (llama-3.3-70b-versatile)…")
+    print(f"   🤖 Sending to Groq (openai/gpt-oss-120b)…")
     print(f"   📤 Prompt size: {len(user_msg):,} chars")
 
-    response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": user_msg},
-        ],
-        temperature=0.1,
-        max_tokens=4_096,
-    )
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_msg},
+    ]
+    try:
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            temperature=0.1,
+            max_tokens=4_096,
+            reasoning_effort=_REASONING_EFFORT,
+        )
+    except Exception as exc:
+        # MODEL-DOESN'T-SUPPORT-reasoning_effort FALLBACK — same self-healing
+        # retry as frontend/lib/server/promote/groqCall.ts and
+        # backend/explore-mcp/llm.py. A non-reasoning model 400s this exact
+        # param with "reasoning_effort is not supported with this model"
+        # rather than ignoring it, so if this hardcoded model id is ever
+        # swapped to a non-reasoning one, sending reasoning_effort
+        # unconditionally would turn every run into a hard failure instead
+        # of degrading. One silent retry without the param — never a loop,
+        # and only for this specific rejection; any other exception (quota,
+        # network, a real bad request) still propagates unchanged.
+        status = getattr(exc, "status_code", None)
+        if status == 400 and "reasoning_effort" in str(exc):
+            print("   ⚠️  Model doesn't support reasoning_effort — retrying without it")
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=4_096,
+            )
+        else:
+            raise
 
     raw   = response.choices[0].message.content.strip()
     usage = response.usage

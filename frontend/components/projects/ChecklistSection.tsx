@@ -42,6 +42,7 @@ import {
 } from "@/app/projects/[id]/actions";
 import type { ChecklistItem, ChecklistStatus } from "@/lib/server/projects";
 import { buildProjectContextLine } from "@/lib/projectTypes";
+import FindProviderPanel from "@/components/projects/FindProviderPanel";
 
 const STATUS_OPTIONS: { value: ChecklistStatus; label: string }[] = [
   { value: "not_yet", label: "Not yet" },
@@ -176,6 +177,11 @@ export default function ChecklistSection({
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+
+  // "Find a provider" — the second door beside "Ask for help" (see
+  // FindProviderPanel.tsx). At most one open at a time; toggling the same
+  // item closes it.
+  const [providerPanelItemId, setProviderPanelItemId] = useState<string | null>(null);
 
   const setBusy = (id: string, busy: boolean) => {
     setBusyIds((prev) => {
@@ -331,11 +337,9 @@ export default function ChecklistSection({
             return (
               <div
                 key={item.id}
-                className={
-                  "flex flex-col md:flex-row md:items-start gap-4 p-6 hover:bg-surface-container-low/30 transition-colors" +
-                  (idx < list.length - 1 ? " border-b border-outline-variant/20" : "")
-                }
+                className={idx < list.length - 1 ? "border-b border-outline-variant/20" : ""}
               >
+              <div className="flex flex-col md:flex-row md:items-start gap-4 p-6 hover:bg-surface-container-low/30 transition-colors">
                 <StatusControl
                   status={item.status}
                   disabled={busy}
@@ -399,6 +403,17 @@ export default function ChecklistSection({
                       Ask for help
                     </Link>
                   )}
+                  {!ready && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setProviderPanelItemId((prev) => (prev === item.id ? null : item.id))
+                      }
+                      className="font-label-sm text-label-sm text-primary hover:underline"
+                    >
+                      Find a provider
+                    </button>
+                  )}
                   <div className="flex flex-col">
                     <button
                       type="button"
@@ -431,6 +446,19 @@ export default function ChecklistSection({
                     <span className="material-symbols-outlined text-[18px]">delete</span>
                   </button>
                 </div>
+              </div>
+
+              {providerPanelItemId === item.id && (
+                <div className="px-6 pb-6">
+                  <FindProviderPanel
+                    projectId={projectId}
+                    itemId={item.id}
+                    itemLabel={item.label}
+                    askForHelpHref={askForHelpHref(item)}
+                    onClose={() => setProviderPanelItemId(null)}
+                  />
+                </div>
+              )}
               </div>
             );
           })}

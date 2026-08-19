@@ -4,7 +4,8 @@
 // resolves and produces FOUR distinct LinkedIn post variants in ONE Groq call
 // (structured JSON — not four round-trips). Matches the existing Groq convention
 // used by lib/server/extractInterests.ts and lib/server/proposal/engine.ts: a
-// raw fetch() to the Groq chat-completions endpoint, model llama-3.3-70b-versatile,
+// raw fetch() to the Groq chat-completions endpoint, model from GROQ_MODEL
+// (default "openai/gpt-oss-120b" — see groqCall.ts's MODEL constant),
 // the GROQ_API_KEY env var, and tolerant JSON parsing of the response.
 //
 // generatePromoPosts THROWS on failure (missing key → ServerConfigError, Groq

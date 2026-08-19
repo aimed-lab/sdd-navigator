@@ -31,7 +31,31 @@ export class RateLimitedError extends Error {
 }
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const MODEL = "llama-3.3-70b-versatile";
+// Read from GROQ_MODEL (optional) with a hardcoded fallback, not a bare
+// hardcoded string — Groq retired llama-3.3-70b-versatile on 2026-08-16
+// with no warning, which broke this call in production for days before
+// anyone noticed. An env var means the NEXT deprecation is a config change,
+// not a code change + redeploy. `|| ` (not a two-arg default) so an
+// explicitly-empty GROQ_MODEL="" falls back too, same reasoning as
+// backend/explore-mcp/llm.py's LLM_MODEL.
+const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+
+// openai/gpt-oss-120b is a REASONING model: unlike llama-3.3-70b-versatile
+// (the previous default, not a reasoning model), it spends hidden "thinking"
+// tokens before it writes the visible answer, and those tokens count against
+// the SAME max_tokens budget as the answer. Confirmed by direct reproduction
+// against the real generate-extras prompt: at the DEFAULT reasoning effort,
+// the model's reasoning alone consumed the full max_tokens: 2048 budget,
+// truncated before any JSON was written, and Groq's response_format:
+// json_object validator rejected the empty result with a 400
+// json_validate_failed (failed_generation: "") — this is EXACTLY the error
+// that was showing up as a 503 in production after the model swap.
+// reasoning_effort: "low" cuts reasoning tokens roughly 5x on the same
+// prompt (244 -> 44 in the reproduction) and leaves the answer comfortably
+// inside budget without changing max_tokens per caller. Every Promote call
+// here is a short, structurally simple generation task (a JSON object of a
+// few paragraphs) that never needed deep reasoning in the first place.
+const REASONING_EFFORT = "low";
 
 /** How long to wait before the single retry. Prefers Groq's own
  *  `x-ratelimit-reset-tokens` / `retry-after` hint, clamped so a request can
@@ -80,25 +104,53 @@ export async function groqComplete(opts: {
 
   const useJson = opts.json ?? true;
 
-  const body = JSON.stringify({
-    model: MODEL,
-    messages: [
-      { role: "system", content: opts.system },
-      { role: "user", content: opts.user },
-    ],
-    temperature: opts.temperature ?? 0.7,
-    max_tokens: opts.maxTokens,
-    ...(useJson ? { response_format: { type: "json_object" } } : {}),
-  });
+  // Built as a function, not a fixed string: `withReasoningEffort` toggles
+  // off for the fallback retry below, when the currently-configured MODEL
+  // turns out not to be a reasoning model after all (see that retry's own
+  // comment). Everything else about the request is identical either way.
+  const buildBody = (withReasoningEffort: boolean) =>
+    JSON.stringify({
+      model: MODEL,
+      ...(withReasoningEffort ? { reasoning_effort: REASONING_EFFORT } : {}),
+      messages: [
+        { role: "system", content: opts.system },
+        { role: "user", content: opts.user },
+      ],
+      temperature: opts.temperature ?? 0.7,
+      max_tokens: opts.maxTokens,
+      ...(useJson ? { response_format: { type: "json_object" } } : {}),
+    });
 
-  const send = () =>
+  const send = (body: string) =>
     fetch(GROQ_URL, {
       method: "POST",
       headers: { Authorization: `Bearer ${groqKey}`, "Content-Type": "application/json" },
       body,
     });
 
-  let res = await send();
+  let useReasoningEffort = true;
+  let res = await send(buildBody(useReasoningEffort));
+
+  // MODEL-DOESN'T-SUPPORT-reasoning_effort FALLBACK. Confirmed directly
+  // against Groq: a model without reasoning support 400s this exact param
+  // with `"reasoning_effort" is not supported with this model` rather than
+  // ignoring it — so if GROQ_MODEL is ever swapped to a non-reasoning model
+  // (the same kind of unannounced-deprecation swap that broke this file
+  // once already), sending reasoning_effort unconditionally would turn
+  // every call into a hard failure instead of degrading. One silent retry
+  // without the param, same "retry once, never a loop" discipline as the
+  // 429/5xx branch below — this is a config mismatch to route around, not
+  // a transient failure to log loudly about. useReasoningEffort flips to
+  // false for the REST of this call (including the 429/5xx retry just
+  // below) so a later retry can't reintroduce the same rejected param.
+  if (res.status === 400) {
+    const cloned = res.clone();
+    const text = await cloned.text().catch(() => "");
+    if (text.includes("reasoning_effort")) {
+      useReasoningEffort = false;
+      res = await send(buildBody(useReasoningEffort));
+    }
+  }
 
   if (res.status === 429 || res.status >= 500) {
     const wait = retryDelayMs(res);
@@ -106,7 +158,7 @@ export async function groqComplete(opts: {
       `Groq ${res.status} (${opts.label}); retrying once in ${wait}ms`
     );
     await sleep(wait);
-    res = await send();
+    res = await send(buildBody(useReasoningEffort));
   }
 
   if (!res.ok) {
