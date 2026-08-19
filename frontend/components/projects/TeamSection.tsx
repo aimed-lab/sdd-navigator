@@ -268,7 +268,17 @@ export default function TeamSection({
                   )}
                   {pending && (
                     <div className="font-body-sm text-body-sm text-secondary">
-                      Awaiting invitation acceptance
+                      {/* Honest, not "Awaiting invitation acceptance" — no
+                          invitation is sent and there's nothing to accept.
+                          This is added-by-email, unlinked to an account
+                          until someone signs in with that exact address
+                          (addProjectMember's DB-side lookup links it
+                          immediately if the account already exists;
+                          claim_pending_project_memberships() links it on
+                          sign-in/next projects-list load otherwise — see
+                          lib/server/projects.ts). */}
+                      Hasn&apos;t signed in yet — they&apos;ll be linked once they sign in with
+                      this exact email.
                     </div>
                   )}
                 </div>

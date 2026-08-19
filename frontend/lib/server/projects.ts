@@ -280,6 +280,24 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
   const viewer = await getCurrentUser();
   if (!viewer) return { status: "ok", projects: [] };
 
+  // RECONCILIATION: claim any project_members row still unlinked
+  // (user_id IS NULL) whose email matches THIS caller's own verified
+  // email, before reading "my projects" below — RLS on `projects` gates
+  // visibility through project_members.user_id = auth.uid(), so an
+  // unclaimed row is invisible here no matter how long ago it was added.
+  // See 2026-08-19_link_existing_accounts.sql for the full reasoning: this
+  // is the backstop for the reverse-ordering case (added while they had no
+  // account) and for anything addProjectMember's own insert-time lookup
+  // ever misses — it's what lets this feature stop depending on signup
+  // timing at all. IDEMPOTENT and CHEAP (a single UPDATE over a partial
+  // index of just the still-pending rows) — safe to call on every load.
+  // Best-effort: a failed claim here should degrade to "maybe still shows
+  // as pending this load" rather than blocking the whole page.
+  const { error: claimError } = await db.rpc("claim_pending_project_memberships");
+  if (claimError) {
+    console.error("listMyProjects: claim_pending_project_memberships failed", claimError);
+  }
+
   const { data, error } = await db
     .from("projects")
     .select(PROJECT_SELECT)
@@ -613,7 +631,20 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
  *  with an existing lowercase row and fail as a duplicate anyway, just with
  *  a less honest-looking value stored; normalizing here means the stored
  *  value and the constraint agree, and the 23505 case below reads as
- *  "already a member" rather than a raw constraint-name error. */
+ *  "already a member" rather than a raw constraint-name error.
+ *
+ *  LINKS AN EXISTING ACCOUNT IMMEDIATELY, not just at signup.
+ *  handle_new_user() (2026-08-04_projects.sql) only claims a pending row
+ *  when its email signs up AFTER being added — the common case is the
+ *  reverse, someone already has an account. find_account_id_by_email_for_
+ *  project (2026-08-19_link_existing_accounts.sql) looks that up in the
+ *  database (never by the app reading auth.users directly) and, if found,
+ *  the row is inserted ALREADY linked — no waiting on a trigger, no
+ *  "Awaiting invitation acceptance" limbo for someone who could see the
+ *  project the moment they're added. A lookup failure (RPC error, no
+ *  match) degrades to the old pending-by-email behavior rather than
+ *  blocking the add — the reconciliation in listMyProjects() (see
+ *  claim_pending_project_memberships) is the backstop if this ever misses. */
 export async function addProjectMember(
   projectId: string,
   email: string
@@ -629,6 +660,20 @@ export async function addProjectMember(
   const normalized = email.trim().toLowerCase();
   if (!normalized) return { status: "error", error: "An email address is required." };
 
+  let existingUserId: string | null = null;
+  const { data: lookupData, error: lookupError } = await db.rpc(
+    "find_account_id_by_email_for_project",
+    { p_project_id: projectId, p_email: normalized }
+  );
+  if (lookupError) {
+    // Degrade, don't block — same stance as everywhere else in this file.
+    // Worst case the row is added pending and the projects-list
+    // reconciliation links it the next time the invitee loads their list.
+    console.error("addProjectMember: existing-account lookup failed", lookupError);
+  } else {
+    existingUserId = (lookupData as string | null) ?? null;
+  }
+
   // The inserter (the lead) is already a member of this project, so the
   // RETURNING read below is evaluated against a row the caller can already
   // see — unlike create_project_with_lead's bootstrapping problem, there is
@@ -640,6 +685,7 @@ export async function addProjectMember(
       email: normalized,
       role: "member",
       added_by: user.id,
+      user_id: existingUserId,
     })
     .select("id, email, user_id, role, created_at")
     .single();
@@ -660,9 +706,10 @@ export async function addProjectMember(
       user_id: (data.user_id as string | null) ?? null,
       role: data.role as "lead" | "member",
       created_at: data.created_at as string,
-      // Always freshly inserted with no user_id (added by email only) — a
-      // brand-new row is pending by construction, so there is no identity
-      // to resolve yet. Not a call to project_member_names() needed here.
+      // Linked immediately when an existing account was found above; name/
+      // profile_slug aren't resolved here either way (a fresh add has no
+      // caller-visible reason to also call project_member_names() for one
+      // row — the next full project_members read does that as usual).
       name: null,
       profile_slug: null,
     },

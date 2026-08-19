@@ -180,17 +180,59 @@ async def list_capabilities_async() -> list[str]:
 
 
 # ── Step 1: map free text onto 0-3 vocabulary terms ────────────────────────────
-
+#
+# THE QUESTION IS "WOULD A TEAM PAY AN EXTERNAL PROVIDER TO DO THIS", NOT
+# "DOES THIS TEXT MENTION A TECHNIQUE THE CATALOG COVERS". The earlier
+# version of this prompt asked the model to match vocabulary terms against
+# the item text, which is exactly the failure mode a live project (NLRP3)
+# surfaced: every one of five agent-generated items got a service match,
+# including "Quantify GSDMD and IL1B expression in EXISTING scRNA-seq
+# biopsy data" and "Perform retrospective analysis of the cohort" — the
+# team's OWN analysis of data they already have, matched purely because
+# "scRNA-seq" is a technique word the catalog also covers. A checklist item
+# naming a method is not evidence the team wants to buy that method from a
+# vendor; it's usually evidence of the opposite — they're describing the
+# work they're about to do themselves.
 _MAPPING_SYSTEM_TEMPLATE = (
-    "You map a project checklist item's free text onto capability tags from a "
-    "FIXED vocabulary. Only use terms from this exact list, verbatim — never "
+    "You decide whether a project checklist item describes work a team would "
+    "PAY AN EXTERNAL PROVIDER OR VENDOR TO DO — a SERVICE.\n\n"
+    "This is NOT a keyword match against a vocabulary list. Mentioning a "
+    "technique, assay, or method by name does NOT by itself make something a "
+    "service — a team writes checklist items describing their OWN planned "
+    "work using exactly that kind of technical language. The question is "
+    "always: would this specific team realistically hire an outside "
+    "provider to do this piece of work, or is this something they're doing "
+    "themselves?\n\n"
+    "NOT a service (return capabilities: [] for these), even when the text "
+    "names a technique the vocabulary covers:\n"
+    "  - Analysing, quantifying, or integrating data the team ALREADY HAS. "
+    'e.g. "Quantify GSDMD and IL1B expression in existing scRNA-seq biopsy '
+    'data", "Perform retrospective analysis of the cohort", "Integrate the '
+    'dataset to assess PANX1-P2X7 signaling" — this is the team\'s own '
+    "analysis of their own data, not something to outsource.\n"
+    "  - A decision, an open question, a write-up, a plan, or a review — "
+    '"Decide on the primary endpoint", "Draft the manuscript", "Review the '
+    'literature for precedent".\n'
+    "  - Recruiting a person, a collaborator, or a co-investigator — that "
+    "needs a PERSON, never a vendor.\n\n"
+    "Possibly a service:\n"
+    "  - GENERATING data, material, or a model system the team does NOT "
+    'already have — "Generate GBM organoids with a CRISPR knockout", "Run '
+    'in vivo efficacy studies", "GMP-manufacture the lead compound".\n'
+    "  - Work that needs a facility, instrument, or capability the team "
+    "does not have in-house.\n\n"
+    "Only use terms from this exact fixed vocabulary, verbatim — never "
     "invent a term, never substitute a close-but-absent one:\n{vocab}\n\n"
     'Return ONLY a JSON object: {{"capabilities": [...], "confident": true|false}}.\n'
-    '"capabilities" is 0-3 terms from the list above that the item is clearly '
-    'asking for. Set "confident": false and leave "capabilities" empty if '
-    "nothing in the list is a clear match for what the item is asking for — do "
-    "not guess a near-miss just to return something. Output JSON only — no "
-    "prose, no code fences."
+    '"capabilities" is 0-3 terms from the list above, and ONLY when this '
+    "item clearly describes work to buy from an outside provider.\n\n"
+    "WHEN IN DOUBT, RETURN NOTHING. Leaving \"capabilities\" empty (and "
+    '"confident": false) is the CORRECT, SAFE default whenever it\'s '
+    "ambiguous, whenever the item reads as the team's own analysis, or "
+    "whenever you are not confident — missing a real service costs "
+    "nothing (the team still sees Ask for help, which always works), but a "
+    "wrong service match is visibly, embarrassingly wrong to the team. "
+    "Bias toward NOT a service. Output JSON only — no prose, no code fences."
 )
 
 
@@ -233,9 +275,39 @@ def _try_map_once(item_text: str, vocab: list[str]) -> list[str] | None:
     return matched
 
 
+# CODE-LEVEL GROUNDING GATE — same "prompt asks, code enforces" pattern as
+# tools/project_agent.py's checklist grounding gate. The prompt above
+# already instructs the model to treat "analysing data we already have" as
+# NOT a service, but a prompt instruction is advisory, not a guarantee —
+# the NLRP3 failure (see _MAPPING_SYSTEM_TEMPLATE's own comment) came from
+# the model latching onto a technique word and discounting the surrounding
+# "existing" qualifier. This is a small, EXPLICIT, closed list of phrases
+# (not a broad heuristic) checked verbatim, case-insensitive, against the
+# raw item text: if any is present, the classification is dropped to []
+# regardless of what the model returned, full stop. False negatives here
+# (a genuine service item that happens to also contain one of these words)
+# cost nothing — Ask for help still works — which is exactly the same
+# bias-toward-NOT-a-service the prompt itself asks for, just enforced in
+# code instead of trusted to hold.
+_ALREADY_HAVE_SIGNALS = (
+    "existing",
+    "our own",
+    "we have",
+    "previously collected",
+    "published",
+    "retrospective",
+)
+
+
+def _has_already_have_signal(item_text: str) -> bool:
+    text = item_text.lower()
+    return any(signal in text for signal in _ALREADY_HAVE_SIGNALS)
+
+
 def _map_item_to_capabilities(item_text: str, vocab: list[str]) -> list[str]:
     """Free text -> 0-3 terms from `vocab`. Retry-once-on-unusable-JSON, same
-    pattern as tools/project_agent.py's relevance/checklist passes.
+    pattern as tools/project_agent.py's relevance/checklist passes, THEN the
+    already-have-it grounding gate above.
 
     Never raises for a bad or low-confidence LLM reply — returns [] (the "say
     so, offer Ask for help instead" signal) rather than guessing. An actual
@@ -244,15 +316,27 @@ def _map_item_to_capabilities(item_text: str, vocab: list[str]) -> list[str]:
     route should log and degrade on distinctly, not a modeling ambiguity."""
     if not vocab:
         return []
+
+    def _gated(caps: list[str]) -> list[str]:
+        if caps and _has_already_have_signal(item_text):
+            logger.info(
+                "find_provider: grounding gate dropped %r for item=%r "
+                "(already-have-it signal present)",
+                caps,
+                item_text,
+            )
+            return []
+        return caps
+
     out = _try_map_once(item_text, vocab)
     if out is not None:
-        return out
+        return _gated(out)
     logger.warning("find_provider: capability-mapping JSON unusable (attempt 1/2), retrying once")
     time.sleep(_JSON_RETRY_BACKOFF_SEC)
     out = _try_map_once(item_text, vocab)
     if out is not None:
         logger.info("find_provider: capability-mapping JSON usable on retry (attempt 2/2)")
-        return out
+        return _gated(out)
     logger.warning(
         "find_provider: capability-mapping JSON unusable (attempt 2/2) — treating as no match"
     )
