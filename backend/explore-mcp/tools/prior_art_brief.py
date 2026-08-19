@@ -255,8 +255,11 @@ def render_digest(
     own status-filtered search_trials_async calls (see trial_query() above for
     the query they should have been run with).
 
-    Returns {markdown, generated_at, counts} — same shape the old standalone
-    endpoint returned, so the frontend's handling of it doesn't change."""
+    Returns {markdown, generated_at, counts, goal_text} — the first three are
+    the same shape the old standalone endpoint returned, so the frontend's
+    rendering of it doesn't change; goal_text was added so the object is
+    self-contained for persistence (see database/migrations/
+    2026-08-19_project_digests.sql)."""
     papers, papers_query = section_items_and_query(sections, "search_papers")
     tools_items, tools_query = section_items_and_query(sections, "search_tools")
     datasets_items, datasets_query = section_items_and_query(sections, "search_datasets")
@@ -411,4 +414,11 @@ def render_digest(
             "genesets": len(pager_items),
             "grants": len(grants_items),
         },
+        # The goal text this digest was generated from — carried on the
+        # digest itself (not just passed alongside it) so a caller that
+        # persists this object (frontend/lib/server/projects.ts's
+        # saveProjectDigest(), see database/migrations/
+        # 2026-08-19_project_digests.sql) has everything it needs in one
+        # place, without threading goal_text through a second parameter.
+        "goal_text": goal_text,
     }

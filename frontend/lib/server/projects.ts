@@ -129,6 +129,21 @@ export type SharedFolder = {
   set_at: string;
 };
 
+// The project agent's persisted prior-art digest
+// (2026-08-19_project_digests.sql) — one row per project, replaced on each
+// run, never a history. Only the digest is persisted, never the proposed
+// resources/checklist items (see that migration's own header for why: a
+// stale proposal would confuse, a stale digest is still a useful,
+// honestly-dated research summary). `generated_at` is the BACKEND's own
+// generation timestamp, not when the row was saved — that's what "the date
+// it was generated" on the frontend actually shows.
+export type ProjectDigest = {
+  markdown: string;
+  generated_at: string;
+  counts: Record<string, number>;
+  goal_text: string;
+};
+
 export type ProjectDetail = {
   id: string;
   name: string;
@@ -159,6 +174,11 @@ export type ProjectDetail = {
   proposal: ProjectProposal | null;
   checklist: ChecklistItem[];
   shared_folder: SharedFolder | null;
+  // null when the agent has never been run for this project, or the run
+  // never produced a digest (search failed entirely — see
+  // run_project_agent_async's own docstring), or the save itself failed
+  // (best-effort — see saveProjectDigest below).
+  digest: ProjectDigest | null;
 };
 
 export type GetProjectResult =
@@ -391,7 +411,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   }
   if (!projectRow) return { status: "not_found" };
 
-  const [membersRes, proposalRes, namesRes, checklistRes, checklistPostsRes, interestCountsRes] =
+  const [membersRes, proposalRes, namesRes, checklistRes, checklistPostsRes, interestCountsRes, digestRes] =
     await Promise.all([
       db
         .from("project_members")
@@ -429,6 +449,15 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       // uses — connection_requests SELECT is own-rows-only, so counting
       // responses cannot be done with a normal query.
       db.rpc("collab_post_interest_counts"),
+      // The project agent's persisted digest (2026-08-19_project_digests.sql)
+      // — one row per project, PRIMARY KEY project_id, so a plain
+      // .eq().maybeSingle() is exact, no ordering/limit needed the way
+      // proposal's "most recent of several" lookup above does.
+      db
+        .from("project_digests")
+        .select("markdown, generated_at, counts, goal_text")
+        .eq("project_id", id)
+        .maybeSingle(),
     ]);
 
   if (membersRes.error) {
@@ -442,6 +471,13 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   if (checklistRes.error) {
     console.error("getProject: checklist_items query failed", checklistRes.error);
     return { status: "error", error: "Couldn't load this project's checklist." };
+  }
+  // Degrades to null on failure, unlike the hard-fails above — persistence
+  // is a convenience, not a dependency (per the digest feature's own
+  // spec): a digest-read hiccup should render the page without a stored
+  // digest, never take down the whole project detail page over it.
+  if (digestRes.error) {
+    console.error("getProject: project_digests query failed", digestRes.error);
   }
   // Degrades to an empty map on failure — same stance as collab.ts's
   // ownerMap(): a names lookup failing should leave rows showing email,
@@ -552,6 +588,14 @@ export async function getProject(id: string): Promise<GetProjectResult> {
             url: sharedFolderUrl,
             set_by_name: sharedFolderSetBy ? names.get(sharedFolderSetBy)?.name ?? null : null,
             set_at: sharedFolderSetAt as string,
+          }
+        : null,
+      digest: digestRes.data
+        ? {
+            markdown: digestRes.data.markdown as string,
+            generated_at: digestRes.data.generated_at as string,
+            counts: (digestRes.data.counts as Record<string, number> | null) ?? {},
+            goal_text: digestRes.data.goal_text as string,
           }
         : null,
     },
@@ -1396,6 +1440,59 @@ export async function setSharedFolder(
   }
 
   return { status: "ok", shared_folder: { url: safe, set_by_name: setByName, set_at: setAt } };
+}
+
+// ── project agent digest ──────────────────────────────────────────────────────
+
+export type SaveDigestResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Persist the project agent's digest — called ONLY from
+ *  app/api/project-agent/status/route.ts, server-side, once a run's status
+ *  poll comes back done with a digest. There is deliberately no client-
+ *  reachable action for this: the browser never posts a digest back, it
+ *  only ever receives one from the backend via that same route (see this
+ *  feature's own spec — "that's a write path we don't need").
+ *
+ *  ONE ROW PER PROJECT, REPLACED ON EACH RUN: upsert on the project_id
+ *  primary key (2026-08-19_project_digests.sql), never an insert that
+ *  accumulates history.
+ *
+ *  ANY MEMBER may call this — same "any member" gate as checklist writes,
+ *  enforced by RLS ("Project digests: member insert/update"), not an
+ *  app-layer isCallerLead check; running the agent isn't lead-gated either.
+ *  A caller who isn't a member gets a normal RLS-denied write (0 rows
+ *  affected / a 42501), which surfaces here as a plain error result — this
+ *  function does not itself re-verify membership, exactly like
+ *  addChecklistItem() above relies on "Checklist items: member insert".
+ *
+ *  BEST-EFFORT BY DESIGN: the caller (the status route) MUST treat any
+ *  non-"ok" result as "log it, still return the run's result to the
+ *  client" — persistence is a convenience, not a dependency. A failed save
+ *  must never fail or even delay the agent run itself. */
+export async function saveProjectDigest(
+  projectId: string,
+  digest: { markdown: string; generated_at: string; counts: Record<string, number>; goal_text: string }
+): Promise<SaveDigestResult> {
+  const { db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("project_digests")
+    .upsert(
+      {
+        project_id: projectId,
+        markdown: digest.markdown,
+        generated_at: digest.generated_at,
+        counts: digest.counts,
+        goal_text: digest.goal_text,
+      },
+      { onConflict: "project_id" }
+    );
+
+  if (error) {
+    console.error("saveProjectDigest: upsert failed", error);
+    return { status: "error", error: "Couldn't save the digest." };
+  }
+  return { status: "ok" };
 }
 
 // ── delete ───────────────────────────────────────────────────────────────────

@@ -193,6 +193,8 @@ export default async function ProjectDetailPage({
         projectId={project.id}
         projectName={project.name}
         isChallenge={!!project.challenge_key}
+        storedDigest={project.digest}
+        exploreHref={exploreHref}
       />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />

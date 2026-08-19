@@ -16,12 +16,16 @@
 // (/api/project-agent/start + /api/project-agent/status poll), one `result`
 // carrying both `digest` and the resource/checklist proposals.
 //
-// This component NEVER persists anything on its own — every write goes
-// through the same saveToProjectAction/addChecklistItemAction Server Actions
-// the Resources and Checklist sections already use, and only once the user
-// hits Accept. The digest is never persisted anywhere; Download .md is the
-// only way to keep a copy (see CLAUDE.md-adjacent note: it belongs in the
-// project wiki once that exists, not blocked on here).
+// This component NEVER persists anything on its own — every write for the
+// proposed resources/checklist goes through the same saveToProjectAction/
+// addChecklistItemAction Server Actions the Resources and Checklist
+// sections already use, and only once the user hits Accept. The DIGEST is
+// the one exception, and it's saved server-side, not by this component:
+// app/api/project-agent/status/route.ts persists it the moment a run comes
+// back done (see 2026-08-19_project_digests.sql) — this component only
+// ever reads it back, via the `storedDigest` prop (the page's own
+// getProject() read) on load, or via a fresh `result.digest` after a live
+// run. One row per project, replaced on each run, never a history.
 //
 // ANY MEMBER may run this — it's read-only against Supabase (the backend
 // route never writes), and accepting reuses the same any-member-gated
@@ -54,6 +58,7 @@ type Digest = {
   markdown: string;
   generated_at: string;
   counts: Record<string, number>;
+  goal_text?: string;
 };
 
 type AgentResult = {
@@ -73,6 +78,13 @@ type AgentResult = {
   // pass succeeding: it never calls an LLM, so it's still present even when
   // analysis_failed is true.
   digest: Digest | null;
+  // Every DISTINCT item the search actually turned up, BEFORE the
+  // already-saved exclusion and before the MAX_CANDIDATES cap (see
+  // _flatten_candidates' total_found in tools/project_agent.py).
+  // selected_items is capped at 8 by design — this is what backs "Showing
+  // 8 of 47 found" below, instead of leaving the rest of what was found
+  // implicit in a sources table with nothing beneath it.
+  candidates_found?: number;
   tools_called: string[];
   warnings: string[];
   // Set when the relevance pass itself failed (e.g. hit a quota). Per Chen's
@@ -300,6 +312,8 @@ export default function AgentSection({
   projectId,
   projectName,
   isChallenge = false,
+  storedDigest = null,
+  exploreHref,
 }: {
   projectId: string;
   projectName: string;
@@ -311,6 +325,16 @@ export default function AgentSection({
   // happens server-side (the backend never runs the checklist step, and
   // never sends checklist copy for a challenge project's summary line).
   isChallenge?: boolean;
+  // The persisted digest from a PRIOR run (getProject()'s own read of
+  // project_digests — see lib/server/projects.ts), shown collapsed on page
+  // load. null when the agent has never been run for this project, or its
+  // last run never produced/saved one. A fresh `result.digest` from a LIVE
+  // run in this session always takes over the display — see the render
+  // logic below (`!result && storedDigest`).
+  storedDigest?: Digest | null;
+  // "Explore for this project" — where "Showing 8 of 47 found" links, so a
+  // capped-by-design proposal doesn't read as "this is all there is."
+  exploreHref: string;
 }) {
   const router = useRouter();
 
@@ -322,6 +346,11 @@ export default function AgentSection({
   const [result, setResult] = useState<AgentResult | null>(null);
   const [selectedResourceIds, setSelectedResourceIds] = useState<Set<string>>(new Set());
   const [selectedChecklistLabels, setSelectedChecklistLabels] = useState<Set<string>>(new Set());
+
+  // Collapsed by default, per the spec: a 30KB document inline on a page
+  // that already has six sections is clutter, not a convenience. Download
+  // is the primary action; expanding to read it inline is opt-in.
+  const [storedDigestExpanded, setStoredDigestExpanded] = useState(false);
 
   const [accepting, setAccepting] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
@@ -374,7 +403,14 @@ export default function AgentSection({
 
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(`/api/project-agent/status?job_id=${encodeURIComponent(jobId!)}`);
+        // project_id rides along so the status route can persist the
+        // digest server-side the moment this run comes back done — see
+        // that route's own comment. It plays no role in reading progress;
+        // membership for the SAVE is enforced by RLS on that route's write,
+        // not by anything checked here.
+        const res = await fetch(
+          `/api/project-agent/status?job_id=${encodeURIComponent(jobId!)}&project_id=${encodeURIComponent(projectId)}`
+        );
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Lost track of the agent's progress.");
 
@@ -418,12 +454,14 @@ export default function AgentSection({
   // FILENAME: {project-slug}-digest-{YYYY-MM-DD}.md — sorts chronologically
   // within a project's own downloads folder (same project, several runs,
   // several dates) and reads as one phrase, e.g.
-  // "atxn2-lowering-in-als-digest-2026-08-17.md".
-  const downloadDigest = () => {
-    if (!result?.digest) return;
-    const date = new Date().toISOString().slice(0, 10);
+  // "atxn2-lowering-in-als-digest-2026-08-17.md". Dated from the digest's
+  // OWN generated_at when downloading a stored one (accurate for a digest
+  // from a prior session), falling back to today for a fresh live result
+  // (generated_at and "now" are the same moment there anyway).
+  const downloadDigest = (digest: Digest) => {
+    const date = (digest.generated_at || new Date().toISOString()).slice(0, 10);
     const filename = `${slugify(projectName)}-digest-${date}.md`;
-    const blob = new Blob([result.digest.markdown], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([digest.markdown], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -432,6 +470,20 @@ export default function AgentSection({
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  };
+
+  // "Aug 19, 2026" — same shape as everywhere else in this app that dates a
+  // moment for a human, not a machine.
+  const formatDigestDate = (iso: string): string => {
+    try {
+      return new Date(iso).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return iso;
+    }
   };
 
   const toggleResource = (id: string) => {
@@ -560,18 +612,66 @@ export default function AgentSection({
         </p>
       )}
 
-      {/* Rendered independent of analysis_failed below — the digest never
-          calls an LLM, so a relevance-pass failure doesn't make it
-          untrustworthy. It's what a click on "Run agent" is guaranteed to
-          produce even on the one run in a hundred where the proposals can't
-          be judged this time. */}
+      {/* STORED digest from a prior run (getProject()'s own read, saved
+          server-side by app/api/project-agent/status/route.ts) — shown
+          collapsed by default with Download as the PRIMARY action, per the
+          spec: 30KB inline on a page with six sections already is clutter,
+          not a convenience. Superseded the instant a LIVE run produces its
+          own `result.digest` below — "running the agent again replaces
+          it," both in storage and on screen. */}
+      {!result && storedDigest && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between gap-4 mb-3">
+            <div>
+              <h3 className="font-label-lg text-label-lg text-on-background">Prior-art digest</h3>
+              <p className="font-body-sm text-body-sm text-secondary mt-0.5">
+                Generated {formatDigestDate(storedDigest.generated_at)}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => downloadDigest(storedDigest)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-primary text-on-primary font-label-sm text-label-sm hover:opacity-90 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-[18px]">download</span>
+                Download .md
+              </button>
+              <button
+                type="button"
+                onClick={() => setStoredDigestExpanded((v) => !v)}
+                aria-expanded={storedDigestExpanded}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {storedDigestExpanded ? "expand_less" : "expand_more"}
+                </span>
+                {storedDigestExpanded ? "Hide" : "View"}
+              </button>
+            </div>
+          </div>
+          {storedDigestExpanded && (
+            <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-5 py-4 max-h-[70vh] overflow-y-auto">
+              <MarkdownView markdown={storedDigest.markdown} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* LIVE digest from THIS session's run — always shown expanded (a
+          researcher who just clicked "Run agent" wants to see what they
+          got), unlike the collapsed stored card above. Rendered independent
+          of analysis_failed below — the digest never calls an LLM, so a
+          relevance-pass failure doesn't make it untrustworthy. It's what a
+          click on "Run agent" is guaranteed to produce even on the one run
+          in a hundred where the proposals can't be judged this time. */}
       {result && result.digest && (
         <div className="mb-8">
           <div className="flex items-center justify-between gap-4 mb-3">
             <h3 className="font-label-lg text-label-lg text-on-background">Prior-art digest</h3>
             <button
               type="button"
-              onClick={downloadDigest}
+              onClick={() => downloadDigest(result.digest!)}
               className="flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/50 text-on-background font-label-sm text-label-sm hover:bg-surface-container-low transition-colors shrink-0"
             >
               <span className="material-symbols-outlined text-[18px]">download</span>
@@ -622,6 +722,23 @@ export default function AgentSection({
               ))}
             </ul>
           )}
+
+          {/* The agent proposes a CAPPED, curated subset by design (8 of
+              however many the search actually found) — without this line a
+              user just sees a sources table saying e.g. "10 datasets" and
+              nothing beneath it, reading as if the rest was silently
+              dropped rather than deliberately not shown here. Only rendered
+              when there's genuinely more than what's proposed. */}
+          {typeof result.candidates_found === "number" &&
+            result.candidates_found > result.selected_items.length && (
+              <p className="font-body-sm text-body-sm text-secondary mb-4">
+                Showing {result.selected_items.length} of {result.candidates_found} found —{" "}
+                <a href={exploreHref} className="text-primary hover:underline">
+                  browse everything
+                </a>
+                .
+              </p>
+            )}
 
           {result.selected_items.length === 0 && result.checklist_items.length === 0 ? (
             <p className="font-body-md text-body-md text-secondary mt-4">

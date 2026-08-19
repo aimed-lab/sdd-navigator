@@ -185,7 +185,7 @@ _AGENT_EXCLUDED_KINDS = {"episode"}
 
 def _flatten_candidates(
     explore_result: dict, excluded_ids: set[str], max_candidates: int = 0
-) -> tuple[list[dict], list[str], int]:
+) -> tuple[list[dict], list[str], int, int]:
     """All items across every section, deduped by id, round-robinned ACROSS
     sections (one item from every section, then a second from every section
     that still has one, and so on) up to `max_candidates`, with anything
@@ -207,11 +207,20 @@ def _flatten_candidates(
     dominating a shared cap (see that module's ROUND-ROBIN note); this is
     the same shape, keyed on section kind instead of a sub-query cursor.
 
-    Returns (items, failed_tool_names, excluded_count) — the count is
-    reported back to the caller so the summary can say honestly how much of
-    what was found was already saved, rather than silently shrinking the
-    candidate pool. `max_candidates <= 0` means unbounded (round-robins
-    every item, useful for tests that don't care about the cap)."""
+    Returns (items, failed_tool_names, excluded_count, total_found) —
+    total_found is len(seen): every DISTINCT non-episode item across every
+    section, BEFORE the excluded_ids drop and before the max_candidates cap
+    — the true "how many did the search actually turn up" number. This is
+    what backs "Showing 8 of 47 found" on the frontend (see AgentSection.tsx
+    and this function's caller below): selected_items is capped at
+    MAX_SELECTED(=8) by design, and total_found is what a researcher would
+    see if they went to Explore for this project instead — reported
+    honestly rather than left implicit in a sources table that only shows
+    per-kind counts. excluded_count is reported separately (as before) so
+    the summary can say how much of what was found was already saved,
+    rather than silently shrinking the candidate pool. `max_candidates <= 0`
+    means unbounded (round-robins every item, useful for tests that don't
+    care about the cap)."""
     seen: set[str] = set()
     failed: list[str] = []
     excluded_count = 0
@@ -257,7 +266,7 @@ def _flatten_candidates(
             break
         row += 1
 
-    return items, failed, excluded_count
+    return items, failed, excluded_count, len(seen)
 
 
 # ── step 2: relevance pass ────────────────────────────────────────────────────
@@ -752,11 +761,20 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
                                              # checklist_items==[] alone can't carry
                                              # that distinction, since a regular
                                              # project can also legitimately find zero
-        digest: {markdown, generated_at, counts} | None,  # the downloadable digest
+        digest: {markdown, generated_at, counts, goal_text} | None,  # the downloadable digest
                                              # (tools/prior_art_brief.py's
                                              # render_digest()) — None only when the
                                              # search itself failed entirely; NOT
                                              # gated on the relevance pass succeeding
+        candidates_found: int,              # every DISTINCT item the search actually
+                                             # turned up (see _flatten_candidates'
+                                             # total_found), BEFORE the already-saved
+                                             # exclusion and before the MAX_CANDIDATES
+                                             # cap — selected_items is capped at
+                                             # MAX_SELECTED(=8) by design, this is what
+                                             # backs "Showing 8 of 47 found" on the
+                                             # frontend instead of leaving the rest
+                                             # implicit
         tools_called: [str],                # from step 1, for transparency
         warnings: [str],                    # partial-failure notes, never fatal
         analysis_failed: bool,              # relevance pass itself failed — see below
@@ -813,7 +831,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
     excluded_ids = {
         str(item_id).strip() for item_id in (project.get("saved_item_ids") or []) if str(item_id).strip()
     }
-    candidates, failed_tools, excluded_count = _flatten_candidates(
+    candidates, failed_tools, excluded_count, candidates_found = _flatten_candidates(
         explore_result, excluded_ids, max_candidates=MAX_CANDIDATES
     )
     if failed_tools:
@@ -839,6 +857,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             "checklist_enabled": not is_challenge,
             "digest": digest,  # still rendered — it never called an LLM, so the
                                 # relevance pass failing doesn't make it untrustworthy
+            "candidates_found": candidates_found,
             "tools_called": explore_result.get("tools_called") or [],
             "warnings": [
                 "The agent could not complete its analysis this run — the relevance pass "
@@ -934,6 +953,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "checklist_items": checklist_items,
         "checklist_enabled": not is_challenge,
         "digest": digest,  # {markdown, generated_at, counts} or None if the search failed entirely
+        "candidates_found": candidates_found,
         "tools_called": explore_result.get("tools_called") or [],
         "warnings": warnings,
         "analysis_failed": False,
