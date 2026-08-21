@@ -103,11 +103,19 @@ def trim_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def trim_sections(sections: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Trim every item inside an explore() `sections` list."""
+    """Trim every item inside an explore() `sections` list.
+
+    `items_key` — the papers section's second, WINNER-ranked ordering (see
+    tools/explore.py's search_papers handling) — is the SAME kind of item
+    payload as `items` and gets the same trim when present.
+    """
     out: list[dict[str, Any]] = []
     for section in sections:
         if isinstance(section, dict) and isinstance(section.get("items"), list):
-            out.append({**section, "items": trim_items(section["items"])})
+            trimmed: dict[str, Any] = {**section, "items": trim_items(section["items"])}
+            if isinstance(section.get("items_key"), list):
+                trimmed["items_key"] = trim_items(section["items_key"])
+            out.append(trimmed)
         else:
             out.append(section)
     return out

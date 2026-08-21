@@ -489,9 +489,10 @@ async def explore(
         input_text: The scientist's free-text message.
         since_year: Optional. Restricts the search_papers section (PubMed/OpenAlex/
             Crossref only) to papers published on/after this year. No other tool's
-            results are date-filtered. If the filtered search_papers section comes
-            back empty, the section is silently re-fetched unfiltered and flagged
-            with date_fallback=true rather than shown empty.
+            results are date-filtered. Not driven by any current UI control —
+            search_papers's own default (since_year omitted) already fetches a
+            large candidate pool per source and returns the latest by date, so
+            this param is for internal/future callers only.
         status_filter: Optional. Restricts the search_trials section to these
             ClinicalTrials.gov overall-status values (e.g. ["TERMINATED",
             "WITHDRAWN"]). Never derived from input_text — a UI-only filter,

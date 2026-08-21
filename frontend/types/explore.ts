@@ -25,12 +25,14 @@ export type ExploreSection = {
   kind: string;
   query?: string;
   items: ExploreItem[];
+  /** Papers section ONLY (kind === "paper"): the SAME already-fetched/ranked
+   *  pool as `items`, but ordered by WINNER's own re-rank instead of date
+   *  desc — rendered as a second "Key Papers" subsection under the same
+   *  Papers tab (see backend/explore-mcp/tools/explore.py's search_papers
+   *  handling, and CategoryStrip — there is no separate "key papers" kind
+   *  or tab). Absent for every other section kind. */
+  items_key?: ExploreItem[];
   error?: string;
-  // Set on the "paper" section only, and only when a since_year filter was
-  // requested but returned zero results after merge/dedupe: the backend
-  // silently re-fetched unfiltered and these items are the unfiltered set.
-  date_fallback?: boolean;
-  date_fallback_message?: string;
 };
 
 /** The structured scope the backend either extracted from a search or used for

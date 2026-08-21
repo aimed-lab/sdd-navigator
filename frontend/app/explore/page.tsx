@@ -37,6 +37,49 @@ const titleFor = (kind: string) =>
 
 const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6";
 
+// "Trial status" — three mutually exclusive states, so a segmented control
+// (one bordered track) rather than a pill row — matching
+// components/projects/ChecklistSection.tsx's StatusControl and Collaborate's
+// community segment() (app/collaborate/page.tsx): same bg-surface-container
+// track, same bg-secondary-container/text-on-secondary-container "selected"
+// treatment.
+const TRIAL_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Any status" },
+  { value: "stopped", label: "Terminated / withdrawn" },
+  { value: "recruiting", label: "Recruiting" },
+];
+
+function TrialStatusControl({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30 w-fit">
+      {TRIAL_STATUS_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value || "any"}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={
+              "px-3 py-1.5 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+              (active
+                ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
+                : "text-secondary hover:text-on-background")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-3 mb-8">
@@ -55,16 +98,10 @@ function ExploreFeed() {
   // ?scope=off — set when the user clears the last interest chip. The generic
   // feed is then what they asked for, so don't re-personalize it under them.
   const personalize = searchParams.get("scope") !== "off";
-  // ?since=<year> — restricts the Latest Papers section to that year onward.
-  // Default unset = current, unconstrained behavior. Kept in the URL so a
-  // filtered search is shareable, same as ?category= / ?scope=.
-  const sinceParam = searchParams.get("since");
-  const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
   // ?trial_status=stopped|recruiting — restricts the Clinical Trials section to
   // ClinicalTrials.gov's own overall-status values (same param the digest
-  // already uses server-side). UI-only, same pattern as ?since= above: never
-  // parsed from free text, only ever set by this control. Unset = current,
-  // unfiltered behavior.
+  // already uses server-side). UI-only: never parsed from free text, only ever
+  // set by this control. Unset = current, unfiltered behavior.
   const trialStatusParam = searchParams.get("trial_status");
   const statusFilter =
     trialStatusParam === "stopped" ? ["TERMINATED", "WITHDRAWN"]
@@ -92,7 +129,6 @@ function ExploreFeed() {
           body: JSON.stringify({
             input: "",
             personalize,
-            ...(sinceYear !== undefined ? { since_year: sinceYear } : {}),
             ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
           }),
         });
@@ -107,7 +143,7 @@ function ExploreFeed() {
     return () => {
       cancelled = true;
     };
-  }, [personalize, sinceYear, trialStatusParam]);
+  }, [personalize, trialStatusParam]);
 
   // The interests the feed was actually built from, straight from the response —
   // present only when the backend personalized it.
@@ -141,23 +177,14 @@ function ExploreFeed() {
   const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
   const showError = failed || data?.error === true || (!loading && totalItems === 0);
 
-  const sinceQsParams = new URLSearchParams();
-  if (sinceYear !== undefined) sinceQsParams.set("since", String(sinceYear));
-  if (trialStatusParam) sinceQsParams.set("trial_status", trialStatusParam);
-  const sinceQs = sinceQsParams.toString() ? `?${sinceQsParams.toString()}` : "";
+  const qsParams = new URLSearchParams();
+  if (trialStatusParam) qsParams.set("trial_status", trialStatusParam);
+  const qs = qsParams.toString() ? `?${qsParams.toString()}` : "";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (q) router.push(`/explore/${encodeURIComponent(q)}${sinceQs}`);
-  };
-
-  const onSinceChange = (value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set("since", value);
-    else params.delete("since");
-    const qs = params.toString();
-    router.push(qs ? `/explore?${qs}` : "/explore");
+    if (q) router.push(`/explore/${encodeURIComponent(q)}${qs}`);
   };
 
   const onTrialStatusChange = (value: string) => {
@@ -188,39 +215,6 @@ function ExploreFeed() {
             <span className="material-symbols-outlined">search</span>
           </button>
         </form>
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <label htmlFor="since-year" className="text-secondary font-label-md text-label-md">
-            Papers since
-          </label>
-          <select
-            id="since-year"
-            value={sinceParam ?? ""}
-            onChange={(e) => onSinceChange(e.target.value)}
-            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          >
-            <option value="">Any time</option>
-            <option value="2026">2026</option>
-            <option value="2025">2025</option>
-            <option value="2024">2024</option>
-            <option value="2022">2022</option>
-            <option value="2020">2020</option>
-          </select>
-        </div>
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <label htmlFor="trial-status" className="text-secondary font-label-md text-label-md">
-            Trial status
-          </label>
-          <select
-            id="trial-status"
-            value={trialStatusParam ?? ""}
-            onChange={(e) => onTrialStatusChange(e.target.value)}
-            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          >
-            <option value="">Any status</option>
-            <option value="stopped">Terminated / withdrawn</option>
-            <option value="recruiting">Recruiting</option>
-          </select>
-        </div>
       </section>
 
       {/* Scope chips — the interests this feed was built from (personalized only) */}
@@ -236,6 +230,23 @@ function ExploreFeed() {
       {/* Category strip — shared switcher; horizontal scroll on mobile. The
           Podcast chip routes to /explore/podcast rather than filtering inline. */}
       <CategoryStrip selected={selected} onSelect={setSelected} query={query} />
+
+      {/* Filters — BELOW the type tabs, and scoped to the active one: the
+          filter comes after the thing being filtered. "Trial status" only
+          makes sense for trials; on "All" (selected === null) it still
+          applies to that section within the combined feed, so it shows
+          rather than forcing a tab switch just to filter. */}
+      {(selected === null || selected === "trial") && (
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
+          <div>
+            <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
+            <TrialStatusControl
+              value={trialStatusParam ?? ""}
+              onChange={onTrialStatusChange}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (
@@ -297,16 +308,31 @@ function ExploreFeed() {
             {activeSections.map((section: ExploreSection) => (
               <section key={section.tool}>
                 <SectionHeader title={titleFor(section.kind)} />
-                {section.date_fallback && (
-                  <p className="mb-4 text-secondary font-body-md">
-                    {section.date_fallback_message ?? "No papers matched that date filter — showing all results instead."}
-                  </p>
-                )}
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
                     <ItemCard key={item.id} item={item} />
                   ))}
                 </div>
+
+                {/* Key Papers — same pool as "Latest Papers" above, re-ordered
+                    by WINNER instead of date desc. Lives as a second
+                    subsection under the existing Papers section/tab rather
+                    than a new top-level CategoryStrip tab: they're two views
+                    of the same underlying set, and CategoryStrip is already
+                    a no-wrap horizontal-scroll row on mobile that shouldn't
+                    grow another chip for this. "★ Key paper" is the wording
+                    ItemCard already uses for a WINNER-ranked item's badge —
+                    reused here instead of inventing new vocabulary. */}
+                {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
+                  <div className="mt-12">
+                    <SectionHeader title="Key Papers" />
+                    <div className={GRID}>
+                      {section.items_key!.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             ))}
 

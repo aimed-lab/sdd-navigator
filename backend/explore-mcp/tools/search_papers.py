@@ -53,6 +53,29 @@ logger = logging.getLogger(__name__)
 _USER_AGENT = "explore-mcp/0.1 (SDD Navigator; research tooling)"
 _SOURCE_NAMES = ("pubmed", "openalex", "crossref")
 
+# DEFAULT PAPERS BEHAVIOR (unconditional, no since_year/UI control needed):
+# fetch a much larger per-source candidate POOL, then sort the merged/deduped/
+# WINNER-ranked pool by date_iso desc and cap to the caller's limit. Diagnosed
+# problem: with a ~10-per-source cap, ranking by relevance/citations, recent
+# papers on a narrow topic can't outrank old landmark papers for a slot in the
+# pool at all — sorting the RESULT by date afterwards still only had 10 (old)
+# candidates to sort. The fix has to widen the pool that's fetched, not just
+# reorder what's already been fetched.
+#
+# 75 is chosen from the two extremes seen in diagnosis:
+#   * a narrow query ("PDAC Classical Basal subtype GATA6") had only ~12
+#     PubMed hits in the entire 2024-2026 window — a pool of 75 comfortably
+#     contains every recent hit even if OpenAlex's RELEVANCE sort (the mode
+#     search_papers uses, see fetch_openalex's `sort` param below) buries a
+#     couple of them below rank 10.
+#   * a broad, hot query ("KRAS inhibitor") has thousands of recent papers,
+#     so 75 relevance-ranked OpenAlex results (or date-sorted PubMed/Crossref
+#     results, which are already date-sorted regardless of pool size) are
+#     virtually guaranteed to include plenty from 2024-2026 without pulling
+#     an unreasonably large page (225 total across 3 sources per query,
+#     vs. 30 before — a real but bounded increase in per-search network cost).
+_DEFAULT_POOL_SIZE = 75
+
 
 def _rank_merge(items: list[Item]) -> list[Item]:
     """Interleave signalled and unsignalled items by within-group rank so signal
@@ -97,22 +120,83 @@ async def search_papers_async(
     search and an unfiltered one for the same query text are genuinely
     different results and must never share a cache entry.
     """
+    ranked = await _ranked_pool(query, limit, since_year)
+    return _order_and_cap(ranked, limit, since_year)
+
+
+async def search_papers_dual_async(
+    query: str, limit: int = 20, since_year: int | None = None
+) -> tuple[list[Item], list[Item]]:
+    """Same cached pool as search_papers_async, but returns BOTH orderings —
+    (latest, key) — of the SAME already-fetched/ranked pool, no second fetch:
+
+      * latest — _order_and_cap's existing date-desc order (unchanged).
+      * key    — WINNER's own re-ranked order (rank_papers_winner's output,
+                 which _order_and_cap otherwise overrides/discards for the
+                 default date-sorted view — see _order_and_cap's docstring).
+
+    Both are capped to `limit`. See tools/explore.py's papers section, the
+    only caller that needs both views at once.
+    """
+    ranked = await _ranked_pool(query, limit, since_year)
+    latest = _order_and_cap(ranked, limit, since_year)
+    key = ranked[:limit]
+    return latest, key
+
+
+async def _ranked_pool(query: str, limit: int, since_year: int | None) -> list[Item]:
+    """Cached + single-flighted: the merged/deduped/WINNER-ranked pool for
+    `query`, UNCAPPED and in WINNER's own order — the shared input both
+    search_papers_async (date view) and search_papers_dual_async (date +
+    WINNER views) derive their final capped lists from, with exactly one
+    underlying fetch per (query, limit, since_year)."""
     key = normalize_key(f"papers:{limit}:{since_year or ''}", query)
     return await cache.get_or_compute(
         key, lambda: _fetch(query, limit, since_year), TTL_SOURCE, STALE_SOURCE
     )
 
 
+def _order_and_cap(ranked: list[Item], limit: int, since_year: int | None) -> list[Item]:
+    """Final ordering step, applied AFTER WINNER's re-rank.
+
+    DEFAULT (since_year is None — every current caller): unconditional
+    latest-first order. This deliberately OVERRIDES _rank_merge/WINNER's
+    citation-graph ordering for the final list handed back — WINNER still
+    runs (see _fetch/search_papers_multi_async) and its relevance signal is
+    what shapes WHICH ~75 candidates per source made it into the pool in the
+    first place (OpenAlex is fetched with SORT_RELEVANCE), but the final
+    top-`limit` slice is chosen by date, not by WINNER's rank.
+
+    since_year supplied (internal/future use, e.g. a status-filter-style
+    caller — not reachable from the current UI): kept exactly as before,
+    WINNER/_rank_merge's own order stands, no date re-sort on top of it.
+    """
+    if since_year is None:
+        ranked = sorted(ranked, key=lambda i: i.date_iso or "", reverse=True)
+    return ranked[:limit]
+
+
 async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[Item]:
-    """Async core: fan out, isolate failures, merge, dedupe, sort, cap."""
+    """Async core: fan out, isolate failures, merge, dedupe, sort, WINNER-rank.
+
+    Returns the ranked pool UNCAPPED, in WINNER's own order — capping/final
+    ordering is the caller's job (_order_and_cap for the date view, a bare
+    slice for the WINNER view — see search_papers_async/search_papers_dual_async).
+    `limit` still shapes the fetch (see fetch_cap below) even though it's no
+    longer applied as a final cap here.
+    """
+    # Unconditional default: fetch a much larger per-source pool (see
+    # _DEFAULT_POOL_SIZE) so a date-sort afterwards has recent candidates to
+    # find. since_year supplied internally keeps the old cap=limit fetch.
+    fetch_cap = _DEFAULT_POOL_SIZE if since_year is None else limit
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
         results = await asyncio.gather(
-            fetch_pubmed(client, query, limit, since_year=since_year),
+            fetch_pubmed(client, query, fetch_cap, since_year=since_year),
             # Relevance, not recency: a topic's important papers cite each other,
             # which is what gives WINNER a graph to rank (a recency-sorted set
             # has ~zero intra-set citations). search_news keeps the recency sort.
-            fetch_openalex(client, query, limit, sort=SORT_RELEVANCE, since_year=since_year),
-            fetch_crossref(client, query, limit, since_year=since_year),
+            fetch_openalex(client, query, fetch_cap, sort=SORT_RELEVANCE, since_year=since_year),
+            fetch_crossref(client, query, fetch_cap, since_year=since_year),
             return_exceptions=True,   # a failing source must not sink the batch
         )
 
@@ -138,7 +222,7 @@ async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[
     seeds = relevance_seed_ids(ranked, query, top_n=10)
     ranked = rank_papers_winner(ranked, seeds)
 
-    return ranked[:limit]
+    return ranked
 
 
 async def search_papers_multi_async(
@@ -219,10 +303,39 @@ async def search_papers_multi_async(
     exactly today's behavior, not "fan-out of one." There is nothing to
     round-robin across with one sub-query anyway.
     """
+    selected = await _multi_selected(queries, limit_per_query, final_limit, since_year)
+    return _order_and_cap(selected, final_limit, since_year)
+
+
+async def search_papers_multi_dual_async(
+    queries: list[str], *, limit_per_query: int, final_limit: int,
+    since_year: int | None = None,
+) -> tuple[list[Item], list[Item]]:
+    """search_papers_multi_async's selection logic, exposed as BOTH orderings
+    — (latest, key) — of the SAME selected set, no second fan-out: `latest`
+    is _order_and_cap's date-desc view (byte-for-byte what
+    search_papers_multi_async already returned), `key` is that same
+    selected set in its existing global-rank/WINNER order, merely capped —
+    see search_papers_dual_async's docstring for the same idea at the
+    single-query level."""
+    selected = await _multi_selected(queries, limit_per_query, final_limit, since_year)
+    latest = _order_and_cap(selected, final_limit, since_year)
+    key = selected[:final_limit]
+    return latest, key
+
+
+async def _multi_selected(
+    queries: list[str], limit_per_query: int, final_limit: int,
+    since_year: int | None,
+) -> list[Item]:
+    """Shared core of search_papers_multi_async/search_papers_multi_dual_async:
+    everything through round-robin selection, UNCAPPED and in global-rank/
+    WINNER order — see search_papers_multi_async's own docstring for the
+    full algorithm (round-robin selection, global-rank display order)."""
     if not queries:
         return []
     if len(queries) == 1:
-        return await search_papers_async(queries[0], final_limit, since_year)
+        return await _ranked_pool(queries[0], final_limit, since_year)
 
     results = await asyncio.gather(
         *(search_papers_async(q, limit_per_query, since_year) for q in queries),
@@ -271,8 +384,10 @@ async def search_papers_multi_async(
                 cursors[i] += 1
                 made_progress = True
 
-    # Step 4 — emit in global-rank order, restricted to the selected set.
-    return [item for item in ranked_global if item.dedupe_key in used][:final_limit]
+    # Step 4 — emit in global-rank order, restricted to the selected set —
+    # capping/date-ordering is left to the caller (_order_and_cap for the
+    # date view, a bare slice for the WINNER view).
+    return [item for item in ranked_global if item.dedupe_key in used]
 
 
 def search_papers(query: str, limit: int = 20, since_year: int | None = None) -> list[Item]:

@@ -115,6 +115,23 @@ function signalBadge(item: ExploreItem): string | null {
   return signal.value > 0 ? `${compact(signal.value)} ${signal.metric}` : null;
 }
 
+// Trial status pill tokens — RECRUITING and TERMINATED/WITHDRAWN previously
+// rendered in the same purple-500, so a stopped programme visually read as
+// live. All three states use tokens already in the design system (no new
+// colors): RECRUITING gets the same primary/10-on-primary "live/positive"
+// treatment as CommunityPanel's "Member" badge; TERMINATED/WITHDRAWN/
+// SUSPENDED get the error-container pair used everywhere else a stopped/
+// failed state is shown; anything else (COMPLETED, ACTIVE_NOT_RECRUITING,
+// etc.) falls back to the neutral surface-container-low/secondary pairing
+// used for the plain date badge below.
+function trialStatusClasses(status: string): string {
+  if (status === "RECRUITING") return "bg-primary/10 text-primary";
+  if (status === "TERMINATED" || status === "WITHDRAWN" || status === "SUSPENDED") {
+    return "bg-error-container text-on-error-container";
+  }
+  return "bg-surface-container-low text-secondary";
+}
+
 function formatDate(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -250,7 +267,7 @@ export default function ItemCard({
           </p>
         )}
 
-        <div className="mt-auto">
+        <div>
           {/* Organism + sample count are what tells a researcher in one glance
               whether this dataset is worth opening — PROMINENT (bold, badge-sized
               text), not folded into the small-print summary line below. This is
@@ -329,7 +346,9 @@ export default function ItemCard({
           {trial && (trial.overall_status || trial.why_stopped) && (
             <div className="mt-2 flex flex-col gap-1.5 text-secondary text-body-sm font-body-sm">
               {trial.overall_status && (
-                <span className="inline-flex items-center self-start px-3 py-1 rounded-full bg-purple-500/10 text-purple-700 font-label-md text-label-md font-semibold">
+                <span
+                  className={`inline-flex items-center self-start px-3 py-1 rounded-full font-label-md text-label-md font-semibold ${trialStatusClasses(trial.overall_status)}`}
+                >
                   {trial.overall_status}
                 </span>
               )}

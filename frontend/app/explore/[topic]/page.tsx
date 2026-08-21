@@ -43,6 +43,45 @@ const titleFor = (kind: string) =>
 
 const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6";
 
+// See app/explore/page.tsx for the rationale on this control — same option
+// set/values, same tokens, kept in sync between the two pages.
+const TRIAL_STATUS_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Any status" },
+  { value: "stopped", label: "Terminated / withdrawn" },
+  { value: "recruiting", label: "Recruiting" },
+];
+
+function TrialStatusControl({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30 w-fit">
+      {TRIAL_STATUS_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value || "any"}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            className={
+              "px-3 py-1.5 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+              (active
+                ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
+                : "text-secondary hover:text-on-background")
+            }
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-3 mb-8">
@@ -62,13 +101,8 @@ function SearchResults() {
 
   const projectId = searchParams.get("project_id") || undefined;
   const projectName = searchParams.get("project_name") || undefined;
-  // ?since=<year> — restricts the Latest Papers section to that year onward.
-  // Same param name/shape as the feed page, so a link between the two carries
-  // the filter along. Default unset = current, unconstrained behavior.
-  const sinceParam = searchParams.get("since");
-  const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
   // ?trial_status=stopped|recruiting — see /explore/page.tsx for the full
-  // rationale (UI-only, same pattern as ?since=).
+  // rationale (UI-only).
   const trialStatusParam = searchParams.get("trial_status");
   const statusFilter =
     trialStatusParam === "stopped" ? ["TERMINATED", "WITHDRAWN"]
@@ -81,7 +115,6 @@ function SearchResults() {
     extraQs.project_id = projectId;
     extraQs.project_name = projectName;
   }
-  if (sinceParam) extraQs.since = sinceParam;
   if (trialStatusParam) extraQs.trial_status = trialStatusParam;
   const projectQs = Object.keys(extraQs).length > 0 ? `?${new URLSearchParams(extraQs).toString()}` : "";
 
@@ -118,7 +151,6 @@ function SearchResults() {
           ? { project_id: projectId }
           : {
               input: topic,
-              ...(sinceYear !== undefined ? { since_year: sinceYear } : {}),
               ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
             };
         const res = await fetch("/api/explore", {
@@ -139,7 +171,7 @@ function SearchResults() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
-  }, [topic, sinceYear, trialStatusParam]);
+  }, [topic, trialStatusParam]);
 
   // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
   const { fullSections, pooledItems } = useMemo(() => {
@@ -192,14 +224,6 @@ function SearchResults() {
     if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}${projectQs}`);
   };
 
-  const onSinceChange = (value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set("since", value);
-    else params.delete("since");
-    const qs = params.toString();
-    router.push(qs ? `/explore/${encodeURIComponent(topic)}?${qs}` : `/explore/${encodeURIComponent(topic)}`);
-  };
-
   const onTrialStatusChange = (value: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("trial_status", value);
@@ -239,39 +263,6 @@ function SearchResults() {
             <span className="material-symbols-outlined">search</span>
           </button>
         </form>
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <label htmlFor="since-year" className="text-secondary font-label-md text-label-md">
-            Papers since
-          </label>
-          <select
-            id="since-year"
-            value={sinceParam ?? ""}
-            onChange={(e) => onSinceChange(e.target.value)}
-            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          >
-            <option value="">Any time</option>
-            <option value="2026">2026</option>
-            <option value="2025">2025</option>
-            <option value="2024">2024</option>
-            <option value="2022">2022</option>
-            <option value="2020">2020</option>
-          </select>
-        </div>
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <label htmlFor="trial-status" className="text-secondary font-label-md text-label-md">
-            Trial status
-          </label>
-          <select
-            id="trial-status"
-            value={trialStatusParam ?? ""}
-            onChange={(e) => onTrialStatusChange(e.target.value)}
-            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
-          >
-            <option value="">Any status</option>
-            <option value="stopped">Terminated / withdrawn</option>
-            <option value="recruiting">Recruiting</option>
-          </select>
-        </div>
       </section>
 
       {/* Query heading */}
@@ -285,6 +276,21 @@ function SearchResults() {
       {/* Category strip — the Podcast chip routes to /explore/podcast, carrying
           the routed topic so the episode grid opens scoped to the same search. */}
       <CategoryStrip selected={selected} onSelect={setSelected} query={topic} />
+
+      {/* Filters — below the type tabs, scoped to the active one. See
+          app/explore/page.tsx for the "All" reasoning (still applies to its
+          own section within the combined feed). */}
+      {(selected === null || selected === "trial") && (
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
+          <div>
+            <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
+            <TrialStatusControl
+              value={trialStatusParam ?? ""}
+              onChange={onTrialStatusChange}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (
@@ -389,16 +395,29 @@ function SearchResults() {
             {activeSections.map((section: ExploreSection) => (
               <section key={section.tool}>
                 <SectionHeader title={titleFor(section.kind)} />
-                {section.date_fallback && (
-                  <p className="mb-4 text-secondary font-body-md">
-                    {section.date_fallback_message ?? "No papers matched that date filter — showing all results instead."}
-                  </p>
-                )}
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
                     <ItemCard key={item.id} item={item} projectId={projectId} />
                   ))}
                 </div>
+
+                {/* Key Papers — same pool as "Latest Papers" above, re-ordered
+                    by WINNER instead of date desc; a second subsection under
+                    the existing Papers section/tab, not a new CategoryStrip
+                    tab — see app/explore/page.tsx for the full rationale
+                    (kept in sync between the two pages). "★ Key paper" is
+                    the wording ItemCard already uses for a WINNER-ranked
+                    item's badge. */}
+                {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
+                  <div className="mt-12">
+                    <SectionHeader title="Key Papers" />
+                    <div className={GRID}>
+                      {section.items_key!.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} projectId={projectId} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
             ))}
 

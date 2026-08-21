@@ -46,7 +46,7 @@ from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
 from tools.search_pager import search_pager_async
-from tools.search_papers import search_papers_async, search_papers_multi_async
+from tools.search_papers import search_papers_async, search_papers_multi_dual_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async
@@ -743,7 +743,7 @@ async def _execute(
             queries = _entity_queries_for_papers(scope)
             papers_query_display = " | ".join(queries)
             tasks.append(
-                search_papers_multi_async(
+                search_papers_multi_dual_async(
                     queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
                     since_year=since_year,
                 )
@@ -768,30 +768,26 @@ async def _execute(
         if isinstance(result, Exception):
             # one tool failing never sinks the others; report an empty, flagged section
             section["items"] = []
+            if tool == "search_papers":
+                section["items_key"] = []
             section["error"] = f"{type(result).__name__}: {result}"
             logger.exception(
                 "explore: tool %s failed for query=%r", tool, query, exc_info=result
             )
+        elif tool == "search_papers":
+            # search_papers_multi_dual_async returns (latest, key) — TWO
+            # orderings of the SAME already-ranked pool (see that function's
+            # docstring). `items` stays the existing date-desc "Latest
+            # Papers" view (so every OTHER caller/consumer of a papers
+            # section is unaffected); `items_key` is the additional WINNER-
+            # ranked "Key Papers" view the frontend renders as a second
+            # subsection under the same Papers tab (see CategoryStrip —
+            # this is not a new top-level kind/tab).
+            latest, key = result
+            section["items"] = [item.model_dump() for item in latest]
+            section["items_key"] = [item.model_dump() for item in key]
         else:
             section["items"] = [item.model_dump() for item in result]
-            # VISIBLE FALLBACK, never silent: since_year is set and the date-
-            # filtered fan-out came back with NOTHING at all, across every
-            # papers source AFTER merge/dedupe — not per-source, since
-            # OpenAlex is the deep source and one thin source (e.g. PubMed)
-            # while OpenAlex still has results is not a real "no results"
-            # experience for the user. Only an empty COMBINED result set
-            # re-fetches, so this never fires on a healthy filtered search.
-            if tool == "search_papers" and since_year is not None and not result:
-                queries = _entity_queries_for_papers(scope)
-                fallback_items = await search_papers_multi_async(
-                    queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
-                    since_year=None,
-                )
-                section["items"] = [item.model_dump() for item in fallback_items]
-                section["date_fallback"] = True
-                section["date_fallback_message"] = (
-                    f"No papers since {since_year} — showing all results instead."
-                )
         sections.append(section)
     return sections
 
