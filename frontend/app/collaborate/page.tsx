@@ -9,15 +9,27 @@
 // is rendered with data already in the HTML — no client fetch, no loading
 // flash. Search and filters are URL state (?q=&filter=&area=&community=), which
 // makes every view linkable and keeps the page a plain GET form. Only the
-// Connect modal is client-side.
+// Connect modal and the "Add to the board" choice menu are client-side.
 //
 // COMMUNITIES (database/migrations/2026-08-20_communities.sql): a community
 // chip is ONE MORE piece of URL state (?community=<slug>), resolved
 // server-side into an id and threaded into BOTH reads below — listCollabPosts
 // and listResources each take a communityId and filter to it. No selection
 // (the default) shows everything, same as today.
+//
+// HIERARCHY (2026-08-21 cleanup): community is the SCOPE (which group's board
+// you're looking at — a segmented control, its neutral option "All
+// communities"); type is a FILTER within that scope (offering / seeking /
+// etc. — lighter pills, neutral option "All types"). They used to be two
+// visually-identical rows of pills each starting with a chip that just said
+// "All" — nothing distinguished them. Topics (research areas, e.g. "AI drug
+// discovery") are a SUBJECT, not an intent, so they no longer share a row
+// with the type filter either; they get their own row. Folding them into the
+// search box was the other option, but that would trade a one-click filter
+// for typing the exact area name back — not a win for a handful of chips.
 
 import Link from "next/link";
+import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
 import PostCard from "@/components/collaborate/PostCard";
 import ResourceCard from "@/components/collaborate/ResourceCard";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
@@ -29,7 +41,7 @@ import { getCommunityBySlug, listCommunities } from "@/lib/server/communities";
 export const dynamic = "force-dynamic"; // board content changes per request
 
 const FILTERS: { value: BoardFilter; label: string }[] = [
-  { value: "all", label: "All" },
+  { value: "all", label: "All types" },
   { value: "offering", label: "Offering" },
   { value: "seeking_team", label: "Seeking Teammates" },
   { value: "seeking_resources", label: "Seeking Resources" },
@@ -46,12 +58,25 @@ function boardHref(params: { q?: string; filter?: string; area?: string; communi
   return qs ? `/collaborate?${qs}` : "/collaborate";
 }
 
+// Type filter + topic chips — the lighter, FILTER-level pill.
 function chip(active: boolean) {
   return (
     "px-4 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
     (active
       ? "bg-primary text-on-primary"
       : "bg-surface-container-low text-secondary hover:bg-surface-container hover:text-primary")
+  );
+}
+
+// Community segmented-control segment — the heavier, SCOPE-level control.
+// Visually distinct from chip(): square-ish segments sharing one bordered
+// track, not free-floating pills, so it doesn't read as "one more chip row".
+function segment(active: boolean) {
+  return (
+    "px-4 py-2 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
+    (active
+      ? "bg-primary text-on-primary shadow-sm"
+      : "text-on-background hover:bg-surface-container")
   );
 }
 
@@ -129,39 +154,24 @@ export default async function CollaboratePage({
   const isEmptyCommunity = Boolean(community) && posts.length === 0 && resources.length === 0;
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16">
+    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-6 md:py-8">
       {/* Header */}
-      <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+      <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight text-on-background">
+          <h1 className="font-headline-lg text-headline-lg md:text-[32px] md:leading-tight text-on-background">
             Collaborate
           </h1>
-          <p className="mt-3 font-body-lg text-body-lg text-secondary max-w-2xl">
+          <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
             {community
               ? community.description || `Posts and shared resources for ${community.name}.`
               : "Share what your lab offers, find what you need, and build teams — for the drug discovery community."}
           </p>
         </div>
-        <div className="flex flex-wrap gap-3 shrink-0">
-          <Link
-            href={newResourceHref}
-            className="btn-outline inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
-          >
-            <span className="material-symbols-outlined">science</span>
-            Add what your lab can share
-          </Link>
-          <Link
-            href={newPostHref}
-            className="btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
-          >
-            <span className="material-symbols-outlined">add</span>
-            Create post
-          </Link>
-        </div>
+        <AddToBoardButton newPostHref={newPostHref} newResourceHref={newResourceHref} />
       </header>
 
       {/* Search (plain GET form — keeps every view linkable) */}
-      <form action="/collaborate" method="get" className="mt-10">
+      <form action="/collaborate" method="get" className="mt-5">
         {filter !== "all" && <input type="hidden" name="filter" value={filter} />}
         {area && <input type="hidden" name="area" value={area} />}
         {communitySlug && <input type="hidden" name="community" value={communitySlug} />}
@@ -175,28 +185,23 @@ export default async function CollaboratePage({
             defaultValue={q}
             placeholder="Search collaborations, resources, people…"
             aria-label="Search the collaboration board"
-            className="w-full glass-panel rounded-xl pl-12 pr-4 py-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full glass-panel rounded-xl pl-12 pr-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
       </form>
 
-      {/* Community chips */}
+      {/* Community — the SCOPE. A segmented control, not a pill row: heavier,
+          one bordered track, so it visually outranks the filter row below. */}
       {communities.length > 0 && (
-        <div className="mt-6 flex flex-wrap gap-2 items-center">
-          <span className="font-label-sm text-label-sm text-secondary/70 uppercase mr-1">
-            Communities
-          </span>
-          <Link
-            href={boardHref({ q, area, filter })}
-            className={chip(!communitySlug)}
-          >
-            All
+        <div className="mt-4 inline-flex flex-wrap items-center gap-1 p-1 rounded-lg bg-surface-container-low border border-outline-variant/30">
+          <Link href={boardHref({ q, area, filter })} className={segment(!communitySlug)}>
+            All communities
           </Link>
           {communities.map((c) => (
             <Link
               key={c.id}
               href={boardHref({ q, area, filter, community: communitySlug === c.slug ? "" : c.slug })}
-              className={chip(communitySlug === c.slug)}
+              className={segment(communitySlug === c.slug)}
             >
               {c.name}
             </Link>
@@ -204,8 +209,8 @@ export default async function CollaboratePage({
         </div>
       )}
 
-      {/* Filter chips */}
-      <div className="mt-5 flex flex-wrap gap-2 items-center">
+      {/* Type — a FILTER within that scope. Lighter pills. */}
+      <div className="mt-3 flex flex-wrap gap-2 items-center">
         {FILTERS.map((f) => (
           <Link
             key={f.value}
@@ -215,20 +220,29 @@ export default async function CollaboratePage({
             {f.label}
           </Link>
         ))}
-        {areas.length > 0 && <span className="mx-1 h-6 w-px bg-outline-variant/50" />}
-        {areas.map((a) => (
-          <Link
-            key={a}
-            href={boardHref({ q, filter, community: communitySlug, area: area === a ? "" : a })}
-            className={chip(area === a)}
-          >
-            {a}
-          </Link>
-        ))}
       </div>
 
+      {/* Topics — a SUBJECT, not an intent, so it's a row of its own rather
+          than sharing the type-filter row it used to sit in. */}
+      {areas.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 items-center">
+          <span className="font-label-sm text-label-sm text-secondary/70 uppercase mr-1">
+            Topics
+          </span>
+          {areas.map((a) => (
+            <Link
+              key={a}
+              href={boardHref({ q, filter, community: communitySlug, area: area === a ? "" : a })}
+              className={chip(area === a)}
+            >
+              {a}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {/* Result line */}
-      <p className="mt-6 font-label-md text-label-md text-secondary">
+      <p className="mt-4 font-label-md text-label-md text-secondary">
         {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
         {resources.length === 1 ? "resource" : "resources"}
         {(filtered || communitySlug) && " matching"}
@@ -244,7 +258,7 @@ export default async function CollaboratePage({
 
       {/* Empty community state — intentional, not "no results" */}
       {isEmptyCommunity ? (
-        <div className="mt-8 max-w-2xl mx-auto glass-panel rounded-2xl p-10 text-center">
+        <div className="mt-6 max-w-2xl mx-auto glass-panel rounded-2xl p-10 text-center">
           <span className="material-symbols-outlined text-4xl text-primary">groups</span>
           <h2 className="mt-3 font-headline-md text-headline-md text-on-background">
             {community!.name} is just getting started here
@@ -268,7 +282,7 @@ export default async function CollaboratePage({
         <>
           {/* Board */}
           {posts.length === 0 ? (
-            <div className="mt-8 max-w-xl mx-auto">
+            <div className="mt-6 max-w-xl mx-auto">
               <InvitationCard
                 heading={filtered ? "Nothing matches that yet" : "Be the first to post"}
                 body={
@@ -280,7 +294,7 @@ export default async function CollaboratePage({
               />
             </div>
           ) : (
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {posts.map((post) => (
                 <PostCard key={post.id} post={post} signedIn={signedIn} />
               ))}
@@ -293,7 +307,7 @@ export default async function CollaboratePage({
           )}
 
           {/* Shared lab resources */}
-          <section className="mt-16 pt-8 border-t border-outline-variant/30">
+          <section className="mt-14 pt-8 border-t border-outline-variant/30">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h2 className="font-headline-md text-headline-md text-on-background">
@@ -333,7 +347,7 @@ export default async function CollaboratePage({
         </>
       )}
 
-      <div className="mt-16 pt-8 border-t border-outline-variant/30">
+      <div className="mt-14 pt-8 border-t border-outline-variant/30">
         <InlineFeedback
           prompt="What would make you post here?"
           pagePath="/collaborate"
