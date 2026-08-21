@@ -469,7 +469,9 @@ async def search_wiki(query: str, limit: int = 20) -> list[dict]:
 
 
 @mcp.tool()
-async def explore(input_text: str, since_year: int | None = None) -> dict:
+async def explore(
+    input_text: str, since_year: int | None = None, status_filter: list[str] | None = None,
+) -> dict:
     """Orchestrate a research query from free text across all the search tools.
 
     Reasons over the message to (1) extract a structured scope
@@ -490,8 +492,12 @@ async def explore(input_text: str, since_year: int | None = None) -> dict:
             results are date-filtered. If the filtered search_papers section comes
             back empty, the section is silently re-fetched unfiltered and flagged
             with date_fallback=true rather than shown empty.
+        status_filter: Optional. Restricts the search_trials section to these
+            ClinicalTrials.gov overall-status values (e.g. ["TERMINATED",
+            "WITHDRAWN"]). Never derived from input_text — a UI-only filter,
+            same as since_year.
     """
-    return await explore_async(input_text, since_year=since_year)
+    return await explore_async(input_text, since_year=since_year, status_filter=status_filter)
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -558,12 +564,17 @@ async def explore_http(request):
         since_year = int(raw_since_year) if raw_since_year is not None else None
     except (TypeError, ValueError):
         since_year = None
+    raw_status_filter = body.get("status_filter") if isinstance(body, dict) else None
+    status_filter = (
+        [str(s).strip() for s in raw_status_filter if str(s).strip()]
+        if isinstance(raw_status_filter, list) else None
+    ) or None
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
         return JSONResponse(
             trim_explore_result(
-                await explore_async(input_text or "", scope_terms, since_year)
+                await explore_async(input_text or "", scope_terms, since_year, status_filter)
             )
         )
     except Exception as exc:

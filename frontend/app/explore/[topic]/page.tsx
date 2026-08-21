@@ -67,6 +67,13 @@ function SearchResults() {
   // the filter along. Default unset = current, unconstrained behavior.
   const sinceParam = searchParams.get("since");
   const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
+  // ?trial_status=stopped|recruiting — see /explore/page.tsx for the full
+  // rationale (UI-only, same pattern as ?since=).
+  const trialStatusParam = searchParams.get("trial_status");
+  const statusFilter =
+    trialStatusParam === "stopped" ? ["TERMINATED", "WITHDRAWN"]
+    : trialStatusParam === "recruiting" ? ["RECRUITING"]
+    : undefined;
   // Carried forward on re-search (see `submit`) so project context
   // survives editing the query, not just the first arrival.
   const extraQs: Record<string, string> = {};
@@ -75,6 +82,7 @@ function SearchResults() {
     extraQs.project_name = projectName;
   }
   if (sinceParam) extraQs.since = sinceParam;
+  if (trialStatusParam) extraQs.trial_status = trialStatusParam;
   const projectQs = Object.keys(extraQs).length > 0 ? `?${new URLSearchParams(extraQs).toString()}` : "";
 
   const [query, setQuery] = useState(topic); // search bar value (pre-filled)
@@ -108,7 +116,11 @@ function SearchResults() {
       try {
         const body = useProjectContext
           ? { project_id: projectId }
-          : { input: topic, ...(sinceYear !== undefined ? { since_year: sinceYear } : {}) };
+          : {
+              input: topic,
+              ...(sinceYear !== undefined ? { since_year: sinceYear } : {}),
+              ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
+            };
         const res = await fetch("/api/explore", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -127,7 +139,7 @@ function SearchResults() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
-  }, [topic, sinceYear]);
+  }, [topic, sinceYear, trialStatusParam]);
 
   // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
   const { fullSections, pooledItems } = useMemo(() => {
@@ -188,6 +200,14 @@ function SearchResults() {
     router.push(qs ? `/explore/${encodeURIComponent(topic)}?${qs}` : `/explore/${encodeURIComponent(topic)}`);
   };
 
+  const onTrialStatusChange = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("trial_status", value);
+    else params.delete("trial_status");
+    const qs = params.toString();
+    router.push(qs ? `/explore/${encodeURIComponent(topic)}?${qs}` : `/explore/${encodeURIComponent(topic)}`);
+  };
+
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
       {/* Saving-to-project indicator — a save from this page must never go
@@ -235,6 +255,21 @@ function SearchResults() {
             <option value="2024">2024</option>
             <option value="2022">2022</option>
             <option value="2020">2020</option>
+          </select>
+        </div>
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <label htmlFor="trial-status" className="text-secondary font-label-md text-label-md">
+            Trial status
+          </label>
+          <select
+            id="trial-status"
+            value={trialStatusParam ?? ""}
+            onChange={(e) => onTrialStatusChange(e.target.value)}
+            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          >
+            <option value="">Any status</option>
+            <option value="stopped">Terminated / withdrawn</option>
+            <option value="recruiting">Recruiting</option>
           </select>
         </div>
       </section>

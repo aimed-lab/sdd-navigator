@@ -16,7 +16,7 @@
 // why Explore without project context must stay exactly as it was.
 
 import { useState } from "react";
-import type { ExploreItem } from "@/types/explore";
+import type { ExploreItem, TrialRaw } from "@/types/explore";
 import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
@@ -63,6 +63,18 @@ type GenesetRaw = {
 function genesetFields(item: ExploreItem): GenesetRaw | null {
   if (item.kind !== "geneset") return null;
   return (item.raw ?? {}) as GenesetRaw;
+}
+
+// Clinical-trial fields (backend/explore-mcp/sources/clinical_trials.py) — all
+// in `raw`. `why_stopped` MUST be rendered EXACTLY as returned: it is quoted
+// verbatim from ClinicalTrials.gov's own record, straight through fetch_trials
+// -> response.py's trim (clinicaltrials is in _INTERNAL_SOURCES, untouched) ->
+// here. Nothing in this component (or anywhere else in this file) runs it
+// through an LLM/summarization step, and it must stay that way — a
+// paraphrased "why a trial stopped" is not a fact a reader can rely on.
+function trialFields(item: ExploreItem): TrialRaw | null {
+  if (item.kind !== "trial") return null;
+  return (item.raw ?? {}) as TrialRaw;
 }
 
 function compact(n: number): string {
@@ -140,6 +152,7 @@ export default function ItemCard({
     item.kind === "episode" ? (item.raw?.image_url as string | undefined) : undefined;
   const geo = geoFields(item);
   const geneset = genesetFields(item);
+  const trial = trialFields(item);
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
@@ -304,6 +317,26 @@ export default function ItemCard({
               )}
               {typeof geneset.ncoco_score === "number" && geneset.ncoco_score > 0 && (
                 <span>nCoCo {geneset.ncoco_score.toFixed(2)}</span>
+              )}
+            </div>
+          )}
+
+          {/* Trial status + why-stopped — VERBATIM, never paraphrased or run
+              through any LLM step (see trialFields() above). Status badge is a
+              plain pass-through of ClinicalTrials.gov's own overallStatus
+              string; why_stopped renders in a blockquote to make clear it's a
+              direct quote from the record, not house copy. */}
+          {trial && (trial.overall_status || trial.why_stopped) && (
+            <div className="mt-2 flex flex-col gap-1.5 text-secondary text-body-sm font-body-sm">
+              {trial.overall_status && (
+                <span className="inline-flex items-center self-start px-3 py-1 rounded-full bg-purple-500/10 text-purple-700 font-label-md text-label-md font-semibold">
+                  {trial.overall_status}
+                </span>
+              )}
+              {trial.why_stopped && (
+                <blockquote className="border-l-2 border-outline-variant/60 pl-2 italic line-clamp-3">
+                  &ldquo;{trial.why_stopped}&rdquo;
+                </blockquote>
               )}
             </div>
           )}

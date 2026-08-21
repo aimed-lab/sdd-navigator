@@ -60,6 +60,16 @@ function ExploreFeed() {
   // filtered search is shareable, same as ?category= / ?scope=.
   const sinceParam = searchParams.get("since");
   const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
+  // ?trial_status=stopped|recruiting — restricts the Clinical Trials section to
+  // ClinicalTrials.gov's own overall-status values (same param the digest
+  // already uses server-side). UI-only, same pattern as ?since= above: never
+  // parsed from free text, only ever set by this control. Unset = current,
+  // unfiltered behavior.
+  const trialStatusParam = searchParams.get("trial_status");
+  const statusFilter =
+    trialStatusParam === "stopped" ? ["TERMINATED", "WITHDRAWN"]
+    : trialStatusParam === "recruiting" ? ["RECRUITING"]
+    : undefined;
   const [query, setQuery] = useState("");
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,6 +93,7 @@ function ExploreFeed() {
             input: "",
             personalize,
             ...(sinceYear !== undefined ? { since_year: sinceYear } : {}),
+            ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
           }),
         });
         const json = (await res.json()) as ExploreResponse;
@@ -96,7 +107,7 @@ function ExploreFeed() {
     return () => {
       cancelled = true;
     };
-  }, [personalize, sinceYear]);
+  }, [personalize, sinceYear, trialStatusParam]);
 
   // The interests the feed was actually built from, straight from the response —
   // present only when the backend personalized it.
@@ -130,7 +141,10 @@ function ExploreFeed() {
   const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
   const showError = failed || data?.error === true || (!loading && totalItems === 0);
 
-  const sinceQs = sinceYear !== undefined ? `?since=${sinceYear}` : "";
+  const sinceQsParams = new URLSearchParams();
+  if (sinceYear !== undefined) sinceQsParams.set("since", String(sinceYear));
+  if (trialStatusParam) sinceQsParams.set("trial_status", trialStatusParam);
+  const sinceQs = sinceQsParams.toString() ? `?${sinceQsParams.toString()}` : "";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,6 +156,14 @@ function ExploreFeed() {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set("since", value);
     else params.delete("since");
+    const qs = params.toString();
+    router.push(qs ? `/explore?${qs}` : "/explore");
+  };
+
+  const onTrialStatusChange = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("trial_status", value);
+    else params.delete("trial_status");
     const qs = params.toString();
     router.push(qs ? `/explore?${qs}` : "/explore");
   };
@@ -182,6 +204,21 @@ function ExploreFeed() {
             <option value="2024">2024</option>
             <option value="2022">2022</option>
             <option value="2020">2020</option>
+          </select>
+        </div>
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <label htmlFor="trial-status" className="text-secondary font-label-md text-label-md">
+            Trial status
+          </label>
+          <select
+            id="trial-status"
+            value={trialStatusParam ?? ""}
+            onChange={(e) => onTrialStatusChange(e.target.value)}
+            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          >
+            <option value="">Any status</option>
+            <option value="stopped">Terminated / withdrawn</option>
+            <option value="recruiting">Recruiting</option>
           </select>
         </div>
       </section>

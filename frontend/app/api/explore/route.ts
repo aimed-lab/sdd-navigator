@@ -49,6 +49,7 @@ export async function POST(req: Request) {
   let personalize = true;
   let projectId: string | undefined;
   let sinceYear: number | undefined;
+  let statusFilter: string[] | undefined;
   try {
     const body = await req.json();
     if (body && typeof body.input === "string") input = body.input;
@@ -56,6 +57,10 @@ export async function POST(req: Request) {
     if (body && typeof body.project_id === "string") projectId = body.project_id;
     if (body && typeof body.since_year === "number" && Number.isFinite(body.since_year)) {
       sinceYear = body.since_year;
+    }
+    if (body && Array.isArray(body.status_filter)) {
+      const cleaned = body.status_filter.filter((s: unknown): s is string => typeof s === "string" && s.trim() !== "");
+      if (cleaned.length > 0) statusFilter = cleaned;
     }
   } catch {
     // malformed body -> treat as empty input (backend serves the default feed)
@@ -86,6 +91,7 @@ export async function POST(req: Request) {
   try {
     const payload: Record<string, unknown> = scope.length > 0 ? { input, scope } : { input };
     if (sinceYear !== undefined) payload.since_year = sinceYear;
+    if (statusFilter !== undefined) payload.status_filter = statusFilter;
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),

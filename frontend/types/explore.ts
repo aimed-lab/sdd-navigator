@@ -43,6 +43,17 @@ export type ExploreScope = Record<string, unknown> & {
   is_personalized?: boolean;
 };
 
+/** backend/explore-mcp/sources/clinical_trials.py's `raw` shape — a handful
+ *  of first-party fields, no top-level Item field for any of them. `why_stopped`
+ *  MUST be rendered verbatim wherever it's shown, never through any LLM/
+ *  summarization step — see components/ItemCard.tsx. */
+export type TrialRaw = {
+  nct_id?: string;
+  overall_status?: string | null;
+  why_stopped?: string | null;
+  phase?: string | null;
+};
+
 export type ExploreResponse = {
   input?: string;
   scope?: ExploreScope;

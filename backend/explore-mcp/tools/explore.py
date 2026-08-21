@@ -458,7 +458,28 @@ def _join_unique(*groups: list[str]) -> str:
 # last-resort net — rather than duplicating the branch per tool. See
 # CLAUDE.md-style audit note below `_QUERY_SLICES` for which other sources
 # were checked and found NOT to need this.
-_SINGLE_TERM_TOOLS = {"search_pager", "search_datasets"}
+#
+# search_datasets (GEO) is now handled SEPARATELY from this set — see
+# _datasets_query below. Diagnosed live (2026-08-21): the gene-first
+# single-term rule above was built and verified against GENE-LED queries
+# ("Amyotrophic lateral sclerosis ATXN2 TARDBP" -> 1; "ATXN2" alone -> 20),
+# but a DISEASE+MODALITY query with no gene at all was never checked against
+# that same rule, and it turns out to behave the opposite way: reducing to
+# `diseases[0]` alone THROWS AWAY the modality term and returns a huge,
+# modality-undifferentiated pool (bare "PDAC" -> 1560 GEO records; bare
+# "pancreatic ductal adenocarcinoma" -> 1491), while sending GEO the LITERAL
+# disease+modality phrase, no reduction at all, returns a small, actually
+# relevant set ("pancreatic ductal adenocarcinoma bulk RNA-seq" -> 54;
+# "PDAC single cell RNA-seq" -> 40; "PDAC spatial transcriptomics" -> 71;
+# "pancreatic organoid drug response" -> 18). So GEO's esearch is NOT
+# strict-AND across the board the way the original PHGDH/ATXN2 diagnostic
+# assumed — it tolerates a several-word disease+modality phrase fine; what it
+# doesn't tolerate is a GENE competing with unrelated disease/topic terms in
+# the same query (confirmed again here: "KRAS G12D pancreatic cancer
+# inhibitor" -> 19, healthy; "PHGDH glioblastoma metabolism" -> 0, while bare
+# "PHGDH" -> 61). The dividing line the evidence actually supports is
+# gene-led vs. not, not single-term vs. not — see _datasets_query.
+_SINGLE_TERM_TOOLS = {"search_pager"}
 
 # search_tools (GitHub) is the SAME collapse-under-composition bug, but a
 # DIFFERENT rule, not the gene-first one above — confirmed directly on the
@@ -504,9 +525,41 @@ def _single_method_query(scope: dict) -> str:
     return _join_unique(*[safe_scope[k] for k in SCOPE_KEYS])
 
 
+def _datasets_query(scope: dict) -> str:
+    """GEO (search_datasets) query composition — see the note above
+    _SINGLE_TERM_TOOLS for the live evidence this is built from.
+
+    GENE-LED (scope has a gene) -> the single most specific gene, alone,
+    same rule as the old _SINGLE_TERM_TOOLS branch and for the same reason:
+    a gene competing with disease/topic terms in one query can zero GEO out
+    ("PHGDH glioblastoma metabolism" -> 0; "PHGDH" alone -> 61). This is the
+    ORIGINAL documented fix (the PHGDH/ATXN2 diagnostic in the comments
+    above) and stays unchanged so it does not regress.
+
+    NOT GENE-LED (disease/modality only, e.g. "PDAC spatial transcriptomics")
+    -> the full non-gene scope (diseases + methods + topics), not just
+    `diseases[0]`. This is the fix: a disease-only reduction throws away the
+    modality term and returns a huge, undifferentiated pool (bare "PDAC" ->
+    1560), while keeping disease+modality together returns a small, relevant
+    set ("PDAC spatial transcriptomics" -> 71) — measured live, not assumed.
+    Genes are still excluded from this branch (there are none, by
+    definition, since this is the not-gene-led case)."""
+    genes = scope.get("genes") or []
+    if genes:
+        return genes[0].strip()
+    query = _join_unique(scope.get("diseases") or [], scope.get("methods") or [], scope.get("topics") or [])
+    if query:
+        return query
+    # Fully degenerate scope (no gene, no disease, no method, no topic) —
+    # same last-resort net as _query_for's own final line.
+    return _join_unique(*[scope[k] for k in SCOPE_KEYS])
+
+
 def _query_for(name: str, scope: dict) -> str:
     if name == "search_tools":
         return _single_method_query(scope)
+    if name == "search_datasets":
+        return _datasets_query(scope)
     if name in _SINGLE_TERM_TOOLS:
         if scope["genes"]:
             return scope["genes"][0].strip()
@@ -673,7 +726,10 @@ def _dispatch(name: str, query: str):
     raise ValueError(f"unknown tool: {name}")
 
 
-async def _execute(chosen: list[str], scope: dict, since_year: int | None = None) -> list[dict]:
+async def _execute(
+    chosen: list[str], scope: dict, since_year: int | None = None,
+    status_filter: list[str] | None = None,
+) -> list[dict]:
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
     papers_query_display: str | None = None
@@ -695,7 +751,13 @@ async def _execute(chosen: list[str], scope: dict, since_year: int | None = None
             specs.append((name, _KINDS[name], papers_query_display))
             continue
         query = _query_for(name, scope)
-        tasks.append(_dispatch(name, query))
+        if name == "search_trials" and status_filter:
+            # status_filter is UI-only (see explore_async's docstring) — never
+            # derived from scope/LLM extraction, forwarded verbatim to
+            # search_trials_async -> ClinicalTrials.gov's filter.overallStatus.
+            tasks.append(search_trials_async(query, _NET_LIMIT, status_filter=status_filter))
+        else:
+            tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))
 
     results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
@@ -736,6 +798,7 @@ async def _execute(chosen: list[str], scope: dict, since_year: int | None = None
 
 async def _explore_uncached(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+    status_filter: list[str] | None = None,
 ) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
     if not (input_text or "").strip():
@@ -767,7 +830,7 @@ async def _explore_uncached(
         )
         chosen = list(chosen)
 
-    sections = await _execute(chosen, scope, since_year)
+    sections = await _execute(chosen, scope, since_year, status_filter)
     return {
         "input": input_text,
         "scope": scope,
@@ -779,6 +842,7 @@ async def _explore_uncached(
 
 async def explore_async(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+    status_filter: list[str] | None = None,
 ) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
 
@@ -788,6 +852,20 @@ async def explore_async(
     caller-supplied value (see server.py's /api/explore bridge). Folded into the
     cache key below so a filtered and an unfiltered search of the same input
     never collide.
+
+    `status_filter`, when given (e.g. ["TERMINATED", "WITHDRAWN"]), restricts
+    the search_trials section to those ClinicalTrials.gov overall-status values
+    — forwarded to search_trials_async -> filter.overallStatus, same mechanism
+    tools/project_agent.py's digest already uses for its own two status-filtered
+    searches. UI-ONLY, same as since_year: NEVER derived from scope extraction
+    or free text. The word "terminated" in a raw query does not reach this
+    param — scope extraction has no status key (SCOPE_KEYS is fixed at
+    topics/genes/diseases/assets/methods) and would drop it as noise even if it
+    tried, the same failure class the since_year fix addressed for dates. A
+    small fixed status vocabulary isn't parsed from text here for the same
+    reason the date filter stayed UI-only: keeping the LLM out of a filter path
+    that changes which real-world results are shown is worth a control click.
+    Folded into the cache key below, same as since_year.
 
     Blank / whitespace-only input skips LLM extraction and routing entirely and
     serves the landing feed: a fixed tool set, with scope.is_default=true so the
@@ -822,19 +900,22 @@ async def explore_async(
     key_terms = terms if terms else input_text
     if since_year is not None:
         base_key += f":since{since_year}"
+    if status_filter:
+        base_key += f":status{','.join(status_filter)}"
     key = normalize_key(base_key, key_terms)
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
     return await cache.get_or_compute(
         key,
-        lambda: _explore_uncached(input_text, terms, since_year),
+        lambda: _explore_uncached(input_text, terms, since_year, status_filter),
         ttl, stale,
     )
 
 
 def explore(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+    status_filter: list[str] | None = None,
 ) -> dict:
     """Synchronous entry point (the registered tool signature).
 
@@ -842,5 +923,8 @@ def explore(
     run them with the right per-tool query, and return results grouped by kind:
     {scope, tools_called, reasoning, sections:[{kind, items}]}. `since_year`
     restricts search_papers's results to that year onward (see search_papers.py).
+    `status_filter` restricts search_trials to those ClinicalTrials.gov overall-
+    status values (e.g. ["TERMINATED", "WITHDRAWN"]) — UI-only, never parsed
+    from `input_text` (see explore_async's docstring).
     """
-    return asyncio.run(explore_async(input_text, scope_terms, since_year))
+    return asyncio.run(explore_async(input_text, scope_terms, since_year, status_filter))
