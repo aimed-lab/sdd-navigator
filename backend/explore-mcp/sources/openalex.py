@@ -50,6 +50,7 @@ async def fetch_openalex(
     cap: int,
     kind: str = "paper",
     sort: str | None = SORT_RECENT,
+    since_year: int | None = None,
 ) -> list[Item]:
     """Fetch OpenAlex works. `kind` tags the resulting Items — default "paper";
     search_news reuses this exact logic with kind="news".
@@ -64,6 +65,8 @@ async def fetch_openalex(
     url = f"https://api.openalex.org/works?search={quote(term)}&per-page={cap}"
     if sort:
         url += f"&sort={sort}"
+    if since_year is not None:
+        url += f"&filter=from_publication_date:{since_year}-01-01"
     url += _mailto_param()
     data = await get_json(client, url)
 

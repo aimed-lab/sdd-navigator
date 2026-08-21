@@ -256,7 +256,7 @@ def _clamp_limit(limit: int, *, ceiling: int, default: int, tool: str) -> int:
 
 
 @mcp.tool()
-async def search_papers(query: str, limit: int = 20) -> list[dict]:
+async def search_papers(query: str, limit: int = 20, since_year: int | None = None) -> list[dict]:
     """Search the live scientific literature for papers relevant to a topic.
 
     Fans out to PubMed, OpenAlex and Crossref in parallel and returns up to `limit`
@@ -269,9 +269,10 @@ async def search_papers(query: str, limit: int = 20) -> list[dict]:
     Args:
         query: A topical query, e.g. "PHGDH Alzheimer's disease" or "EGFR glioblastoma".
         limit: Max items to return (default 20, capped at 50).
+        since_year: Optional. Restricts to papers published on/after this year.
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_papers")
-    items = await search_papers_async(query, limit)
+    items = await search_papers_async(query, limit, since_year)
     return [item.model_dump() for item in items]
 
 
@@ -468,7 +469,7 @@ async def search_wiki(query: str, limit: int = 20) -> list[dict]:
 
 
 @mcp.tool()
-async def explore(input_text: str) -> dict:
+async def explore(input_text: str, since_year: int | None = None) -> dict:
     """Orchestrate a research query from free text across all the search tools.
 
     Reasons over the message to (1) extract a structured scope
@@ -484,8 +485,13 @@ async def explore(input_text: str) -> dict:
 
     Args:
         input_text: The scientist's free-text message.
+        since_year: Optional. Restricts the search_papers section (PubMed/OpenAlex/
+            Crossref only) to papers published on/after this year. No other tool's
+            results are date-filtered. If the filtered search_papers section comes
+            back empty, the section is silently re-fetched unfiltered and flagged
+            with date_fallback=true rather than shown empty.
     """
-    return await explore_async(input_text)
+    return await explore_async(input_text, since_year=since_year)
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -547,11 +553,18 @@ async def explore_http(request):
     input_text = body.get("input", "") if isinstance(body, dict) else ""
     raw_scope = body.get("scope") if isinstance(body, dict) else None
     scope_terms = raw_scope if isinstance(raw_scope, list) else None
+    raw_since_year = body.get("since_year") if isinstance(body, dict) else None
+    try:
+        since_year = int(raw_since_year) if raw_since_year is not None else None
+    except (TypeError, ValueError):
+        since_year = None
     try:
         # trim_* only on egress — the cached copy keeps its full `raw` so the
         # citation graph stays rebuildable server-side (see response.py).
         return JSONResponse(
-            trim_explore_result(await explore_async(input_text or "", scope_terms))
+            trim_explore_result(
+                await explore_async(input_text or "", scope_terms, since_year)
+            )
         )
     except Exception as exc:
         logger.exception("POST /api/explore failed: input=%r", input_text)
@@ -646,10 +659,15 @@ async def papers_http(request):
         limit = max(1, min(int(request.query_params.get("limit") or 8), 50))
     except (TypeError, ValueError):
         limit = 8
+    raw_since_year = request.query_params.get("since_year")
+    try:
+        since_year = int(raw_since_year) if raw_since_year else None
+    except (TypeError, ValueError):
+        since_year = None
     if not query.strip():
         return JSONResponse({"query": query, "items": []})
     try:
-        items = await search_papers_async(query, limit)
+        items = await search_papers_async(query, limit, since_year)
         return JSONResponse(
             {"query": query, "items": trim_items([i.model_dump() for i in items])}
         )

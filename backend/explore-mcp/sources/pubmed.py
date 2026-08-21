@@ -48,12 +48,19 @@ def _api_key_param() -> str:
     return f"&api_key={quote(key)}" if key else ""
 
 
-async def fetch_pubmed(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+async def fetch_pubmed(
+    client: httpx.AsyncClient, term: str, cap: int, since_year: int | None = None
+) -> list[Item]:
     auth = _api_key_param()   # applies to BOTH E-utilities calls below
 
     search_url = (
         f"{_ESEARCH}?db=pubmed&term={quote(term)}&retmax={cap}&sort=date&retmode=json{auth}"
     )
+    if since_year is not None:
+        # datetype=pdat scopes mindate/maxdate to publication date (not the
+        # E-utilities default, entry date). maxdate is a fixed far-future cap
+        # so this is a genuine "since Y" filter, not a bounded window.
+        search_url += f"&datetype=pdat&mindate={since_year}/01/01&maxdate=3000/01/01"
     search_data = await get_json(client, search_url)
     ids = ((search_data or {}).get("esearchresult") or {}).get("idlist") or []
     if not ids:

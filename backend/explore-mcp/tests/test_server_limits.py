@@ -71,7 +71,7 @@ def test_clamp_does_not_log_when_within_ceiling(caplog):
 def test_search_papers_clamps_at_the_boundary(monkeypatch):
     seen = {}
 
-    async def fake(query, limit):
+    async def fake(query, limit, since_year=None):
         seen["limit"] = limit
         return []
 
@@ -83,7 +83,7 @@ def test_search_papers_clamps_at_the_boundary(monkeypatch):
 def test_search_papers_under_ceiling_passes_through(monkeypatch):
     seen = {}
 
-    async def fake(query, limit):
+    async def fake(query, limit, since_year=None):
         seen["limit"] = limit
         return []
 
@@ -95,7 +95,7 @@ def test_search_papers_under_ceiling_passes_through(monkeypatch):
 def test_search_papers_zero_limit_falls_back_to_default(monkeypatch):
     seen = {}
 
-    async def fake(query, limit):
+    async def fake(query, limit, since_year=None):
         seen["limit"] = limit
         return []
 
@@ -107,7 +107,7 @@ def test_search_papers_zero_limit_falls_back_to_default(monkeypatch):
 def test_search_papers_negative_limit_falls_back_to_default(monkeypatch):
     seen = {}
 
-    async def fake(query, limit):
+    async def fake(query, limit, since_year=None):
         seen["limit"] = limit
         return []
 

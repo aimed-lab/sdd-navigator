@@ -37,7 +37,7 @@ def executed(monkeypatch):
     with — one entry per ACTUAL compute, so its length is the miss count."""
     calls: list[tuple[list[str], dict]] = []
 
-    async def fake_execute(chosen, scope):
+    async def fake_execute(chosen, scope, since_year=None):
         calls.append((list(chosen), dict(scope)))
         return [{"tool": name, "kind": te._KINDS[name], "query": "", "items": []} for name in chosen]
 

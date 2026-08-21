@@ -26,6 +26,11 @@ export type ExploreSection = {
   query?: string;
   items: ExploreItem[];
   error?: string;
+  // Set on the "paper" section only, and only when a since_year filter was
+  // requested but returned zero results after merge/dedupe: the backend
+  // silently re-fetched unfiltered and these items are the unfiltered set.
+  date_fallback?: boolean;
+  date_fallback_message?: string;
 };
 
 /** The structured scope the backend either extracted from a search or used for

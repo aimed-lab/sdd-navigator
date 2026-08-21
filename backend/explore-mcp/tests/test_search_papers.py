@@ -35,13 +35,13 @@ def _item(source, ext, *, signal=None, date="2024-01-01T00:00:00.000Z", key=None
 
 
 def test_failing_source_does_not_sink_batch():
-    async def ok_pubmed(client, q, limit):
+    async def ok_pubmed(client, q, limit, **kw):
         return [_item("pubmed", "1", date="2024-06-01T00:00:00.000Z")]
 
     async def boom_openalex(client, q, limit, **kw):
         raise RuntimeError("OpenAlex is down")
 
-    async def ok_crossref(client, q, limit):
+    async def ok_crossref(client, q, limit, **kw):
         return [_item("crossref", "1", date="2024-02-01T00:00:00.000Z")]
 
     orig = (sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref)
@@ -71,13 +71,13 @@ def test_rank_interleave_does_not_let_signal_dominate_source():
                   as_of="2024-01-01T00:00:00.000Z"), date="2019-01-01T00:00:00.000Z"),
         ]
 
-    async def ok_pubmed(client, q, limit):
+    async def ok_pubmed(client, q, limit, **kw):
         return [
             _item("pubmed", "new", date="2025-01-01T00:00:00.000Z"),
             _item("pubmed", "old", date="2018-01-01T00:00:00.000Z"),
         ]
 
-    async def ok_crossref(client, q, limit):
+    async def ok_crossref(client, q, limit, **kw):
         return []
 
     orig = (sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref)
@@ -123,6 +123,61 @@ def test_search_papers_requests_the_relevance_sort():
         sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = orig
 
     assert captured["sort"] is SORT_RELEVANCE
+
+
+def test_since_year_is_threaded_to_every_source():
+    """search_papers_async(query, limit, since_year) must pass since_year to
+    all three source fetchers — the date-filtering fix this test file is
+    otherwise silent about."""
+    captured = {}
+
+    async def spy_pubmed(client, q, limit, **kw):
+        captured["pubmed"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    async def spy_openalex(client, q, limit, **kw):
+        captured["openalex"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    async def spy_crossref(client, q, limit, **kw):
+        captured["crossref"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    orig = (sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref)
+    sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = spy_pubmed, spy_openalex, spy_crossref
+    try:
+        asyncio.run(sp.search_papers_async("anything", limit=10, since_year=2024))
+    finally:
+        sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = orig
+
+    assert captured == {"pubmed": 2024, "openalex": 2024, "crossref": 2024}
+
+
+def test_since_year_none_is_unchanged_behavior():
+    """Omitting since_year must send None through to every source (today's
+    behavior, byte-for-byte) rather than some other default."""
+    captured = {}
+
+    async def spy_pubmed(client, q, limit, **kw):
+        captured["pubmed"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    async def spy_openalex(client, q, limit, **kw):
+        captured["openalex"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    async def spy_crossref(client, q, limit, **kw):
+        captured["crossref"] = kw.get("since_year", "NOT PASSED")
+        return []
+
+    orig = (sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref)
+    sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = spy_pubmed, spy_openalex, spy_crossref
+    try:
+        asyncio.run(sp.search_papers_async("anything", limit=10))
+    finally:
+        sp.fetch_pubmed, sp.fetch_openalex, sp.fetch_crossref = orig
+
+    assert captured == {"pubmed": None, "openalex": None, "crossref": None}
 
 
 if __name__ == "__main__":

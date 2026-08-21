@@ -88,24 +88,31 @@ def _rank_merge(items: list[Item]) -> list[Item]:
     return [item for _, item in ranked]
 
 
-async def search_papers_async(query: str, limit: int = 20) -> list[Item]:
-    """Cached + single-flighted wrapper around the fan-out (see _fetch)."""
-    key = normalize_key(f"papers:{limit}", query)
+async def search_papers_async(
+    query: str, limit: int = 20, since_year: int | None = None
+) -> list[Item]:
+    """Cached + single-flighted wrapper around the fan-out (see _fetch).
+
+    `since_year`, when set, is folded into the cache key: a date-filtered
+    search and an unfiltered one for the same query text are genuinely
+    different results and must never share a cache entry.
+    """
+    key = normalize_key(f"papers:{limit}:{since_year or ''}", query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit, since_year), TTL_SOURCE, STALE_SOURCE
     )
 
 
-async def _fetch(query: str, limit: int) -> list[Item]:
+async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[Item]:
     """Async core: fan out, isolate failures, merge, dedupe, sort, cap."""
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
         results = await asyncio.gather(
-            fetch_pubmed(client, query, limit),
+            fetch_pubmed(client, query, limit, since_year=since_year),
             # Relevance, not recency: a topic's important papers cite each other,
             # which is what gives WINNER a graph to rank (a recency-sorted set
             # has ~zero intra-set citations). search_news keeps the recency sort.
-            fetch_openalex(client, query, limit, sort=SORT_RELEVANCE),
-            fetch_crossref(client, query, limit),
+            fetch_openalex(client, query, limit, sort=SORT_RELEVANCE, since_year=since_year),
+            fetch_crossref(client, query, limit, since_year=since_year),
             return_exceptions=True,   # a failing source must not sink the batch
         )
 
@@ -135,7 +142,8 @@ async def _fetch(query: str, limit: int) -> list[Item]:
 
 
 async def search_papers_multi_async(
-    queries: list[str], *, limit_per_query: int, final_limit: int
+    queries: list[str], *, limit_per_query: int, final_limit: int,
+    since_year: int | None = None,
 ) -> list[Item]:
     """Fan-out entry point: run several entity-scoped queries in PARALLEL,
     each through the existing single-query path (search_papers_async) — so
@@ -214,10 +222,10 @@ async def search_papers_multi_async(
     if not queries:
         return []
     if len(queries) == 1:
-        return await search_papers_async(queries[0], final_limit)
+        return await search_papers_async(queries[0], final_limit, since_year)
 
     results = await asyncio.gather(
-        *(search_papers_async(q, limit_per_query) for q in queries),
+        *(search_papers_async(q, limit_per_query, since_year) for q in queries),
         return_exceptions=True,
     )
 
@@ -267,10 +275,11 @@ async def search_papers_multi_async(
     return [item for item in ranked_global if item.dedupe_key in used][:final_limit]
 
 
-def search_papers(query: str, limit: int = 20) -> list[Item]:
+def search_papers(query: str, limit: int = 20, since_year: int | None = None) -> list[Item]:
     """Synchronous entry point (the registered tool signature).
 
     Search PubMed, OpenAlex and Crossref for papers relevant to `query` and return
-    up to `limit` deduped Items, best-ranked first.
+    up to `limit` deduped Items, best-ranked first. `since_year`, when given,
+    restricts to papers published on/after that year (see sources/*.py).
     """
-    return asyncio.run(search_papers_async(query, limit))
+    return asyncio.run(search_papers_async(query, limit, since_year))

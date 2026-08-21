@@ -673,9 +673,10 @@ def _dispatch(name: str, query: str):
     raise ValueError(f"unknown tool: {name}")
 
 
-async def _execute(chosen: list[str], scope: dict) -> list[dict]:
+async def _execute(chosen: list[str], scope: dict, since_year: int | None = None) -> list[dict]:
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
+    papers_query_display: str | None = None
     for name in chosen:
         if name == "search_papers":
             # Entity fan-out (see _entity_queries_for_papers) instead of one
@@ -684,10 +685,14 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
             # UI/API transparency string — never re-parsed as a single query
             # anywhere.
             queries = _entity_queries_for_papers(scope)
+            papers_query_display = " | ".join(queries)
             tasks.append(
-                search_papers_multi_async(queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT)
+                search_papers_multi_async(
+                    queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
+                    since_year=since_year,
+                )
             )
-            specs.append((name, _KINDS[name], " | ".join(queries)))
+            specs.append((name, _KINDS[name], papers_query_display))
             continue
         query = _query_for(name, scope)
         tasks.append(_dispatch(name, query))
@@ -707,11 +712,31 @@ async def _execute(chosen: list[str], scope: dict) -> list[dict]:
             )
         else:
             section["items"] = [item.model_dump() for item in result]
+            # VISIBLE FALLBACK, never silent: since_year is set and the date-
+            # filtered fan-out came back with NOTHING at all, across every
+            # papers source AFTER merge/dedupe — not per-source, since
+            # OpenAlex is the deep source and one thin source (e.g. PubMed)
+            # while OpenAlex still has results is not a real "no results"
+            # experience for the user. Only an empty COMBINED result set
+            # re-fetches, so this never fires on a healthy filtered search.
+            if tool == "search_papers" and since_year is not None and not result:
+                queries = _entity_queries_for_papers(scope)
+                fallback_items = await search_papers_multi_async(
+                    queries, limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
+                    since_year=None,
+                )
+                section["items"] = [item.model_dump() for item in fallback_items]
+                section["date_fallback"] = True
+                section["date_fallback_message"] = (
+                    f"No papers since {since_year} — showing all results instead."
+                )
         sections.append(section)
     return sections
 
 
-async def _explore_uncached(input_text: str, scope_terms: list[str] | None = None) -> dict:
+async def _explore_uncached(
+    input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+) -> dict:
     """The real orchestration: extract scope, route, fan out, assemble."""
     if not (input_text or "").strip():
         chosen = list(_DEFAULT_TOOLS)
@@ -742,7 +767,7 @@ async def _explore_uncached(input_text: str, scope_terms: list[str] | None = Non
         )
         chosen = list(chosen)
 
-    sections = await _execute(chosen, scope)
+    sections = await _execute(chosen, scope, since_year)
     return {
         "input": input_text,
         "scope": scope,
@@ -752,8 +777,17 @@ async def _explore_uncached(input_text: str, scope_terms: list[str] | None = Non
     }
 
 
-async def explore_async(input_text: str, scope_terms: list[str] | None = None) -> dict:
+async def explore_async(
+    input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
+
+    `since_year`, when given, restricts search_papers (PubMed/OpenAlex/Crossref
+    only — no other tool's date logic changes) to results published on/after
+    that year. Never derived from scope extraction; comes only from an explicit
+    caller-supplied value (see server.py's /api/explore bridge). Folded into the
+    cache key below so a filtered and an unfiltered search of the same input
+    never collide.
 
     Blank / whitespace-only input skips LLM extraction and routing entirely and
     serves the landing feed: a fixed tool set, with scope.is_default=true so the
@@ -784,22 +818,29 @@ async def explore_async(input_text: str, scope_terms: list[str] | None = None) -
     blank = not (input_text or "").strip()
     terms = _clean_terms(scope_terms) if blank else []
 
-    key = normalize_key("explore:interests", terms) if terms else normalize_key("explore", input_text)
+    base_key = "explore:interests" if terms else "explore"
+    key_terms = terms if terms else input_text
+    if since_year is not None:
+        base_key += f":since{since_year}"
+    key = normalize_key(base_key, key_terms)
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
     return await cache.get_or_compute(
         key,
-        lambda: _explore_uncached(input_text, terms),
+        lambda: _explore_uncached(input_text, terms, since_year),
         ttl, stale,
     )
 
 
-def explore(input_text: str, scope_terms: list[str] | None = None) -> dict:
+def explore(
+    input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
+) -> dict:
     """Synchronous entry point (the registered tool signature).
 
     Reason about a free-text research message, route to the fitting search tools,
     run them with the right per-tool query, and return results grouped by kind:
-    {scope, tools_called, reasoning, sections:[{kind, items}]}.
+    {scope, tools_called, reasoning, sections:[{kind, items}]}. `since_year`
+    restricts search_papers's results to that year onward (see search_papers.py).
     """
-    return asyncio.run(explore_async(input_text, scope_terms))
+    return asyncio.run(explore_async(input_text, scope_terms, since_year))

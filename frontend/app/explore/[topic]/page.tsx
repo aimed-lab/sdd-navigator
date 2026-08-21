@@ -62,12 +62,20 @@ function SearchResults() {
 
   const projectId = searchParams.get("project_id") || undefined;
   const projectName = searchParams.get("project_name") || undefined;
+  // ?since=<year> — restricts the Latest Papers section to that year onward.
+  // Same param name/shape as the feed page, so a link between the two carries
+  // the filter along. Default unset = current, unconstrained behavior.
+  const sinceParam = searchParams.get("since");
+  const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
   // Carried forward on re-search (see `submit`) so project context
   // survives editing the query, not just the first arrival.
-  const projectQs =
-    projectId && projectName
-      ? `?${new URLSearchParams({ project_id: projectId, project_name: projectName }).toString()}`
-      : "";
+  const extraQs: Record<string, string> = {};
+  if (projectId && projectName) {
+    extraQs.project_id = projectId;
+    extraQs.project_name = projectName;
+  }
+  if (sinceParam) extraQs.since = sinceParam;
+  const projectQs = Object.keys(extraQs).length > 0 ? `?${new URLSearchParams(extraQs).toString()}` : "";
 
   const [query, setQuery] = useState(topic); // search bar value (pre-filled)
   const [data, setData] = useState<ExploreResponse | null>(null);
@@ -98,10 +106,13 @@ function SearchResults() {
       setLoading(true);
       setFailed(false);
       try {
+        const body = useProjectContext
+          ? { project_id: projectId }
+          : { input: topic, ...(sinceYear !== undefined ? { since_year: sinceYear } : {}) };
         const res = await fetch("/api/explore", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(useProjectContext ? { project_id: projectId } : { input: topic }),
+          body: JSON.stringify(body),
         });
         const json = (await res.json()) as ExploreResponse;
         if (!cancelled) setData(json);
@@ -116,7 +127,7 @@ function SearchResults() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
-  }, [topic]);
+  }, [topic, sinceYear]);
 
   // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
   const { fullSections, pooledItems } = useMemo(() => {
@@ -169,6 +180,14 @@ function SearchResults() {
     if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}${projectQs}`);
   };
 
+  const onSinceChange = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("since", value);
+    else params.delete("since");
+    const qs = params.toString();
+    router.push(qs ? `/explore/${encodeURIComponent(topic)}?${qs}` : `/explore/${encodeURIComponent(topic)}`);
+  };
+
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
       {/* Saving-to-project indicator — a save from this page must never go
@@ -200,6 +219,24 @@ function SearchResults() {
             <span className="material-symbols-outlined">search</span>
           </button>
         </form>
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <label htmlFor="since-year" className="text-secondary font-label-md text-label-md">
+            Papers since
+          </label>
+          <select
+            id="since-year"
+            value={sinceParam ?? ""}
+            onChange={(e) => onSinceChange(e.target.value)}
+            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          >
+            <option value="">Any time</option>
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+            <option value="2022">2022</option>
+            <option value="2020">2020</option>
+          </select>
+        </div>
       </section>
 
       {/* Query heading */}
@@ -317,6 +354,11 @@ function SearchResults() {
             {activeSections.map((section: ExploreSection) => (
               <section key={section.tool}>
                 <SectionHeader title={titleFor(section.kind)} />
+                {section.date_fallback && (
+                  <p className="mb-4 text-secondary font-body-md">
+                    {section.date_fallback_message ?? "No papers matched that date filter — showing all results instead."}
+                  </p>
+                )}
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
                     <ItemCard key={item.id} item={item} projectId={projectId} />

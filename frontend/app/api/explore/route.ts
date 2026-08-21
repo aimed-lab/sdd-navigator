@@ -48,11 +48,15 @@ export async function POST(req: Request) {
   let input = "";
   let personalize = true;
   let projectId: string | undefined;
+  let sinceYear: number | undefined;
   try {
     const body = await req.json();
     if (body && typeof body.input === "string") input = body.input;
     if (body && body.personalize === false) personalize = false;
     if (body && typeof body.project_id === "string") projectId = body.project_id;
+    if (body && typeof body.since_year === "number" && Number.isFinite(body.since_year)) {
+      sinceYear = body.since_year;
+    }
   } catch {
     // malformed body -> treat as empty input (backend serves the default feed)
   }
@@ -80,10 +84,12 @@ export async function POST(req: Request) {
   }
 
   try {
+    const payload: Record<string, unknown> = scope.length > 0 ? { input, scope } : { input };
+    if (sinceYear !== undefined) payload.since_year = sinceYear;
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(scope.length > 0 ? { input, scope } : { input }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`explore backend responded ${res.status}`);
     const data = await res.json();

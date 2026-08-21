@@ -26,11 +26,15 @@ _CROSSREF_NON_ARTICLE_TYPES = {
 }
 
 
-async def fetch_crossref(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+async def fetch_crossref(
+    client: httpx.AsyncClient, term: str, cap: int, since_year: int | None = None
+) -> list[Item]:
     url = (
         f"https://api.crossref.org/works?query={quote(term)}"
         f"&rows={cap}&sort=published&order=desc"
     )
+    if since_year is not None:
+        url += f"&filter=from-pub-date:{since_year}-01-01"
     data = await get_json(client, url)
 
     items: list[Item] = []

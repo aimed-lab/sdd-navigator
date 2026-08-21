@@ -55,6 +55,11 @@ function ExploreFeed() {
   // ?scope=off — set when the user clears the last interest chip. The generic
   // feed is then what they asked for, so don't re-personalize it under them.
   const personalize = searchParams.get("scope") !== "off";
+  // ?since=<year> — restricts the Latest Papers section to that year onward.
+  // Default unset = current, unconstrained behavior. Kept in the URL so a
+  // filtered search is shareable, same as ?category= / ?scope=.
+  const sinceParam = searchParams.get("since");
+  const sinceYear = sinceParam && /^\d{4}$/.test(sinceParam) ? Number(sinceParam) : undefined;
   const [query, setQuery] = useState("");
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +79,11 @@ function ExploreFeed() {
           headers: { "Content-Type": "application/json" },
           // empty input -> the landing feed; the route scopes it to the signed-in
           // user's interests unless personalization was explicitly turned off.
-          body: JSON.stringify({ input: "", personalize }),
+          body: JSON.stringify({
+            input: "",
+            personalize,
+            ...(sinceYear !== undefined ? { since_year: sinceYear } : {}),
+          }),
         });
         const json = (await res.json()) as ExploreResponse;
         if (!cancelled) setData(json);
@@ -87,7 +96,7 @@ function ExploreFeed() {
     return () => {
       cancelled = true;
     };
-  }, [personalize]);
+  }, [personalize, sinceYear]);
 
   // The interests the feed was actually built from, straight from the response —
   // present only when the backend personalized it.
@@ -121,10 +130,20 @@ function ExploreFeed() {
   const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
   const showError = failed || data?.error === true || (!loading && totalItems === 0);
 
+  const sinceQs = sinceYear !== undefined ? `?since=${sinceYear}` : "";
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const q = query.trim();
-    if (q) router.push(`/explore/${encodeURIComponent(q)}`);
+    if (q) router.push(`/explore/${encodeURIComponent(q)}${sinceQs}`);
+  };
+
+  const onSinceChange = (value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value) params.set("since", value);
+    else params.delete("since");
+    const qs = params.toString();
+    router.push(qs ? `/explore?${qs}` : "/explore");
   };
 
   return (
@@ -147,6 +166,24 @@ function ExploreFeed() {
             <span className="material-symbols-outlined">search</span>
           </button>
         </form>
+        <div className="mt-2 flex items-center justify-end gap-2">
+          <label htmlFor="since-year" className="text-secondary font-label-md text-label-md">
+            Papers since
+          </label>
+          <select
+            id="since-year"
+            value={sinceParam ?? ""}
+            onChange={(e) => onSinceChange(e.target.value)}
+            className="h-9 px-3 bg-white border border-outline-variant/40 rounded-lg text-label-md font-label-md focus:ring-2 focus:ring-primary/20 focus:border-primary"
+          >
+            <option value="">Any time</option>
+            <option value="2026">2026</option>
+            <option value="2025">2025</option>
+            <option value="2024">2024</option>
+            <option value="2022">2022</option>
+            <option value="2020">2020</option>
+          </select>
+        </div>
       </section>
 
       {/* Scope chips — the interests this feed was built from (personalized only) */}
@@ -223,6 +260,11 @@ function ExploreFeed() {
             {activeSections.map((section: ExploreSection) => (
               <section key={section.tool}>
                 <SectionHeader title={titleFor(section.kind)} />
+                {section.date_fallback && (
+                  <p className="mb-4 text-secondary font-body-md">
+                    {section.date_fallback_message ?? "No papers matched that date filter — showing all results instead."}
+                  </p>
+                )}
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
                     <ItemCard key={item.id} item={item} />
