@@ -124,19 +124,36 @@ export async function createResourceAction(input: unknown): Promise<ActionResult
   }
 }
 
+// `path` below is the exact current URL (pathname + querystring, e.g.
+// "/collaborate?community=biokdd"), passed up from CommunityPanel via
+// usePathname()/useSearchParams(). revalidatePath("/collaborate") alone
+// invalidates the Next.js client Router Cache entry for the bare path only
+// — the community view actually on screen is a DIFFERENT entry
+// (?community=<slug> is part of the cache key), so the membership button
+// kept showing the pre-action state until that exact URL's entry was
+// invalidated too (or the URL changed, which is why a dummy query param
+// "fixed" it). Revalidating both covers the current view AND the plain
+// board. See lib/server/communities.ts's header for the other half of this
+// fix (unstable_noStore() on the membership reads themselves).
+function revalidateCollaborate(path?: string) {
+  revalidatePath("/collaborate");
+  if (path && path !== "/collaborate") revalidatePath(path);
+}
+
 /** Join an open community, or request to join a closed one — which one
  *  happens is decided by community_members_self_insert (RLS), not here; see
  *  lib/server/communities.ts:joinCommunity. `isOpen` just carries the
  *  community row the caller already has on screen through to the insert. */
 export async function joinCommunityAction(
   communityId: string,
-  isOpen: boolean
+  isOpen: boolean,
+  path?: string
 ): Promise<SimpleActionResult> {
   if (!communityId) return { ok: false, error: "Missing community." };
 
   try {
     await joinCommunity(communityId, isOpen);
-    revalidatePath("/collaborate");
+    revalidateCollaborate(path);
     return { ok: true };
   } catch (e) {
     if (e instanceof UnauthorizedError) {
@@ -149,12 +166,15 @@ export async function joinCommunityAction(
 
 /** Leave a community, or withdraw a pending request — same action either
  *  way (community_members_self_delete, RLS). */
-export async function leaveCommunityAction(communityId: string): Promise<SimpleActionResult> {
+export async function leaveCommunityAction(
+  communityId: string,
+  path?: string
+): Promise<SimpleActionResult> {
   if (!communityId) return { ok: false, error: "Missing community." };
 
   try {
     await leaveCommunity(communityId);
-    revalidatePath("/collaborate");
+    revalidateCollaborate(path);
     return { ok: true };
   } catch (e) {
     if (e instanceof UnauthorizedError) {
@@ -170,12 +190,15 @@ export async function leaveCommunityAction(communityId: string): Promise<SimpleA
  *  update matches zero rows and this still reports success from the DB's
  *  point of view, so the UI only ever shows this action to someone the
  *  server already told is a lead (see the pending-requests read). */
-export async function approveMembershipAction(memberRowId: string): Promise<SimpleActionResult> {
+export async function approveMembershipAction(
+  memberRowId: string,
+  path?: string
+): Promise<SimpleActionResult> {
   if (!memberRowId) return { ok: false, error: "Missing request." };
 
   try {
     await approveMembership(memberRowId);
-    revalidatePath("/collaborate");
+    revalidateCollaborate(path);
     return { ok: true };
   } catch (e) {
     if (e instanceof UnauthorizedError) {

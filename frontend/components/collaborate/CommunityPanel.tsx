@@ -13,13 +13,23 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   approveMembershipAction,
   joinCommunityAction,
   leaveCommunityAction,
 } from "@/app/collaborate/actions";
 import type { Membership, PendingRequest } from "@/lib/server/communities";
+
+/** The exact URL on screen (path + querystring) — this is the Router Cache
+ *  key that has to be revalidated for the button to update without a full
+ *  navigation. See app/collaborate/actions.ts's revalidateCollaborate(). */
+function useCurrentPath(): string {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const qs = searchParams.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
+}
 
 function JoinAction({
   communityId,
@@ -32,6 +42,7 @@ function JoinAction({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const currentPath = useCurrentPath();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,7 +69,7 @@ function JoinAction({
           disabled={busy}
           onClick={async () => {
             setBusy(true);
-            const res = await leaveCommunityAction(communityId);
+            const res = await leaveCommunityAction(communityId, currentPath);
             if (res.ok) {
               router.refresh();
             } else {
@@ -87,7 +98,7 @@ function JoinAction({
           disabled={busy}
           onClick={async () => {
             setBusy(true);
-            const res = await leaveCommunityAction(communityId);
+            const res = await leaveCommunityAction(communityId, currentPath);
             if (res.ok) {
               router.refresh();
             } else {
@@ -113,7 +124,7 @@ function JoinAction({
         onClick={async () => {
           setBusy(true);
           setError(null);
-          const res = await joinCommunityAction(communityId, isOpen);
+          const res = await joinCommunityAction(communityId, isOpen, currentPath);
           if (res.ok) {
             router.refresh();
           } else {
@@ -163,6 +174,7 @@ function ShareButton({ path }: { path: string }) {
 
 function PendingRequests({ requests }: { requests: PendingRequest[] }) {
   const router = useRouter();
+  const currentPath = useCurrentPath();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -185,7 +197,7 @@ function PendingRequests({ requests }: { requests: PendingRequest[] }) {
               onClick={async () => {
                 setBusyId(r.id);
                 setError(null);
-                const res = await approveMembershipAction(r.id);
+                const res = await approveMembershipAction(r.id, currentPath);
                 if (res.ok) {
                   router.refresh();
                 } else {

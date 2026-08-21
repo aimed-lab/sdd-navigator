@@ -19,7 +19,32 @@
 // a SECURITY DEFINER RPC that returns aggregates only (never a row) —
 // deliberately granted to anon (see that migration) so a shared link shows
 // the community is alive before asking anyone to sign in.
+//
+// CACHING (2026-08-21 fix): join/leave/approve write through Server Actions
+// that already call revalidatePath() — but the symptom reported was stale
+// membership state surviving that: /collaborate?community=biokdd kept
+// showing the pre-action button until the URL changed, even though
+// community_members itself was correct. That's the Next.js CLIENT Router
+// Cache (a per-URL RSC-payload cache), not the server-side Full Route Cache
+// — this page is already fully dynamic (it reads searchParams, which alone
+// forces dynamic rendering regardless of the `dynamic` export at the top of
+// page.tsx), so there was no server-side page cache to disable in the first
+// place. The actual fix has two parts, both scoped to the membership read
+// ONLY — posts/resources keep whatever caching they'd otherwise get:
+//   1. The Server Actions now revalidatePath() the EXACT current URL
+//      (path + ?community=<slug>), not just the bare "/collaborate" — the
+//      client Router Cache keys its entries per full URL, so revalidating
+//      only the path-without-query left the query-bearing entry (the one
+//      actually on screen) untouched. See app/collaborate/actions.ts.
+//   2. getMembership() (and the other two per-viewer membership reads
+//      below) call unstable_noStore() — an explicit, LOCAL opt-out of
+//      caching for just this data fetch, rather than something that would
+//      affect listCommunities/listPendingRequests-adjacent public reads or
+//      force the whole route to declare itself dynamic (it already must be,
+//      via searchParams, but this makes the "this read must always be
+//      fresh" intent explicit and independent of that).
 
+import { unstable_noStore as noStore } from "next/cache";
 import { getSession, requireCurrentUser } from "@/lib/auth";
 import { getAnonServerClient } from "./supabaseServer";
 
@@ -74,6 +99,7 @@ export type Membership = { state: MembershipState; isLead: boolean };
  *  alongside "active" — it's what the UI checks before showing the
  *  pending-requests / approve affordance. */
 export async function getMembership(communityId: string): Promise<Membership> {
+  noStore(); // this specific read must never be served from a cached RSC payload
   const session = await getSession();
   if (!session) return { state: "signed_out", isLead: false };
 
@@ -130,6 +156,7 @@ export type PendingRequest = { id: string; email: string | null; requested_at: s
  *  community (community_members' self-or-lead SELECT policy is the actual
  *  gate; a non-lead caller just gets an empty list back, not an error). */
 export async function listPendingRequests(communityId: string): Promise<PendingRequest[]> {
+  noStore(); // same reasoning as getMembership() — must reflect the latest approve/leave
   const session = await getSession();
   if (!session) return [];
 
