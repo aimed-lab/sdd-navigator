@@ -21,18 +21,24 @@ from models import Item, Signal
 from .base import filter_quality, get_json, now_iso, to_iso
 
 
-def _mailto_param() -> str:
-    """`&mailto=…` when OPENALEX_EMAIL is set, else "".
+def _api_key_param() -> str:
+    """`&api_key=…` when OPENALEX_API_KEY is set, else "".
 
-    This is OpenAlex's "polite pool": identified traffic gets faster, more
-    consistent service and is far less likely to be throttled. Unset -> the
-    common pool, which still works.
+    OpenAlex retired the unauthenticated "polite pool" (`mailto=`) on
+    2026-02-13 in favor of a keyed, credit-metered model (see
+    docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication).
+    Without a key, every request here runs on the unauthenticated common
+    pool and is throttled hard — this is exactly what silently degraded
+    WINNER to a no-op for six months (every source request 429ing, isolated
+    per-source by _fetch's exception handling, so it never surfaced as an
+    error, just as an empty citation graph). `api_key=` is now required to
+    get real throughput.
 
     Read at CALL time, not import time: server.py imports the tools before it
     calls load_dotenv(), so a module-level read would miss the .env values.
     """
-    email = (os.environ.get("OPENALEX_EMAIL") or "").strip()
-    return f"&mailto={quote(email)}" if email else ""
+    key = (os.environ.get("OPENALEX_API_KEY") or "").strip()
+    return f"&api_key={quote(key)}" if key else ""
 
 
 # OpenAlex sort for recency-first callers (search_news). Kept as the DEFAULT so
@@ -67,7 +73,16 @@ async def fetch_openalex(
         url += f"&sort={sort}"
     if since_year is not None:
         url += f"&filter=from_publication_date:{since_year}-01-01"
-    url += _mailto_param()
+    # Field limiting: only what this module + ranking.py/dedupe.py/response.py
+    # actually read off a work object. `id` is needed (not just our own
+    # "openalex:W…" item id) because ranking.py's _work_index also matches
+    # merged items whose surviving id came from PubMed/Crossref but which
+    # carry OpenAlex raw (see ranking.py's _work_index docstring).
+    url += (
+        "&select=id,title,publication_date,primary_location,authorships,"
+        "doi,cited_by_count,referenced_works"
+    )
+    url += _api_key_param()
     data = await get_json(client, url)
 
     items: list[Item] = []

@@ -194,7 +194,7 @@ def _redact_url(url: str) -> str:
     """Scheme+host+path only — NEVER the query string.
 
     Query params are where secrets/PII ride on these requests: NCBI_API_KEY
-    (pubmed.py), OPENALEX_EMAIL (openalex.py). Headers (e.g. GITHUB_TOKEN) are
+    (pubmed.py), OPENALEX_API_KEY (openalex.py). Headers (e.g. GITHUB_TOKEN) are
     never logged here either — only this redacted URL is."""
     parts = urlsplit(url)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))

@@ -202,6 +202,23 @@ if not EXPLORE_API_TOKEN:
         "AND on the frontend to require a bearer token."
     )
 
+# OpenAlex retired its unauthenticated "polite pool" (mailto=) on 2026-02-13 in
+# favor of a keyed, credit-metered model — see sources/openalex.py's
+# _api_key_param(). Running without OPENALEX_API_KEY isn't a hard failure (the
+# unauthenticated common pool still technically answers requests), but it gets
+# throttled hard and silently: search_papers._fetch isolates failures per
+# source, so 429s from OpenAlex never surface as an error, they just quietly
+# empty out the citation graph WINNER needs — this ran undetected for six
+# months before. Same loud-warning pattern as EXPLORE_API_TOKEN above, so a
+# repeat of that silent degradation is caught at startup instead.
+if not (os.environ.get("OPENALEX_API_KEY") or "").strip():
+    logger.warning(
+        "OPENALEX_API_KEY is not set — OpenAlex requests are running on the "
+        "UNAUTHENTICATED common pool and will be throttled hard. This degrades "
+        "silently (per-source fetch failures are swallowed), not loudly — expect "
+        "WINNER's citation graph to come back empty. Set OPENALEX_API_KEY here."
+    )
+
 
 # ── Limit clamping ──────────────────────────────────────────────────────────────
 # The MCP tools below used to accept an UNBOUNDED `limit` — a caller could pass

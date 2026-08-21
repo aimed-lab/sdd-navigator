@@ -135,7 +135,8 @@ Optional env vars. Each source degrades to a lower unauthenticated rate
 limit if unset rather than failing:
 
 - `NCBI_API_KEY` (PubMed)
-- `OPENALEX_EMAIL` (OpenAlex polite pool)
+- `OPENALEX_API_KEY` (OpenAlex; strongly recommended — the unauthenticated
+  "polite pool" was retired 2026-02-13, unset means the throttled common pool)
 - `GITHUB_TOKEN` (`search_tools`)
 - `PREWARM_ENABLED`, `PREWARM_INTERVAL_SEC`, pre-warms the blank landing feed
   on startup so the first real visitor doesn't pay for a cold cache

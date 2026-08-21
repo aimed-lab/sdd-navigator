@@ -63,7 +63,7 @@ class _SpyClient:
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     """Every test starts from a known-empty auth environment."""
-    for var in ("NCBI_API_KEY", "OPENALEX_EMAIL", "GITHUB_TOKEN"):
+    for var in ("NCBI_API_KEY", "OPENALEX_API_KEY", "GITHUB_TOKEN"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -109,35 +109,56 @@ def test_pubmed_key_is_read_at_call_time(monkeypatch):
 # ── OpenAlex ──────────────────────────────────────────────────────────────────
 
 
-def test_openalex_sends_mailto_polite_pool(monkeypatch):
-    monkeypatch.setenv("OPENALEX_EMAIL", "researcher@uab.edu")
+def test_openalex_sends_api_key(monkeypatch):
+    monkeypatch.setenv("OPENALEX_API_KEY", "test-openalex-key")
     client = _SpyClient([{"results": []}])
     asyncio.run(fetch_openalex(client, "egfr", 5))
 
-    assert "mailto=researcher%40uab.edu" in client.urls[0], client.urls[0]
+    assert "api_key=test-openalex-key" in client.urls[0], client.urls[0]
 
 
-def test_openalex_works_without_an_email():
+def test_openalex_works_without_an_api_key():
     client = _SpyClient([{"results": []}])
     asyncio.run(fetch_openalex(client, "egfr", 5))
-    assert "mailto" not in client.urls[0]
+    assert "api_key" not in client.urls[0]
 
 
-def test_openalex_mailto_coexists_with_the_sort_param(monkeypatch):
-    """The two query-string additions must not clobber each other."""
+def test_openalex_blank_api_key_is_treated_as_unset(monkeypatch):
+    monkeypatch.setenv("OPENALEX_API_KEY", "   ")
+    client = _SpyClient([{"results": []}])
+    asyncio.run(fetch_openalex(client, "egfr", 5))
+    assert "api_key" not in client.urls[0]
+
+
+def test_openalex_api_key_is_read_at_call_time(monkeypatch):
+    """Set AFTER import — mirrors load_dotenv() running after the tool imports."""
+    client = _SpyClient([{"results": []}])
+    monkeypatch.setenv("OPENALEX_API_KEY", "late-bound-key")
+    asyncio.run(fetch_openalex(client, "egfr", 5))
+    assert "api_key=late-bound-key" in client.urls[0]
+
+
+def test_openalex_always_sends_select(monkeypatch):
+    client = _SpyClient([{"results": []}])
+    asyncio.run(fetch_openalex(client, "egfr", 5))
+    assert "select=id,title,publication_date,primary_location,authorships,doi,cited_by_count,referenced_works" in client.urls[0]
+
+
+def test_openalex_api_key_coexists_with_the_sort_param(monkeypatch):
+    """The query-string additions must not clobber each other."""
     from sources.openalex import SORT_RECENT, SORT_RELEVANCE
 
-    monkeypatch.setenv("OPENALEX_EMAIL", "a@b.org")
+    monkeypatch.setenv("OPENALEX_API_KEY", "a-key")
 
     recency = _SpyClient([{"results": []}])
     asyncio.run(fetch_openalex(recency, "egfr", 5, sort=SORT_RECENT))
     assert "sort=publication_date:desc" in recency.urls[0]
-    assert "mailto=a%40b.org" in recency.urls[0]
+    assert "api_key=a-key" in recency.urls[0]
 
     relevance = _SpyClient([{"results": []}])
     asyncio.run(fetch_openalex(relevance, "egfr", 5, sort=SORT_RELEVANCE))
     assert "sort=" not in relevance.urls[0]
-    assert "mailto=a%40b.org" in relevance.urls[0]
+    assert "api_key=a-key" in relevance.urls[0]
 
 
 # ── GitHub ────────────────────────────────────────────────────────────────────

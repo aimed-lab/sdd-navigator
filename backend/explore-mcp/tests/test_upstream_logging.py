@@ -56,7 +56,7 @@ def test_get_json_429_logs_a_warning_with_redacted_url(caplog):
 
 @pytest.mark.parametrize("status", [400, 403, 500, 503])
 def test_get_json_non_2xx_logs_a_warning(caplog, status):
-    url = "https://api.openalex.org/works?search=egfr&mailto=someone%40example.com"
+    url = "https://api.openalex.org/works?search=egfr&api_key=someone-secret-key"
     with caplog.at_level(logging.WARNING, logger="sources.base"):
         with pytest.raises(httpx.HTTPStatusError):
             asyncio.run(_fetch_get(url, status))
@@ -67,8 +67,8 @@ def test_get_json_non_2xx_logs_a_warning(caplog, status):
     assert f"status={status}" in msg
     assert "non-2xx" in msg
     assert "api.openalex.org/works" in msg
-    assert "mailto" not in msg
-    assert "someone%40example.com" not in msg
+    assert "api_key" not in msg
+    assert "someone-secret-key" not in msg
 
 
 def test_get_json_200_logs_no_warning(caplog):

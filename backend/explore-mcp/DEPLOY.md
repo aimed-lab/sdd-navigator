@@ -103,7 +103,7 @@ LLM_PROVIDER=
 LLM_MODEL=
 LLM_API_KEY=
 NCBI_API_KEY=
-OPENALEX_EMAIL=
+OPENALEX_API_KEY=
 GITHUB_TOKEN=
 PREWARM_ENABLED=
 PREWARM_INTERVAL_SEC=
@@ -381,7 +381,7 @@ project's credentials, never invent or reuse a value from another project.
 | `LLM_MODEL` | Optional | Which model to use for the chosen provider. Has a built-in default. |
 | `LLM_API_KEY` | Optional | Overrides `GROQ_API_KEY` if you want a separate key just for LLM calls. Falls back to `GROQ_API_KEY` if unset. |
 | `NCBI_API_KEY` | Optional | Raises the PubMed/GEO rate limit. Works fine without it, just slower under load. |
-| `OPENALEX_EMAIL` | Optional | Identifies traffic to OpenAlex for better service ("polite pool"). Any real contact address. |
+| `OPENALEX_API_KEY` | Strongly recommended | OpenAlex retired its unauthenticated "polite pool" on 2026-02-13; unset means the throttled common pool, and 429s under fan-out load are swallowed silently per-source. |
 | `GITHUB_TOKEN` | Optional | Raises the GitHub search rate limit. A read-only, no-scopes token is enough. |
 | `PREWARM_ENABLED` | Optional | Whether to pre-fetch the default landing-page results on startup. Defaults on. |
 | `PREWARM_INTERVAL_SEC` | Optional | How often the pre-fetch refreshes. Has a built-in default. |
