@@ -30,13 +30,22 @@
 
 import Link from "next/link";
 import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
+import CommunityPanel from "@/components/collaborate/CommunityPanel";
 import PostCard from "@/components/collaborate/PostCard";
 import ResourceCard from "@/components/collaborate/ResourceCard";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
-import { getCommunityBySlug, listCommunities } from "@/lib/server/communities";
+import {
+  getCommunityBySlug,
+  getCommunityStats,
+  getMembership,
+  listCommunities,
+  listPendingRequests,
+  type Membership,
+  type PendingRequest,
+} from "@/lib/server/communities";
 
 export const dynamic = "force-dynamic"; // board content changes per request
 
@@ -140,6 +149,20 @@ export default async function CollaboratePage({
   ]);
   const signedIn = user !== null;
 
+  // Membership/activity reads only fire when a community is actually
+  // selected — they're meaningless (and, for stats, an extra RPC) on the
+  // unscoped board.
+  let membership: Membership = { state: "none", isLead: false };
+  let pendingRequests: PendingRequest[] = [];
+  let stats = { memberCount: 0, joinedLast7d: 0 };
+  if (communityId) {
+    [membership, stats] = await Promise.all([
+      getMembership(communityId),
+      getCommunityStats(communityId),
+    ]);
+    if (membership.isLead) pendingRequests = await listPendingRequests(communityId);
+  }
+
   // Area chips are derived from the posts actually on the board, so they can
   // never offer a filter that returns nothing.
   const areas = Array.from(
@@ -151,7 +174,36 @@ export default async function CollaboratePage({
   const filtered = q || area || filter !== "all";
   const newPostHref = `/collaborate/new${communitySlug ? `?community=${encodeURIComponent(communitySlug)}` : ""}`;
   const newResourceHref = `/collaborate/resources/new${communitySlug ? `?community=${encodeURIComponent(communitySlug)}` : ""}`;
+  const sharePath = `/collaborate?community=${encodeURIComponent(communitySlug)}`;
   const isEmptyCommunity = Boolean(community) && posts.length === 0 && resources.length === 0;
+
+  // Activity — "show what is happening" for a selected community. Built
+  // entirely from data already fetched above (posts/resources are public
+  // reads regardless of community; nothing here is manufactured when there
+  // is genuinely nothing — see isEmptyCommunity's own branch below, which
+  // this never overrides).
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const recentActivity = communityId
+    ? [
+        ...posts.map((p) => ({ label: p.title, created_at: p.created_at, kind: "post" as const })),
+        ...resources.map((r) => ({
+          label: (r.fields.name as string) || "Untitled resource",
+          created_at: r.created_at,
+          kind: "resource" as const,
+        })),
+      ]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 3)
+    : [];
+  const newThisWeek = communityId
+    ? [...posts, ...resources].filter(
+        (x) => Date.now() - new Date(x.created_at).getTime() < WEEK_MS
+      ).length
+    : 0;
+  const labsSharing = communityId
+    ? new Set(resources.map((r) => (r.fields.pi_lab as string) || r.owner_name || r.id)).size
+    : 0;
+  const hasActivity = posts.length > 0 || resources.length > 0;
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-6 md:py-8">
@@ -241,20 +293,76 @@ export default async function CollaboratePage({
         </div>
       )}
 
-      {/* Result line */}
-      <p className="mt-4 font-label-md text-label-md text-secondary">
-        {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
-        {resources.length === 1 ? "resource" : "resources"}
-        {(filtered || communitySlug) && " matching"}
-        {(filtered || communitySlug) && (
-          <>
-            {" · "}
-            <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
-              Clear filters
-            </Link>
-          </>
-        )}
-      </p>
+      {/* Join / Share / (lead-only) pending requests — always shown for a
+          selected community, empty or not: the point is a lead can send
+          this link out and people can join before there's anything to show. */}
+      {community && (
+        <CommunityPanel
+          communityId={community.id}
+          isOpen={community.is_open}
+          sharePath={sharePath}
+          membership={membership}
+          pendingRequests={pendingRequests}
+        />
+      )}
+
+      {/* Result line / activity summary. A community with real activity gets
+          the "show what is happening" summary (counts + recent additions,
+          by name) instead of a bare count — a plain "0 posts · 0 resources"
+          convinces nobody to be first into an empty room. Nothing here is
+          manufactured: hasActivity gates it, and the honest empty state below
+          still runs when there's genuinely nothing. */}
+      {communityId && hasActivity ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-label-md text-label-md text-secondary">
+          {labsSharing > 0 && (
+            <span>
+              <span className="text-on-background font-semibold">{labsSharing}</span>{" "}
+              {labsSharing === 1 ? "lab" : "labs"} sharing
+            </span>
+          )}
+          <span>
+            <span className="text-on-background font-semibold">{stats.memberCount}</span>{" "}
+            {stats.memberCount === 1 ? "member" : "members"}
+            {stats.joinedLast7d > 0 && ` (+${stats.joinedLast7d} this week)`}
+          </span>
+          {newThisWeek > 0 && (
+            <span>
+              <span className="text-on-background font-semibold">{newThisWeek}</span> new this
+              week
+            </span>
+          )}
+          <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
+            Clear filters
+          </Link>
+        </div>
+      ) : (
+        <p className="mt-4 font-label-md text-label-md text-secondary">
+          {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
+          {resources.length === 1 ? "resource" : "resources"}
+          {(filtered || communitySlug) && " matching"}
+          {(filtered || communitySlug) && (
+            <>
+              {" · "}
+              <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
+                Clear filters
+              </Link>
+            </>
+          )}
+        </p>
+      )}
+
+      {communityId && hasActivity && recentActivity.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-body-sm text-body-sm text-secondary/80">
+          {recentActivity.map((item, i) => (
+            <li key={i}>
+              <span className="material-symbols-outlined text-sm align-text-bottom mr-0.5">
+                {item.kind === "post" ? "campaign" : "science"}
+              </span>
+              {item.label}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {/* Empty community state — intentional, not "no results" */}
       {isEmptyCommunity ? (
@@ -268,6 +376,8 @@ export default async function CollaboratePage({
               "This community doesn't have any posts or shared resources yet."}{" "}
             Be the first to add a technique, a piece of equipment, a line — or post
             what you&apos;re looking for.
+            {stats.memberCount > 0 &&
+              ` ${stats.memberCount} ${stats.memberCount === 1 ? "person has" : "people have"} already joined.`}
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             <Link href={newResourceHref} className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md">
