@@ -68,11 +68,18 @@ function boardHref(params: { q?: string; filter?: string; area?: string; communi
 }
 
 // Type filter + topic chips — the lighter, FILTER-level pill.
+//
+// SELECTED, NOT ACTION (2026-08-21 design pass): an active chip used to be
+// solid primary green — the exact same treatment as "Add to the board" and
+// "Join", so five unrelated green elements all read as equally-important
+// buttons with no entry point. A selected chip isn't an action to take,
+// it's a STATE to notice — so it now uses secondary-container (the existing
+// light blue-lavender token, not a new color) with bold text instead.
 function chip(active: boolean) {
   return (
     "px-4 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
     (active
-      ? "bg-primary text-on-primary"
+      ? "bg-secondary-container text-on-secondary-container font-semibold"
       : "bg-surface-container-low text-secondary hover:bg-surface-container hover:text-primary")
   );
 }
@@ -80,11 +87,13 @@ function chip(active: boolean) {
 // Community segmented-control segment — the heavier, SCOPE-level control.
 // Visually distinct from chip(): square-ish segments sharing one bordered
 // track, not free-floating pills, so it doesn't read as "one more chip row".
+// Same "selected, not action" reasoning as chip() above — secondary-container,
+// not primary green.
 function segment(active: boolean) {
   return (
     "px-4 py-2 rounded-md font-label-md text-label-md whitespace-nowrap transition-all " +
     (active
-      ? "bg-primary text-on-primary shadow-sm"
+      ? "bg-secondary-container text-on-secondary-container font-semibold shadow-sm"
       : "text-on-background hover:bg-surface-container")
   );
 }
@@ -176,6 +185,15 @@ export default async function CollaboratePage({
   const newResourceHref = `/collaborate/resources/new${communitySlug ? `?community=${encodeURIComponent(communitySlug)}` : ""}`;
   const sharePath = `/collaborate?community=${encodeURIComponent(communitySlug)}`;
   const isEmptyCommunity = Boolean(community) && posts.length === 0 && resources.length === 0;
+  // Nothing to show, and no filter narrowing it — the friendly empty card
+  // (community-scoped or the plain "Be the first to post" invitation) is
+  // about to say so itself, in warmer words. A count line reading "0 posts
+  // · 0 resources" directly above that card was saying the same thing
+  // twice; suppressed here, but ONLY when there's no active filter — with a
+  // filter applied, "Clear filters" is genuinely useful (the community/board
+  // isn't actually empty, this view of it is), so the line stays.
+  const nothingToShowUnfiltered =
+    posts.length === 0 && resources.length === 0 && !filtered;
 
   // Activity — "show what is happening" for a selected community. Built
   // entirely from data already fetched above (posts/resources are public
@@ -207,17 +225,42 @@ export default async function CollaboratePage({
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-6 md:py-8">
-      {/* Header */}
+      {/* Header — names the selected community (2026-08-21 design pass):
+          "Collaborate" becomes a breadcrumb back to the unscoped board, and
+          the community's own name takes the H1, so the page always says
+          where you are instead of leaving the title generic while only the
+          description below it changes. The join/share row folds in here
+          too, beside the name — there is no standalone panel whose only
+          content is those two buttons anymore. */}
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
+          {community ? (
+            <Link
+              href="/collaborate"
+              className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors"
+            >
+              Collaborate
+            </Link>
+          ) : null}
           <h1 className="font-headline-lg text-headline-lg md:text-[32px] md:leading-tight text-on-background">
-            Collaborate
+            {community ? community.name : "Collaborate"}
           </h1>
           <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
             {community
               ? community.description || `Posts and shared resources for ${community.name}.`
               : "Share what your lab offers, find what you need, and build teams — for the drug discovery community."}
           </p>
+          {community && (
+            <div className="mt-3">
+              <CommunityPanel
+                communityId={community.id}
+                isOpen={community.is_open}
+                sharePath={sharePath}
+                membership={membership}
+                pendingRequests={pendingRequests}
+              />
+            </div>
+          )}
         </div>
         <AddToBoardButton newPostHref={newPostHref} newResourceHref={newResourceHref} />
       </header>
@@ -293,75 +336,67 @@ export default async function CollaboratePage({
         </div>
       )}
 
-      {/* Join / Share / (lead-only) pending requests — always shown for a
-          selected community, empty or not: the point is a lead can send
-          this link out and people can join before there's anything to show. */}
-      {community && (
-        <CommunityPanel
-          communityId={community.id}
-          isOpen={community.is_open}
-          sharePath={sharePath}
-          membership={membership}
-          pendingRequests={pendingRequests}
-        />
-      )}
-
-      {/* Result line / activity summary. A community with real activity gets
-          the "show what is happening" summary (counts + recent additions,
-          by name) instead of a bare count — a plain "0 posts · 0 resources"
-          convinces nobody to be first into an empty room. Nothing here is
-          manufactured: hasActivity gates it, and the honest empty state below
-          still runs when there's genuinely nothing. */}
-      {communityId && hasActivity ? (
-        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-label-md text-label-md text-secondary">
-          {labsSharing > 0 && (
-            <span>
-              <span className="text-on-background font-semibold">{labsSharing}</span>{" "}
-              {labsSharing === 1 ? "lab" : "labs"} sharing
-            </span>
-          )}
-          <span>
-            <span className="text-on-background font-semibold">{stats.memberCount}</span>{" "}
-            {stats.memberCount === 1 ? "member" : "members"}
-            {stats.joinedLast7d > 0 && ` (+${stats.joinedLast7d} this week)`}
-          </span>
-          {newThisWeek > 0 && (
-            <span>
-              <span className="text-on-background font-semibold">{newThisWeek}</span> new this
-              week
-            </span>
-          )}
-          <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
-            Clear filters
-          </Link>
-        </div>
-      ) : (
-        <p className="mt-4 font-label-md text-label-md text-secondary">
-          {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
-          {resources.length === 1 ? "resource" : "resources"}
-          {(filtered || communitySlug) && " matching"}
-          {(filtered || communitySlug) && (
-            <>
-              {" · "}
+      {/* Result line / activity summary — suppressed entirely when there is
+          genuinely nothing to show and no filter is active (see
+          nothingToShowUnfiltered above): the empty card just below already
+          says so, in warmer words, and a "0 posts · 0 resources" line sitting
+          directly above it was saying the same thing twice. A community with
+          real activity gets the "show what is happening" summary (counts +
+          recent additions, by name) instead of a bare count. */}
+      {!nothingToShowUnfiltered && (
+        <>
+          {communityId && hasActivity ? (
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 font-label-md text-label-md text-secondary">
+              {labsSharing > 0 && (
+                <span>
+                  <span className="text-on-background font-semibold">{labsSharing}</span>{" "}
+                  {labsSharing === 1 ? "lab" : "labs"} sharing
+                </span>
+              )}
+              <span>
+                <span className="text-on-background font-semibold">{stats.memberCount}</span>{" "}
+                {stats.memberCount === 1 ? "member" : "members"}
+                {stats.joinedLast7d > 0 && ` (+${stats.joinedLast7d} this week)`}
+              </span>
+              {newThisWeek > 0 && (
+                <span>
+                  <span className="text-on-background font-semibold">{newThisWeek}</span> new
+                  this week
+                </span>
+              )}
               <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
                 Clear filters
               </Link>
-            </>
+            </div>
+          ) : (
+            <p className="mt-4 font-label-md text-label-md text-secondary">
+              {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
+              {resources.length === 1 ? "resource" : "resources"}
+              {(filtered || communitySlug) && " matching"}
+              {(filtered || communitySlug) && (
+                <>
+                  {" · "}
+                  <Link href="/collaborate" className="text-primary hover:underline underline-offset-4">
+                    Clear filters
+                  </Link>
+                </>
+              )}
+            </p>
           )}
-        </p>
-      )}
 
-      {communityId && hasActivity && recentActivity.length > 0 && (
-        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-body-sm text-body-sm text-secondary/80">
-          {recentActivity.map((item, i) => (
-            <li key={i}>
-              <span className="material-symbols-outlined text-sm align-text-bottom mr-0.5">
-                {item.kind === "post" ? "campaign" : "science"}
-              </span>
-              {item.label}
-            </li>
-          ))}
-        </ul>
+          {communityId && hasActivity && recentActivity.length > 0 && (
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-body-sm text-body-sm text-secondary/80">
+              {recentActivity.map((item, i) => (
+                <li key={i}>
+                  <span className="material-symbols-outlined text-sm align-text-bottom mr-0.5">
+                    {item.kind === "post" ? "campaign" : "science"}
+                  </span>
+                  {item.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       {/* Empty community state — intentional, not "no results" */}
@@ -379,8 +414,12 @@ export default async function CollaboratePage({
             {stats.memberCount > 0 &&
               ` ${stats.memberCount} ${stats.memberCount === 1 ? "person has" : "people have"} already joined.`}
           </p>
+          {/* Both outline, not one primary + one outline: "Add to the board"
+              in the header is already the one primary action on this
+              screen — repeating it in solid green here would be a second
+              competing green element, not a second primary action. */}
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <Link href={newResourceHref} className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md">
+            <Link href={newResourceHref} className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md">
               Add what your lab can share
             </Link>
             <Link href={newPostHref} className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md">

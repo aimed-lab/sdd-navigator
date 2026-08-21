@@ -1,8 +1,7 @@
 "use client";
 
-// The panel shown when a community is selected on /collaborate: join/request/
-// member state, a copy-link Share action, and — for a lead only — the list of
-// pending requests to approve. All the DATA here (membership state, isLead,
+// The join/request-state + Share controls shown when a community is
+// selected on /collaborate. All the DATA here (membership state, isLead,
 // pending requests, stats) is computed server-side and passed in as props;
 // this component only handles the interactive bits (the join/leave/approve
 // calls and the clipboard copy).
@@ -10,6 +9,17 @@
 // SIGNED OUT: shows a "Sign in to join" prompt, not a wall — browsing (posts,
 // resources, activity) all render regardless of session, from the server
 // component around this one.
+//
+// VISUAL WEIGHT (2026-08-21 design pass): this used to be its own glass-panel
+// box sitting alone between the filters and the results — a container whose
+// only content, most of the time, was one small button. It's now an inline
+// row folded into the page header (see app/collaborate/page.tsx), and every
+// button here is intentionally SECONDARY (btn-outline / quiet text, never
+// btn-primary): "Add to the board" is the one primary action on this screen,
+// and Join competing with it in the same green read as two things of equal
+// importance when they aren't. The lead-only pending-requests list keeps its
+// own small tinted block below the row, but only ever renders when there's
+// at least one request in it — never as an empty container.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -50,7 +60,7 @@ function JoinAction({
     return (
       <Link
         href={`/login?callbackUrl=${encodeURIComponent(pathname)}`}
-        className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md"
+        className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm"
       >
         Sign in to join
       </Link>
@@ -132,7 +142,7 @@ function JoinAction({
             setBusy(false);
           }
         }}
-        className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md disabled:opacity-50"
+        className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
       >
         {busy ? "…" : isOpen ? "Join" : "Request to join"}
       </button>
@@ -162,7 +172,7 @@ function ShareButton({ path }: { path: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       }}
-      className="btn-outline inline-flex items-center gap-2 px-4 py-2.5 rounded-lg font-label-md text-label-md"
+      className="btn-outline inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-label-sm text-label-sm"
     >
       <span className="material-symbols-outlined text-base">
         {copied ? "check" : "link"}
@@ -181,7 +191,7 @@ function PendingRequests({ requests }: { requests: PendingRequest[] }) {
   if (requests.length === 0) return null;
 
   return (
-    <div className="mt-4 rounded-xl bg-surface-container-low p-4">
+    <div className="mt-3 rounded-xl bg-surface-container-low p-4">
       <p className="font-label-md text-label-md text-on-background mb-2">
         Pending requests ({requests.length})
       </p>
@@ -231,8 +241,8 @@ export default function CommunityPanel({
   pendingRequests: PendingRequest[];
 }) {
   return (
-    <div className="mt-4 glass-panel rounded-2xl p-5">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
         <JoinAction communityId={communityId} isOpen={isOpen} membership={membership} />
         <ShareButton path={sharePath} />
       </div>
