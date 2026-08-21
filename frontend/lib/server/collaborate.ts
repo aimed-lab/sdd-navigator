@@ -8,7 +8,11 @@
 // WRITE (createResource) is AUTH-GATED — it goes through requireCurrentUser() so the
 // owner (owner_id) is derived from the validated session, never the caller. RLS
 // (WITH CHECK auth.uid() = owner_id) then guarantees a user can only register
-// resources as themselves.
+// resources as themselves. When the resource is tagged with a community_id, RLS
+// additionally requires either an open community or a community_members row
+// (see database/migrations/2026-08-20_communities.sql, can_post_to_community()) —
+// this module doesn't re-check that client-side; a forged community_id on a
+// closed community a caller doesn't belong to is rejected by Postgres, not here.
 //
 // CONTACT (getResourceContact) is AUTH-GATED too — the ONLY path that ever returns
 // contact_info. It requires a signed-in session (requireCurrentUser) but any signed-in
@@ -18,19 +22,30 @@
 import { requireCurrentUser } from "@/lib/auth";
 import { getAnonServerClient, ServerConfigError } from "./supabaseServer";
 
-// The 8 spreadsheet categories the generic table supports. Only 'technique' has a
-// UI/flow in v1; the rest are schema-ready for later forms (no schema change).
-export const RESOURCE_CATEGORIES = [
-  "technique",
-  "equipment",
-  "vector",
-  "animal_model",
-  "cell_line",
-  "protein_antibody",
-  "software",
-  "drug",
-] as const;
-export type ResourceCategory = (typeof RESOURCE_CATEGORIES)[number];
+// Types + constants live in lib/collaborateTypes.ts so "use client" components
+// (the new-resource form) can import the VALUES (RESOURCE_CATEGORIES,
+// CATEGORY_LABELS, CATEGORY_FIELDS) without pulling this server-only module —
+// and its `next/headers` dependency — into the client bundle. Re-exported here
+// so server callers have one import.
+import {
+  CATEGORY_FIELDS,
+  CATEGORY_LABELS,
+  RESOURCE_CATEGORIES,
+  type CreateResourceInput,
+  type FieldSpec,
+  type ResourceCard,
+  type ResourceCategory,
+} from "@/lib/collaborateTypes";
+
+export {
+  CATEGORY_FIELDS,
+  CATEGORY_LABELS,
+  RESOURCE_CATEGORIES,
+  type CreateResourceInput,
+  type FieldSpec,
+  type ResourceCard,
+  type ResourceCategory,
+} from "@/lib/collaborateTypes";
 
 // The users(name) join can surface as an object or a single-element array
 // depending on how PostgREST resolves the relationship (same as comments.ts).
@@ -44,21 +59,13 @@ function ownerName(owner: OwnerJoin): string | null {
 
 // ── Public browse (listResources) ─────────────────────────────────────────────
 
-// One resource row for the browse grid. NO contact_info (never public); owner_name
-// is the joined display name (may be null when the owner's profile isn't public).
-export type ResourceCard = {
-  id: string;
-  category: string;
-  fields: Record<string, unknown>;
-  created_at: string;
-  owner_name: string | null;
-};
-
-// Fetch the public registry, optionally filtered by category and a keyword search
-// against fields->>'name'. Degrades to an empty list. Never selects contact_info.
+// Fetch the public registry, optionally filtered by category, a keyword search
+// against fields->>'name', and a community. Degrades to an empty list. Never
+// selects contact_info.
 export async function listResources(opts: {
   q?: string;
   category?: string;
+  communityId?: string;
 }): Promise<ResourceCard[]> {
   const supabase = getAnonServerClient();
   if (!supabase) return [];
@@ -67,11 +74,12 @@ export async function listResources(opts: {
     .from("lab_resources")
     // owner NAME only — email is PII and is never joined here; contact_info is
     // deliberately excluded (only the auth-gated /contact route returns it).
-    .select("id, category, fields, created_at, owner:users!owner_id(name)")
+    .select("id, category, fields, created_at, community_id, owner:users!owner_id(name)")
     .order("created_at", { ascending: false });
 
   if (opts.category) query = query.eq("category", opts.category);
   if (opts.q) query = query.ilike("fields->>name", `%${opts.q}%`);
+  if (opts.communityId) query = query.eq("community_id", opts.communityId);
 
   const { data, error } = await query;
   if (error || !data) return [];
@@ -81,27 +89,24 @@ export async function listResources(opts: {
     category: string;
     fields: Record<string, unknown> | null;
     created_at: string;
+    community_id: string | null;
     owner: OwnerJoin;
   }>).map((r) => ({
     id: r.id,
     category: r.category,
     fields: r.fields ?? {},
     created_at: r.created_at,
+    community_id: r.community_id ?? null,
     owner_name: ownerName(r.owner),
   }));
 }
 
 // ── Register a resource (createResource) ──────────────────────────────────────
 
-export type CreateResourceInput = {
-  category: ResourceCategory;
-  fields: Record<string, unknown>;
-  contact_info: string | null;
-};
-
 // Validate + normalize an untrusted body. Returns null when the category is not
-// one of the 8 known values or `fields` isn't a plain object, so the route can
-// answer 400 without touching the DB. owner_id is NOT read from the body.
+// one of the 8 known values, `fields` isn't a plain object, or "name" (the one
+// field required across every category) is blank — so the route/action can
+// answer without touching the DB. owner_id is NOT read from the body.
 export function parseResourceInput(body: unknown): CreateResourceInput | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
@@ -109,18 +114,43 @@ export function parseResourceInput(body: unknown): CreateResourceInput | null {
   const category = typeof b.category === "string" ? b.category : "";
   if (!RESOURCE_CATEGORIES.includes(category as ResourceCategory)) return null;
 
-  const fields =
+  const rawFields =
     b.fields && typeof b.fields === "object" && !Array.isArray(b.fields)
       ? (b.fields as Record<string, unknown>)
       : null;
-  if (!fields) return null;
+  if (!rawFields) return null;
+
+  const name = typeof rawFields.name === "string" ? rawFields.name.trim() : "";
+  if (!name) return null;
+
+  // Rebuild `fields` from the known spec for this category (+ name, + the
+  // optional lab), so an arbitrary client body can't smuggle unrelated keys
+  // into the jsonb column. Every field here is OPTIONAL except name.
+  const fields: Record<string, unknown> = { name: name.slice(0, 200) };
+
+  const pi_lab = typeof rawFields.pi_lab === "string" ? rawFields.pi_lab.trim() : "";
+  if (pi_lab) fields.pi_lab = pi_lab.slice(0, 200);
+
+  const specs: FieldSpec[] = CATEGORY_FIELDS[category as ResourceCategory] ?? [];
+  for (const spec of specs) {
+    const raw = rawFields[spec.key];
+    if (spec.kind === "boolean") {
+      if (typeof raw === "boolean") fields[spec.key] = raw;
+    } else {
+      if (typeof raw === "string" && raw.trim()) fields[spec.key] = raw.trim().slice(0, 500);
+    }
+  }
 
   const contact_info = typeof b.contact_info === "string" ? b.contact_info.trim() : "";
+
+  const community_id =
+    typeof b.community_id === "string" && b.community_id.trim() ? b.community_id.trim() : null;
 
   return {
     category: category as ResourceCategory,
     fields,
     contact_info: contact_info || null,
+    community_id,
   };
 }
 
@@ -136,6 +166,7 @@ export async function createResource(input: CreateResourceInput): Promise<string
       category: input.category,
       fields: input.fields,
       contact_info: input.contact_info,
+      community_id: input.community_id ?? null,
     })
     .select("id")
     .single();

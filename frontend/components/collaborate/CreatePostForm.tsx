@@ -130,6 +130,8 @@ export default function CreatePostForm({
   initialDescription = "",
   initialNeed,
   checklistItemId,
+  communityId,
+  communityName,
   returnTo = "/collaborate",
 }: {
   initialTitle?: string;
@@ -140,6 +142,11 @@ export default function CreatePostForm({
    *  just the one value it starts with. */
   initialNeed?: string;
   checklistItemId?: string;
+  /** Resolved server-side from the ?community= slug — passed straight
+   *  through to createPostAction; RLS (can_post_to_community) is what
+   *  actually decides whether this caller may post into it. */
+  communityId?: string;
+  communityName?: string;
   returnTo?: string;
 } = {}) {
   const router = useRouter();
@@ -174,6 +181,7 @@ export default function CreatePostForm({
       stage,
       funding_status: fundingStatus === UNSPECIFIED ? null : fundingStatus,
       checklist_item_id: checklistItemId ?? null,
+      community_id: communityId ?? null,
     });
 
     if (res.ok) {
@@ -187,6 +195,12 @@ export default function CreatePostForm({
 
   return (
     <form onSubmit={submit} className="space-y-6">
+      {communityName && (
+        <p className="font-label-md text-label-md text-primary">
+          Posting into <span className="font-semibold">{communityName}</span>
+        </p>
+      )}
+
       {/* About */}
       <section className="glass-panel rounded-2xl p-6 space-y-5">
         <h2 className="font-headline-md text-lg text-on-background">About</h2>

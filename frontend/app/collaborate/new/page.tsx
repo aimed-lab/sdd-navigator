@@ -21,6 +21,7 @@
 import Link from "next/link";
 import CreatePostForm from "@/components/collaborate/CreatePostForm";
 import { getCurrentUser } from "@/lib/auth";
+import { getCommunityBySlug } from "@/lib/server/communities";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -29,7 +30,6 @@ export default async function NewCollabPostPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await getCurrentUser();
   const params = await searchParams;
   const str = (v: string | string[] | undefined): string | undefined =>
     typeof v === "string" ? v : Array.isArray(v) ? v[0] : undefined;
@@ -39,7 +39,18 @@ export default async function NewCollabPostPage({
   const initialTitle = str(params.title);
   const initialDescription = str(params.description);
   const initialNeed = str(params.need);
-  const returnTo = projectId ? `/projects/${projectId}` : "/collaborate";
+  const communitySlug = str(params.community);
+
+  const [user, community] = await Promise.all([
+    getCurrentUser(),
+    communitySlug ? getCommunityBySlug(communitySlug) : Promise.resolve(null),
+  ]);
+
+  const returnTo = projectId
+    ? `/projects/${projectId}`
+    : communitySlug
+      ? `/collaborate?community=${encodeURIComponent(communitySlug)}`
+      : "/collaborate";
   const backLabel = projectId ? "Back to the project" : "Back to the board";
 
   // Preserves the full querystring in the login callback, so a signed-out
@@ -75,6 +86,8 @@ export default async function NewCollabPostPage({
             initialDescription={initialDescription}
             initialNeed={initialNeed}
             checklistItemId={checklistItemId}
+            communityId={community?.id}
+            communityName={community?.name}
             returnTo={returnTo}
           />
         ) : (

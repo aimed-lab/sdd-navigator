@@ -62,7 +62,7 @@ import type { BoardFilter } from "@/lib/collabTypes";
 //
 // Posting identifies you by name; it does not publish your profile.
 const POST_SELECT =
-  "id, title, description, research_areas, haves, needs, stage, funding_status, created_at, owner_id";
+  "id, title, description, research_areas, haves, needs, stage, funding_status, created_at, owner_id, community_id";
 
 // ── normalization ────────────────────────────────────────────────────────────
 
@@ -112,6 +112,15 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
       ? b.checklist_item_id.trim()
       : null;
 
+  // Same "opaque string, RLS is the real gate" reasoning as
+  // checklist_item_id above: can_post_to_community() (RLS) rejects a
+  // caller-supplied community_id they aren't allowed to post into, so this
+  // layer only needs to pass the value through, not validate it.
+  const community_id =
+    typeof b.community_id === "string" && b.community_id.trim()
+      ? b.community_id.trim()
+      : null;
+
   return {
     title: title.slice(0, 200),
     description: typeof b.description === "string" ? b.description.trim().slice(0, 4000) : "",
@@ -121,6 +130,7 @@ export function parseCollabPostInput(body: unknown): CreateCollabPostInput | nul
     stage,
     funding_status,
     checklist_item_id,
+    community_id,
   };
 }
 
@@ -166,6 +176,7 @@ export async function listCollabPosts(opts: {
   q?: string;
   area?: string;
   filter?: BoardFilter;
+  communityId?: string;
 } = {}): Promise<CollabPost[]> {
   const db = await getDb();
   if (!db) throw new ServerConfigError();
@@ -178,6 +189,8 @@ export async function listCollabPosts(opts: {
   if (filter === "offering") query = query.not("haves", "eq", "{}");
   else if (filter === "seeking_resources") query = query.not("needs", "eq", "{}");
   else if (filter === "seeking_team") query = query.eq("stage", "seeking_team");
+
+  if (opts.communityId) query = query.eq("community_id", opts.communityId);
 
   if (opts.area?.trim()) query = query.contains("research_areas", [opts.area.trim()]);
 
@@ -209,6 +222,7 @@ export async function listCollabPosts(opts: {
     owner: owners.get(row.owner_id as string) ?? null,
     interested: counts.get(row.id as string) ?? 0,
     is_owner: viewer !== null && row.owner_id === viewer.id,
+    community_id: (row.community_id as string | null) ?? null,
   }));
 }
 
@@ -241,6 +255,7 @@ export async function getCollabPost(id: string): Promise<CollabPost | null> {
     owner: owners.get(row.owner_id as string) ?? null,
     interested: counts.get(row.id as string) ?? 0,
     is_owner: viewer !== null && row.owner_id === viewer.id,
+    community_id: (row.community_id as string | null) ?? null,
   };
 }
 
@@ -263,6 +278,7 @@ export async function createCollabPost(input: CreateCollabPostInput): Promise<st
       stage: input.stage ?? "concept",
       funding_status: input.funding_status ?? null,
       checklist_item_id: input.checklist_item_id ?? null,
+      community_id: input.community_id ?? null,
     })
     .select("id")
     .single();

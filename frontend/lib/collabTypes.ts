@@ -83,6 +83,9 @@ export type CollabPost = {
    *  gate is the collab_posts_delete_own RLS policy, enforced again in
    *  Postgres regardless of what this flag says. */
   is_owner: boolean;
+  /** Optional community tag (database/migrations/2026-08-20_communities.sql).
+   *  Null for an ordinary, uncommunitied post. */
+  community_id: string | null;
 };
 
 export type CreateCollabPostInput = {
@@ -97,4 +100,8 @@ export type CreateCollabPostInput = {
   // database/migrations/2026-08-04_projects.sql: collab_posts.checklist_item_id,
   // ON DELETE SET NULL). Optional — a normal board post has none.
   checklist_item_id?: string | null;
+  // Optional community tag — see communities.ts / 2026-08-20_communities.sql.
+  // RLS (can_post_to_community) is the real gate on whether this id is
+  // actually postable by the caller; this is just the value carried through.
+  community_id?: string | null;
 };

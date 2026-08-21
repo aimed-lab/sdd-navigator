@@ -22,6 +22,7 @@ import {
   respondToCollabPost,
   type InterestType,
 } from "@/lib/server/collab";
+import { createResource, parseResourceInput } from "@/lib/server/collaborate";
 
 export type ActionResult = { ok: true; id: string } | { ok: false; error: string };
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -93,5 +94,27 @@ export async function deletePostAction(postId: string): Promise<SimpleActionResu
     }
     console.error("deletePostAction failed", e);
     return { ok: false, error: "Couldn't delete the post. Please try again." };
+  }
+}
+
+/** Register a lab resource ("Add what your lab can share"). Rejects when
+ *  signed out, and when the input is missing name/category — the UI gate
+ *  and this parse are convenience; RLS (can_post_to_community, when a
+ *  community is set) and the owner-derives-from-session rule in
+ *  createResource are the real enforcement. */
+export async function createResourceAction(input: unknown): Promise<ActionResult> {
+  const parsed = parseResourceInput(input);
+  if (!parsed) return { ok: false, error: "A name and category are required." };
+
+  try {
+    const id = await createResource(parsed);
+    revalidatePath("/collaborate");
+    return { ok: true, id };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in to share a resource." };
+    }
+    console.error("createResourceAction failed", e);
+    return { ok: false, error: "Couldn't save that. Please try again." };
   }
 }
