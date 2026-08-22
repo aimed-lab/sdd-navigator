@@ -190,6 +190,16 @@ export default function ItemCard({
   // a badge slot is exactly where a fabricated "ranked" label would be a lie.
   const badge = signalBadge(item, variant);
   const date = badge ? null : formatDate(item.date_iso);
+
+  // Paper cards ALWAYS show a date, plus a citation count when one exists —
+  // never both-or-nothing like the shared badge/date fallback above. Kept as
+  // a kind-scoped branch (not a change to signalBadge()/date above) so
+  // datasets/trials/gene sets/tools/grants keep their exact existing
+  // treatment. `badge` here (when present) is always a citation string for
+  // papers: signalBadge() only ever returns "★ ..." for stars (github tools,
+  // not papers) or a plain "N citations"/priorCitations() string for papers.
+  const paperDate = item.kind === "paper" ? formatDate(item.date_iso) : null;
+  const paperCitations = item.kind === "paper" ? badge : null;
   const accent = ACCENT[item.kind] ?? "border-t-outline-variant";
   const imageUrl =
     item.kind === "episode" ? (item.raw?.image_url as string | undefined) : undefined;
@@ -257,7 +267,13 @@ export default function ItemCard({
         <div className="flex items-start gap-2 mb-4">
           {/* Signal badge only when a real metric exists; else the date; else
               NOTHING (never a vague label or a raw source slug). */}
-          {badge ? (
+          {item.kind === "paper" ? (
+            (paperDate || paperCitations) && (
+              <span className="inline-block px-3 py-1 rounded-full bg-surface-container-low text-secondary text-label-sm font-label-sm">
+                {[paperDate, paperCitations].filter(Boolean).join(" · ")}
+              </span>
+            )
+          ) : badge ? (
             <span className="inline-block px-3 py-1 rounded-full bg-primary text-on-primary text-label-sm font-label-sm">
               {badge}
             </span>
