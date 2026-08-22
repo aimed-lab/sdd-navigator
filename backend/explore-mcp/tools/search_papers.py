@@ -271,11 +271,14 @@ async def search_papers_multi_async(
          then item 1 from every sub-query; then item 2; and so on, until
          `final_limit` is reached or every sub-query is exhausted. "Item N
          from a sub-query" always means that sub-query's own Nth-BEST
-         paper by the existing per-query ranking (search_papers_async's own
-         _fetch already ranked each sub-query's list before this function
-         ever sees it) — round-robin decides how many slots each entity
-         gets, the existing ranking still decides WHICH papers represent
-         it. A dedupe_key some earlier sub-query already claimed this round
+         paper by the existing per-query ranking (_ranked_pool's own _fetch
+         already WINNER-ranked each sub-query's list before this function
+         ever sees it — see _multi_selected, which calls _ranked_pool
+         directly rather than search_papers_async specifically so that
+         WINNER's per-sub-query order survives instead of being overwritten
+         by search_papers_async's date-sort-and-cap) — round-robin decides
+         how many slots each entity gets, the existing ranking still decides
+         WHICH papers represent it. A dedupe_key some earlier sub-query already claimed this round
          is skipped WITHOUT costing the current sub-query its turn — it
          just contributes its own next not-yet-claimed paper instead of
          nothing, so a duplicate never shrinks a sub-query's effective
@@ -337,8 +340,24 @@ async def _multi_selected(
     if len(queries) == 1:
         return await _ranked_pool(queries[0], final_limit, since_year)
 
+    # Use _ranked_pool, NOT search_papers_async, for each sub-query. This is
+    # the fix for a diagnosed bug: search_papers_async's return value has
+    # already been through _order_and_cap, which (for since_year=None, the
+    # only path reachable from the real UI) date-sorts AND caps to
+    # `limit_per_query` (10) — discarding the WINNER re-rank that
+    # search_papers_async's own _fetch just computed on that sub-query's
+    # full, healthy pool (~90 nodes / 124-164 edges per sub-query, verified
+    # live) and handing round-robin ten date-ordered, WINNER-blind items
+    # instead. _ranked_pool is the exact same cached fetch (identical
+    # normalize_key(f"papers:{limit}:{since_year or ''}", query) — this call
+    # and the one search_papers_async makes internally share one cache
+    # entry, so this costs NO additional OpenAlex/PubMed/Crossref credits),
+    # just returned UNCAPPED and in WINNER's own order (or _rank_merge's
+    # order, on the rarer sub-query where WINNER itself fell back) instead
+    # of re-sorted by date. Round-robin (step 2 below) can then draw each
+    # sub-query's genuinely-most-central papers first, not its most-recent.
     results = await asyncio.gather(
-        *(search_papers_async(q, limit_per_query, since_year) for q in queries),
+        *(_ranked_pool(q, limit_per_query, since_year) for q in queries),
         return_exceptions=True,
     )
 
@@ -362,6 +381,26 @@ async def _multi_selected(
 
     # Global rank, computed once: this is ONLY the final display order now
     # (step 4) — there is no fill phase left to feed from it.
+    #
+    # DOES WINNER RUN TWICE? Yes, deliberately, and the two runs are not
+    # redundant. The per-sub-query run (inside _ranked_pool/_fetch, above)
+    # ranks each gene's OWN ~90-node pool by centrality within that gene's
+    # own literature — that's what round-robin now draws from to pick WHICH
+    # papers represent each gene. This second run ranks the union of those
+    # (now uncapped, ~90-per-gene) pools AFTER dedup — a much richer graph
+    # than the old 10-per-gene union, since it still contains each gene's
+    # full citation cluster, not just its 10 most recent papers — and its
+    # job is ONLY to decide the FINAL DISPLAY ORDER (step 4) of whichever
+    # papers round-robin selected. It commonly has enough edges to run for
+    # real now (each gene's own cluster still cites itself even if cross-
+    # gene citations stay rare), which is a genuine improvement over before;
+    # if it still falls short of MIN_EDGES for a particular query, step 4
+    # just emits the round-robin selection in _rank_merge's citations/date
+    # order instead — never a meaningless rank on an unrankable graph, and
+    # never a reason to lower MIN_EDGES. Either way, Key Papers' ORDER never
+    # depends on this second call succeeding: which ten papers appear was
+    # already decided by round-robin over each gene's own WINNER rank; this
+    # call only refines how those ten are sequenced against each other.
     ranked_global = _rank_merge(collapsed)
     seeds = relevance_seed_ids(ranked_global, "", top_n=10)
     ranked_global = rank_papers_winner(ranked_global, seeds)

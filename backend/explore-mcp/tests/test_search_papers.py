@@ -180,6 +180,55 @@ def test_since_year_none_is_unchanged_behavior():
     assert captured == {"pubmed": None, "openalex": None, "crossref": None}
 
 
+def test_multi_selected_uses_ranked_pool_not_capped_date_order():
+    """_multi_selected must draw each sub-query's contribution from
+    _ranked_pool (WINNER's own order, uncapped) — NOT from
+    search_papers_async's return value, which is already date-sorted and
+    capped to limit_per_query by _order_and_cap. Regression test for the
+    diagnosed bug: round-robin was drawing from 10-item, WINNER-blind,
+    date-ordered lists instead of each sub-query's real ranked pool.
+
+    Stub _ranked_pool with an 11th-ranked item that would NOT survive
+    search_papers_async's cap-to-10-by-date; assert it's still selectable
+    by round-robin, and assert search_papers_async is never called at all
+    for a multi-query fan-out.
+    """
+    gene_a_pool = [_item("openalex", f"a{i}", date="2020-01-01T00:00:00.000Z")
+                   for i in range(11)]  # WINNER/rank order: a0 (best) .. a10 (11th)
+    gene_b_pool = [_item("openalex", "b0", date="2020-01-01T00:00:00.000Z")]
+
+    calls = {"ranked_pool": [], "search_papers_async": 0}
+
+    async def fake_ranked_pool(query, limit, since_year):
+        calls["ranked_pool"].append(query)
+        return gene_a_pool if query == "geneA" else gene_b_pool
+
+    async def fail_search_papers_async(*a, **kw):
+        calls["search_papers_async"] += 1
+        raise AssertionError("_multi_selected must not call search_papers_async")
+
+    orig_ranked_pool = sp._ranked_pool
+    orig_search_papers_async = sp.search_papers_async
+    sp._ranked_pool = fake_ranked_pool
+    sp.search_papers_async = fail_search_papers_async
+    try:
+        selected = asyncio.run(
+            sp._multi_selected(["geneA", "geneB"], limit_per_query=10, final_limit=12,
+                                since_year=None)
+        )
+    finally:
+        sp._ranked_pool = orig_ranked_pool
+        sp.search_papers_async = orig_search_papers_async
+
+    assert calls["search_papers_async"] == 0
+    assert sorted(calls["ranked_pool"]) == ["geneA", "geneB"]
+    ids = {it.id for it in selected}
+    # geneA's 11th-best (a10) is only reachable if round-robin drew from the
+    # UNCAPPED 11-item pool, not a date-capped-to-10 one — final_limit=12
+    # with round-robin (a-then-b alternating) reaches a10 on geneA's 11th turn.
+    assert "openalex:a10" in ids
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failures = 0
