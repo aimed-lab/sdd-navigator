@@ -527,13 +527,16 @@ export default function ItemCard({
             </div>
           )}
 
-          {/* Open Targets — disease name and association score shown ONCE,
-              combined into a single pill ("Disease · 0.83") rather than the
-              disease name (title + pill) and the score (twice) each
-              appearing redundantly. When scope had both a gene and a
-              disease, a non-matched item (broader top-scoring context, not
-              an answer to the query's disease) is visibly prefixed "Also
-              associated with" — see sources/opentargets.py's
+          {/* Open Targets — disease name and association score shown ONCE
+              each: the disease as its own pill, the score as a small
+              secondary line labeled "Open Targets score" (not a bare
+              number) so it reads as their metric, aggregated across
+              evidence-source types, not a biological-importance ranking
+              from this app. See TARGET_SECTION_NOTE in the explore pages
+              for the section-level framing note. When scope had both a
+              gene and a disease, a non-matched item (broader top-scoring
+              context, not an answer to the query's disease) is visibly
+              prefixed "Also associated with" — see sources/opentargets.py's
               _fetch_by_gene. Evidence-type chips are capped to the
               strongest few so this card stays roughly paper/compound-card
               height; tractability collapses to ONE plain-language line
@@ -547,7 +550,11 @@ export default function ItemCard({
                 {opentargets.disease_name && (
                   <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-700 font-label-md text-label-md font-semibold">
                     {opentargets.disease_name}
-                    {opentargets.score != null ? ` · ${opentargets.score.toFixed(2)}` : ""}
+                  </span>
+                )}
+                {opentargets.score != null && (
+                  <span className="text-xs text-tertiary">
+                    Open Targets score {opentargets.score.toFixed(2)}
                   </span>
                 )}
               </div>

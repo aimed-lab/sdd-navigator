@@ -84,14 +84,25 @@ function TrialStatusControl({
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+function SectionHeader({ title, note }: { title: string; note?: string }) {
   return (
     <div className="flex items-center gap-3 mb-8">
       <div className="w-1.5 h-8 bg-primary rounded-full" />
-      <h2 className="font-headline-lg text-headline-lg text-on-background">{title}</h2>
+      <div>
+        <h2 className="font-headline-lg text-headline-lg text-on-background">{title}</h2>
+        {note && <p className="text-xs text-tertiary mt-0.5">{note}</p>}
+      </div>
     </div>
   );
 }
+
+// Open Targets' association score aggregates evidence across source types
+// (genetic association, literature, animal model, ...) via a weighted
+// harmonic mean — it is not a biological-importance ranking, so a pair
+// with many evidence types can outscore one with strong-but-narrow
+// evidence. One short line here, not a card-level essay.
+const TARGET_SECTION_NOTE =
+  "Open Targets' association score reflects breadth of evidence sources, not biological importance.";
 
 function SearchResults() {
   const router = useRouter();
@@ -398,7 +409,10 @@ function SearchResults() {
           <div className="space-y-16">
             {activeSections.map((section: ExploreSection) => (
               <section key={section.tool}>
-                <SectionHeader title={titleFor(section.kind)} />
+                <SectionHeader
+                  title={titleFor(section.kind)}
+                  note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
+                />
                 <div className={GRID}>
                   {section.items.map((item: ExploreItem) => (
                     <ItemCard key={item.id} item={item} projectId={projectId} />
