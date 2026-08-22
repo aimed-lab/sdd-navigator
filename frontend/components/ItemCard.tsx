@@ -98,7 +98,19 @@ function priorCitations(item: ExploreItem): string | null {
 // A real, evidence-backed badge string, or null if the signal isn't meaningful.
 // citations only when > 0 (a page of 0-citation preprints shouldn't all read
 // "0 citations" — fall back to the date instead); stars always (GitHub filters >=5).
-function signalBadge(item: ExploreItem): string | null {
+//
+// `variant` distinguishes which of the two paper subsections a card is being
+// rendered in (see app/explore/page.tsx / [topic]/page.tsx: "Latest Papers"
+// vs the WINNER-reordered "Key Papers" subsection below it). Both subsection
+// headers already say what they are, so neither card repeats a "★ Key paper"
+// label — that reads as redundant next to a header that already says
+// "Key Papers", and was inconsistent on Latest Papers cards anyway (it only
+// fired when raw.prior_signal happened to be present from a WINNER re-rank,
+// which predates the Latest/Key split — some Latest Papers cards had it and
+// some didn't, for no reason visible to a reader). The citation COUNT itself
+// is preserved and shown in both subsections; only the star/label text
+// changes based on where the card lives.
+function signalBadge(item: ExploreItem, variant: "default" | "key" = "default"): string | null {
   const signal = item.signal;
   if (!signal) return null;
 
@@ -106,8 +118,14 @@ function signalBadge(item: ExploreItem): string | null {
   // no meaning to a reader ("3.00" says nothing), so it is NEVER shown — the
   // label is qualitative and is backed by the real, preserved citation count.
   if (signal.metric === "network_rank") {
-    const cites = priorCitations(item);
-    return cites ? `★ Key paper · ${cites}` : "★ Key paper";
+    // Neither subsection shows the "★ Key paper" star/label anymore: the
+    // Key Papers header already says it, and on Latest Papers it fired
+    // inconsistently (only when raw.prior_signal happened to survive a
+    // WINNER re-rank) and read as confusing next to cards without it. Only
+    // the real citation count — never the label — is preserved, identically
+    // for both `variant`s (kept as an explicit prop for callers/future
+    // per-subsection divergence, not because the two currently differ).
+    return priorCitations(item);
   }
 
   if (signal.metric === "citations") return citationText(signal.value);
@@ -143,6 +161,7 @@ export default function ItemCard({
   item,
   projectId,
   initiallySaved = false,
+  variant = "default",
 }: {
   item: ExploreItem;
   /** When set, the bookmark button saves into/removes from THIS project
@@ -152,6 +171,13 @@ export default function ItemCard({
    *  project Resources section already knows are saved; false (the
    *  default) everywhere else, matching today's behavior exactly. */
   initiallySaved?: boolean;
+  /** Which paper subsection this card is rendered in — "key" for the
+   *  WINNER-reordered Key Papers subsection, default ("default") for
+   *  everywhere else including Latest Papers. Both drop the "★ Key paper"
+   *  star/label (see signalBadge()); kept as an explicit prop, not inferred
+   *  from item.raw, so the two subsections render consistently regardless
+   *  of which item happens to carry raw.prior_signal. */
+  variant?: "default" | "key";
 }) {
   const [saved, setSaved] = useState(initiallySaved);
   const [pending, setPending] = useState(false);
@@ -162,7 +188,7 @@ export default function ItemCard({
   // signal is always null here and signalBadge() falls through to the plain date
   // badge below automatically. No dataset-specific badge logic needed or wanted:
   // a badge slot is exactly where a fabricated "ranked" label would be a lie.
-  const badge = signalBadge(item);
+  const badge = signalBadge(item, variant);
   const date = badge ? null : formatDate(item.date_iso);
   const accent = ACCENT[item.kind] ?? "border-t-outline-variant";
   const imageUrl =

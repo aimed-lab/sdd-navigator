@@ -277,10 +277,12 @@ function SearchResults() {
           the routed topic so the episode grid opens scoped to the same search. */}
       <CategoryStrip selected={selected} onSelect={setSelected} query={topic} />
 
-      {/* Filters — below the type tabs, scoped to the active one. See
-          app/explore/page.tsx for the "All" reasoning (still applies to its
-          own section within the combined feed). */}
-      {(selected === null || selected === "trial") && (
+      {/* Filters — below the type tabs, scoped to the active one. Shows ONLY
+          on the Trials tab — see app/explore/page.tsx for the full
+          rationale (kept in sync between the two pages). Switching tabs
+          does not clear trial_status from the URL/state; only visibility
+          changes. */}
+      {selected === "trial" && (
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
           <div>
             <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
@@ -413,7 +415,7 @@ function SearchResults() {
                     <SectionHeader title="Key Papers" />
                     <div className={GRID}>
                       {section.items_key!.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} projectId={projectId} />
+                        <ItemCard key={item.id} item={item} projectId={projectId} variant="key" />
                       ))}
                     </div>
                   </div>

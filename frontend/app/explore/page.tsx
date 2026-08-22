@@ -233,10 +233,15 @@ function ExploreFeed() {
 
       {/* Filters — BELOW the type tabs, and scoped to the active one: the
           filter comes after the thing being filtered. "Trial status" only
-          makes sense for trials; on "All" (selected === null) it still
-          applies to that section within the combined feed, so it shows
-          rather than forcing a tab switch just to filter. */}
-      {(selected === null || selected === "trial") && (
+          makes sense for trials, so it shows ONLY on the Trials tab — on
+          "All" it read as page furniture since it only affects one of eight
+          sections there. Switching away from Trials does NOT clear
+          trial_status from the URL/state (see onTrialStatusChange /
+          statusFilter above, both untouched) — only this control's
+          visibility changes, so returning to Trials restores the previous
+          choice, and status_filter keeps applying to the trial section
+          exactly as before regardless of which tab is active. */}
+      {selected === "trial" && (
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
           <div>
             <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
@@ -328,7 +333,7 @@ function ExploreFeed() {
                     <SectionHeader title="Key Papers" />
                     <div className={GRID}>
                       {section.items_key!.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} />
+                        <ItemCard key={item.id} item={item} variant="key" />
                       ))}
                     </div>
                   </div>
