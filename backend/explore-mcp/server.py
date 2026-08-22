@@ -1,7 +1,7 @@
 """
 server.py — Explore MCP server (streamable-HTTP transport).
 
-Exposes 11 tools to other agents over MCP (external agents such as Pleaser call
+Exposes 12 tools to other agents over MCP (external agents such as Pleaser call
 these directly to learn about papers, news, assays/trials, funding,
 datasets/tools, gene sets/pathways, internal resources, people, and podcast
 episodes):
@@ -14,6 +14,7 @@ episodes):
   • search_datasets      — gene-expression/functional-genomics DATASETS (NCBI GEO), not papers
   • search_pager         — gene sets / pathways (PAGER), not papers, not datasets
   • search_chembl        — drug mechanisms / bioactivity against a gene target (ChEMBL)
+  • search_opentargets   — target-disease evidence / tractability (Open Targets, gene or disease)
   • search_lab_resources — internal lab-resource registry (read-only; never contact_info)
   • search_people        — researchers: public platform profiles + internal collaborators
   • search_wiki          — internal podcast-derived episode wiki pages
@@ -85,6 +86,7 @@ from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
 from tools.search_news import search_news_async
+from tools.search_opentargets import search_opentargets_async
 from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_async
 from tools.search_people import search_people as _search_people
@@ -447,6 +449,33 @@ async def search_chembl(query: str, limit: int = 20) -> list[dict]:
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_chembl")
     items = await search_chembl_async(query, limit)
+    return [item.model_dump() for item in items]
+
+
+@mcp.tool()
+async def search_opentargets(query: str, limit: int = 20) -> list[dict]:
+    """Search Open Targets for target-disease EVIDENCE — NOT papers, NOT datasets.
+
+    Returns up to `limit` records (kind="target", source="opentargets"), ONE
+    PER target-disease association: the disease name, the association score,
+    the evidence-type breakdown (`raw.evidence` — genetic_association,
+    literature, animal_model, known_drug, ... each with its own score), and
+    the target's tractability assessments where value=true (`raw.tractability`).
+    No ranking signal (signal=null): an association score is not a citation
+    or star count, so there is no signal to rank by.
+
+    GENE-PRIMARY, DISEASE-FALLBACK: `query` is tried first as a gene/protein
+    SYMBOL (e.g. "PHGDH", "KRAS"); if that has no Open Targets target, it is
+    tried as a disease name (e.g. "glioblastoma") using Open Targets' reverse
+    disease->targets lookup. Unlike search_chembl (gene-only), this accepts
+    either on its own.
+
+    Args:
+        query: A gene/protein symbol or disease name, e.g. "PHGDH" or "glioblastoma".
+        limit: Max items to return (default 20, capped at 50).
+    """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_opentargets")
+    items = await search_opentargets_async(query, limit)
     return [item.model_dump() for item in items]
 
 

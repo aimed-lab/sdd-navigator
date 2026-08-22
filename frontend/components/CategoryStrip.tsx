@@ -28,6 +28,7 @@ export const CATEGORIES: {
   { label: "Datasets", kind: "dataset" },
   { label: "Gene sets", kind: "geneset" },
   { label: "Compounds", kind: "compound" },
+  { label: "Targets", kind: "target" },
   { label: "Tools", kind: "tool" },
   { label: "Trials", kind: "trial" },
   { label: "Grants", kind: "grant" },

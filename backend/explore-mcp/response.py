@@ -72,7 +72,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 # Sources whose `raw` is first-party content the UI renders directly.
-_INTERNAL_SOURCES = {"internal", "geo", "pager", "clinicaltrials", "chembl"}
+_INTERNAL_SOURCES = {"internal", "geo", "pager", "clinicaltrials", "chembl", "opentargets"}
 
 # For external items, the ONLY raw keys the frontend reads.
 #   prior_signal -> components/ItemCard.tsx priorCitations()

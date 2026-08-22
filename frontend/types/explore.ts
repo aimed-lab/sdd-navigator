@@ -8,7 +8,7 @@ export type Signal = {
 
 export type ExploreItem = {
   id: string;
-  kind: string; // paper | news | trial | grant | tool | dataset | geneset | compound | resource | person | episode
+  kind: string; // paper | news | trial | grant | tool | dataset | geneset | compound | target | resource | person | episode
   title: string;
   summary: string | null;
   url: string | null;
@@ -76,6 +76,31 @@ export type ChemblRaw = {
   standard_value?: number | string | null;
   standard_units?: string | null;
   assay_description?: string | null;
+};
+
+/** backend/explore-mcp/sources/opentargets.py's `raw` shape — a handful of
+ *  first-party, curated fields, no top-level Item field for any of them. ONE
+ *  target-disease association per item (not a nested list of several). */
+export type OpenTargetsEvidence = {
+  type?: string; // e.g. "genetic_association" | "literature" | "animal_model" | "known_drug"
+  score?: number;
+};
+
+export type OpenTargetsTractability = {
+  label?: string;
+  modality?: string;
+  value?: boolean;
+};
+
+export type OpenTargetsRaw = {
+  target_ensembl_id?: string;
+  target_symbol?: string;
+  target_name?: string | null;
+  disease_id?: string;
+  disease_name?: string;
+  score?: number | null;
+  evidence?: OpenTargetsEvidence[];
+  tractability?: OpenTargetsTractability[];
 };
 
 export type ExploreResponse = {

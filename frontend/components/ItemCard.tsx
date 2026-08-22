@@ -16,7 +16,7 @@
 // why Explore without project context must stay exactly as it was.
 
 import { useState } from "react";
-import type { ChemblRaw, ExploreItem, TrialRaw } from "@/types/explore";
+import type { ChemblRaw, ExploreItem, OpenTargetsRaw, TrialRaw } from "@/types/explore";
 import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
@@ -30,8 +30,11 @@ const ACCENT: Record<string, string> = {
   geneset: "border-t-fuchsia-500",
   // rose-500 — unused by every other kind (paper=primary, news=sky,
   // tool=blue, trial=purple, grant=amber, dataset=emerald, geneset=fuchsia,
-  // episode=primary-container, resource=teal, person=secondary).
+  // episode=primary-container, resource=teal, person=secondary, target=indigo).
   compound: "border-t-rose-500",
+  // indigo-500 — unused by every other kind (see the rose-500 comment above
+  // for the full accounting; indigo isn't in that list either).
+  target: "border-t-indigo-500",
   episode: "border-t-primary-container",
   resource: "border-t-teal-500",
   person: "border-t-secondary",
@@ -100,6 +103,31 @@ function trialFields(item: ExploreItem): TrialRaw | null {
 function chemblFields(item: ExploreItem): ChemblRaw | null {
   if (item.kind !== "compound") return null;
   return (item.raw ?? {}) as ChemblRaw;
+}
+
+// Open Targets target-disease evidence fields (backend/explore-mcp/sources/
+// opentargets.py) — all in `raw`, no top-level Item field for any of them.
+// One target-disease association per item (not a nested list) — see that
+// module's docstring for why one card per association reads better than a
+// mega-card. No WINNER badge here either: signal is always null (an
+// association score is not a citation/star count), same "no fabricated
+// ranking" idiom as GEO/PAGER/ChEMBL above.
+function opentargetsFields(item: ExploreItem): OpenTargetsRaw | null {
+  if (item.kind !== "target") return null;
+  return (item.raw ?? {}) as OpenTargetsRaw;
+}
+
+// Evidence-type label -> a short, readable display string. Open Targets'
+// own datatype ids are snake_case internal names (genetic_association,
+// known_drug, ...) — title-cased with underscores replaced, not relabeled
+// into different vocabulary, so the string a reader sees is still
+// recognizably the same field Open Targets reports.
+function evidenceLabel(type: string | undefined): string {
+  if (!type) return "evidence";
+  return type
+    .split("_")
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(" ");
 }
 
 function compact(n: number): string {
@@ -232,6 +260,7 @@ export default function ItemCard({
   const geneset = genesetFields(item);
   const trial = trialFields(item);
   const chembl = chemblFields(item);
+  const opentargets = opentargetsFields(item);
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
@@ -459,6 +488,51 @@ export default function ItemCard({
                 </span>
               )}
               {chembl.pchembl_value != null && <span>pChEMBL {chembl.pchembl_value}</span>}
+            </div>
+          )}
+
+          {/* Open Targets — disease name, association score, and the
+              evidence-type breakdown (genetic association, literature,
+              animal model, ...) that backs it. A score with no provenance
+              isn't useful, so the evidence chips are shown alongside it,
+              never the score alone. Tractability (viable-modality flags)
+              is secondary metadata, smaller print, same treatment as a
+              trial's phase/status line. */}
+          {opentargets && (opentargets.disease_name || opentargets.score != null) && (
+            <div className="mt-2 flex flex-col gap-1.5 text-secondary text-body-sm font-body-sm">
+              <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                {opentargets.disease_name && (
+                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-700 font-label-md text-label-md font-semibold">
+                    {opentargets.disease_name}
+                  </span>
+                )}
+                {opentargets.score != null && (
+                  <span>association score {opentargets.score.toFixed(3)}</span>
+                )}
+              </div>
+              {opentargets.evidence && opentargets.evidence.length > 0 && (
+                <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                  {opentargets.evidence.map((e, i) => (
+                    <span
+                      key={`${e.type ?? "evidence"}-${i}`}
+                      className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-low text-xs"
+                    >
+                      {evidenceLabel(e.type)}
+                      {typeof e.score === "number" ? ` ${e.score.toFixed(2)}` : ""}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {opentargets.tractability && opentargets.tractability.length > 0 && (
+                <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                  {opentargets.tractability.map((t, i) => (
+                    <span key={`${t.label ?? "tractability"}-${i}`}>
+                      {t.modality ? `${t.modality}: ` : ""}
+                      {t.label}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

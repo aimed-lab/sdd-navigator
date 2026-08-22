@@ -46,6 +46,7 @@ from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
+from tools.search_opentargets import search_opentargets_async
 from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_async, search_papers_multi_dual_async
 from tools.search_people import search_people
@@ -178,6 +179,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
     "search_pager":         "GENE SETS and PATHWAYS a gene/disease belongs to (not papers, not datasets) — PAGER",
     "search_chembl":        "drug MECHANISMS and quantified BIOACTIVITY against a specific GENE target — ChEMBL (gene-only, not disease/topic text)",
+    "search_opentargets":   "target-disease EVIDENCE — association score plus the evidence-type breakdown (genetic association, literature, animal model, ...) and tractability — Open Targets (gene OR disease)",
     "search_lab_resources": "INTERNAL lab registry — techniques, equipment, models, cell lines, reagents, software for collaboration",
     "search_people":        "researchers — public platform profiles + internal collaborators",
     "search_wiki":          "INTERNAL podcast-derived episode wiki pages",
@@ -216,6 +218,14 @@ _ROUTING_SYSTEM = (
     "that gene target. GENES ONLY — a disease alone with no gene named is NOT enough to "
     "route to search_chembl (ChEMBL's target lookup needs a gene/protein symbol; a "
     "disease-only query has nothing to resolve to a target).\n"
+    "  • ALWAYS include search_opentargets whenever the scope has a disease AND/OR a "
+    "gene (e.g. 'PHGDH glioblastoma', 'KRAS pancreatic cancer', or even a bare gene or "
+    "disease name alone) — same reasoning as datasets/pager above: a named gene or "
+    "disease target is itself reason enough to check Open Targets for its association "
+    "score and evidence-type breakdown (genetic association, literature, animal model, "
+    "...), whether or not the user's own wording asks for 'evidence' or 'targets' "
+    "explicitly. Unlike search_chembl (gene-only), search_opentargets accepts EITHER a "
+    "gene OR a disease on its own.\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
     'Return ONLY a JSON object of the form '
     '{"tools": ["search_papers", ...], "reasoning": "one sentence"}. '
@@ -242,6 +252,8 @@ def _heuristic_tools(scope: dict) -> list[str]:
         chosen.append("search_pager")
     if scope["genes"]:
         chosen.append("search_chembl")
+    if scope["diseases"] or scope["genes"]:
+        chosen.append("search_opentargets")
     if scope["diseases"] or scope["methods"]:
         chosen.append("search_people")
     if topical:
@@ -399,6 +411,7 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_datasets":      ("diseases", "genes"),            # VESTIGIAL — _query_for's _SINGLE_TERM_TOOLS branch overrides this. Left here as a record of the slice that turned out still-too-diluted: "Amyotrophic lateral sclerosis ATXN2 TARDBP" (this slice's output) returned 1 dataset; "ATXN2"/"TARDBP"/"Amyotrophic lateral sclerosis" alone each returned 20. Same strict-AND behavior as PAGER, confirmed directly, not assumed.
     "search_pager":         ("genes",),                       # VESTIGIAL — see _SINGLE_TERM_TOOLS in _query_for, which is what actually runs for this tool now. Left here as a record only.
     "search_chembl":        ("genes",),                       # GENE-ONLY — ChEMBL's target search resolves a gene/protein symbol to a target_chembl_id; a disease/topic string has nothing to resolve to. Single most specific gene, same _SINGLE_TERM_TOOLS-style handling as pager/datasets (see _query_for).
+    "search_opentargets":   ("genes", "diseases"),             # GENE-OR-DISEASE — unlike ChEMBL, Open Targets' `search` resolves either a gene/protein symbol OR a disease name to an id (see sources/opentargets.py's GENE-PRIMARY, DISEASE-FALLBACK). VESTIGIAL — _query_for special-cases this to _opentargets_query() (single most specific gene, else single most specific disease), same "one term, not several" discipline as the strict-matcher tools above. Left here as a record only.
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -439,6 +452,7 @@ _KINDS: dict[str, str] = {
     "search_datasets": "dataset",
     "search_pager": "geneset",
     "search_chembl": "compound",
+    "search_opentargets": "target",
     "search_lab_resources": "resource",
     "search_people": "person",
     "search_wiki": "episode",
@@ -583,6 +597,25 @@ def _chembl_query(scope: dict) -> str:
     return _join_unique(*[scope[k] for k in SCOPE_KEYS])
 
 
+def _opentargets_query(scope: dict) -> str:
+    """Open Targets (search_opentargets) query composition — GENE-PRIMARY,
+    DISEASE-FALLBACK, mirroring sources/opentargets.py's own resolution
+    order: single most specific gene when one is present (same "one term,
+    not several" reasoning as _chembl_query — Open Targets' `search` resolves
+    a SYMBOL, not a bag of words), else the single most specific disease
+    (Open Targets' reverse `disease{associatedTargets}}` path handles this
+    case natively, unlike ChEMBL which has no disease-side query at all).
+    Routing only chooses this tool when scope has a gene or a disease, so the
+    empty-scope branch is a defensive last resort, not the expected path."""
+    genes = scope.get("genes") or []
+    if genes:
+        return genes[0].strip()
+    diseases = scope.get("diseases") or []
+    if diseases:
+        return diseases[0].strip()
+    return _join_unique(*[scope[k] for k in SCOPE_KEYS])
+
+
 def _query_for(name: str, scope: dict) -> str:
     if name == "search_tools":
         return _single_method_query(scope)
@@ -590,6 +623,8 @@ def _query_for(name: str, scope: dict) -> str:
         return _datasets_query(scope)
     if name == "search_chembl":
         return _chembl_query(scope)
+    if name == "search_opentargets":
+        return _opentargets_query(scope)
     if name in _SINGLE_TERM_TOOLS:
         if scope["genes"]:
             return scope["genes"][0].strip()
@@ -749,6 +784,8 @@ def _dispatch(name: str, query: str):
         return search_pager_async(query, _NET_LIMIT)
     if name == "search_chembl":
         return search_chembl_async(query, _NET_LIMIT)
+    if name == "search_opentargets":
+        return search_opentargets_async(query, _NET_LIMIT)
     if name == "search_lab_resources":
         return asyncio.to_thread(search_lab_resources, query, None, _INTERNAL_LIMIT)
     if name == "search_people":
