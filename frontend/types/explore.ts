@@ -101,6 +101,14 @@ export type OpenTargetsRaw = {
   score?: number | null;
   evidence?: OpenTargetsEvidence[];
   tractability?: OpenTargetsTractability[];
+  /** Only present when scope had BOTH a gene and a disease (see
+   *  sources/opentargets.py's fetch_opentargets/_fetch_by_gene). true = this
+   *  IS the specific target-disease pair the query asked about (shown as the
+   *  primary/unlabeled result); false = broader top-scoring context, not an
+   *  answer to the query's disease, and must be visibly labeled as such
+   *  (see ItemCard.tsx). Absent for a gene-only query — nothing to
+   *  distinguish there, current top-by-score behavior stands unlabeled. */
+  matched_query_disease?: boolean;
 };
 
 export type ExploreResponse = {

@@ -820,7 +820,22 @@ async def _execute(
             specs.append((name, _KINDS[name], papers_query_display))
             continue
         query = _query_for(name, scope)
-        if name == "search_trials" and status_filter:
+        if name == "search_opentargets":
+            # Thread the disease term through as a SEPARATE parameter
+            # alongside the gene, not concatenated into `query` — see
+            # sources/opentargets.py's fetch_opentargets docstring (Problem
+            # 1). Only meaningful when the primary query resolved to the
+            # gene (i.e. scope actually has a gene); when it fell back to
+            # the disease term itself (no gene in scope), there's no second
+            # disease to filter by, so `disease` stays None and the reverse
+            # disease-driven path is untouched.
+            disease_term = None
+            if scope.get("genes"):
+                diseases = scope.get("diseases") or []
+                if diseases:
+                    disease_term = diseases[0].strip()
+            tasks.append(search_opentargets_async(query, _NET_LIMIT, disease=disease_term))
+        elif name == "search_trials" and status_filter:
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
             # search_trials_async -> ClinicalTrials.gov's filter.overallStatus.

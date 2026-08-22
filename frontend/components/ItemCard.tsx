@@ -16,7 +16,13 @@
 // why Explore without project context must stay exactly as it was.
 
 import { useState } from "react";
-import type { ChemblRaw, ExploreItem, OpenTargetsRaw, TrialRaw } from "@/types/explore";
+import type {
+  ChemblRaw,
+  ExploreItem,
+  OpenTargetsRaw,
+  OpenTargetsTractability,
+  TrialRaw,
+} from "@/types/explore";
 import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
@@ -128,6 +134,36 @@ function evidenceLabel(type: string | undefined): string {
     .split("_")
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
     .join(" ");
+}
+
+// Open Targets modality codes (SM/AB/PR/OC), spelled out in plain words for
+// a card — see sources/opentargets.py's _curated_tractability for what's
+// already been filtered out (PR-modality data-availability noise like
+// "Half-life Data") before this ever reaches the frontend.
+const MODALITY_LABEL: Record<string, string> = {
+  SM: "small molecule",
+  AB: "antibody",
+  PR: "PROTAC",
+  OC: "other modality",
+};
+
+function modalityLabel(modality: string | undefined): string {
+  if (!modality) return "unknown modality";
+  return MODALITY_LABEL[modality] ?? modality;
+}
+
+/** One or two plain-language tractability facts from the curated
+ *  {label, modality, value} list — never the raw SM/AB/PR codes or a
+ *  9-line flag dump. See ItemCard's target render block. */
+function tractabilitySummary(rows: OpenTargetsTractability[] | undefined): string | null {
+  if (!rows || rows.length === 0) return null;
+  const hasApprovedDrug = rows.some((r) => r.label === "Approved Drug");
+  const modalities = Array.from(new Set(rows.map((r) => modalityLabel(r.modality))));
+  const parts: string[] = [];
+  if (hasApprovedDrug) parts.push("approved drug available");
+  if (modalities.length > 0) parts.push(`tractable: ${modalities.join(", ")}`);
+  if (parts.length === 0) return null;
+  return parts.join(" · ");
 }
 
 function compact(n: number): string {
@@ -491,47 +527,48 @@ export default function ItemCard({
             </div>
           )}
 
-          {/* Open Targets — disease name, association score, and the
-              evidence-type breakdown (genetic association, literature,
-              animal model, ...) that backs it. A score with no provenance
-              isn't useful, so the evidence chips are shown alongside it,
-              never the score alone. Tractability (viable-modality flags)
-              is secondary metadata, smaller print, same treatment as a
-              trial's phase/status line. */}
+          {/* Open Targets — disease name and association score shown ONCE,
+              combined into a single pill ("Disease · 0.83") rather than the
+              disease name (title + pill) and the score (twice) each
+              appearing redundantly. When scope had both a gene and a
+              disease, a non-matched item (broader top-scoring context, not
+              an answer to the query's disease) is visibly prefixed "Also
+              associated with" — see sources/opentargets.py's
+              _fetch_by_gene. Evidence-type chips are capped to the
+              strongest few so this card stays roughly paper/compound-card
+              height; tractability collapses to ONE plain-language line
+              (see tractabilitySummary), never the raw SM/AB/PR codes. */}
           {opentargets && (opentargets.disease_name || opentargets.score != null) && (
             <div className="mt-2 flex flex-col gap-1.5 text-secondary text-body-sm font-body-sm">
               <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
+                {opentargets.matched_query_disease === false && (
+                  <span className="text-xs italic text-tertiary">Also associated with</span>
+                )}
                 {opentargets.disease_name && (
                   <span className="inline-flex items-center px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-700 font-label-md text-label-md font-semibold">
                     {opentargets.disease_name}
+                    {opentargets.score != null ? ` · ${opentargets.score.toFixed(2)}` : ""}
                   </span>
-                )}
-                {opentargets.score != null && (
-                  <span>association score {opentargets.score.toFixed(3)}</span>
                 )}
               </div>
               {opentargets.evidence && opentargets.evidence.length > 0 && (
                 <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
-                  {opentargets.evidence.map((e, i) => (
-                    <span
-                      key={`${e.type ?? "evidence"}-${i}`}
-                      className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-low text-xs"
-                    >
-                      {evidenceLabel(e.type)}
-                      {typeof e.score === "number" ? ` ${e.score.toFixed(2)}` : ""}
-                    </span>
-                  ))}
+                  {[...opentargets.evidence]
+                    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+                    .slice(0, 3)
+                    .map((e, i) => (
+                      <span
+                        key={`${e.type ?? "evidence"}-${i}`}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full bg-surface-container-low text-xs"
+                      >
+                        {evidenceLabel(e.type)}
+                        {typeof e.score === "number" ? ` ${e.score.toFixed(2)}` : ""}
+                      </span>
+                    ))}
                 </div>
               )}
-              {opentargets.tractability && opentargets.tractability.length > 0 && (
-                <div className="flex items-center gap-x-2 gap-y-1 flex-wrap">
-                  {opentargets.tractability.map((t, i) => (
-                    <span key={`${t.label ?? "tractability"}-${i}`}>
-                      {t.modality ? `${t.modality}: ` : ""}
-                      {t.label}
-                    </span>
-                  ))}
-                </div>
+              {tractabilitySummary(opentargets.tractability) && (
+                <div className="text-xs">{tractabilitySummary(opentargets.tractability)}</div>
               )}
             </div>
           )}
