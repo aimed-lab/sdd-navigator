@@ -90,6 +90,13 @@ function trialFields(item: ExploreItem): TrialRaw | null {
 // renders whichever fields are actually present. No WINNER badge here either:
 // signal is always null (no citation graph between compounds), same
 // "no fabricated ranking" idiom as GEO/PAGER above.
+//
+// `item.title` is already the resolved drug name (pref_name) when ChEMBL has
+// one, falling back to the bare molecule_chembl_id when it doesn't — the
+// backend bakes that fallback in, never a fabricated name. The id itself is
+// never dropped even when a name resolves: raw.molecule_chembl_id is always
+// rendered below as canonical secondary text, same as a trial card's phase/
+// status line next to its title.
 function chemblFields(item: ExploreItem): ChemblRaw | null {
   if (item.kind !== "compound") return null;
   return (item.raw ?? {}) as ChemblRaw;
@@ -426,9 +433,14 @@ export default function ItemCard({
               pchembl_value). mechanism_of_action / assay_description are
               already the item's `summary` (rendered above), so this block
               only surfaces the structured fields summary doesn't carry. */}
-          {chembl && (chembl.max_phase != null || chembl.action_type || chembl.mutation
-            || chembl.standard_type || chembl.pchembl_value != null) && (
+          {chembl && (chembl.molecule_chembl_id || chembl.max_phase != null || chembl.action_type
+            || chembl.mutation || chembl.standard_type || chembl.pchembl_value != null) && (
             <div className="mt-2 flex items-center gap-x-2 gap-y-1 flex-wrap text-secondary text-body-sm font-body-sm">
+              {/* Canonical ChEMBL id — always shown, name-or-not, so the id is
+                  never lost even once pref_name resolves and becomes the title. */}
+              {chembl.molecule_chembl_id && (
+                <span className="font-mono text-xs">{chembl.molecule_chembl_id}</span>
+              )}
               {chembl.max_phase != null && (
                 <span className="inline-flex items-center px-3 py-1 rounded-full bg-rose-500/10 text-rose-700 font-label-md text-label-md font-semibold">
                   Phase {chembl.max_phase}

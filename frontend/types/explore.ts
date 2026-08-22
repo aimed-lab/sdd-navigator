@@ -65,6 +65,7 @@ export type TrialRaw = {
  *  fields absent). */
 export type ChemblRaw = {
   molecule_chembl_id?: string;
+  pref_name?: string | null;
   mechanism_of_action?: string | null;
   max_phase?: number | null;
   action_type?: string | null;

@@ -25,7 +25,9 @@ CURATION AT FETCH TIME (the thing that's bitten every source before this one):
 mechanism_of_action, max_phase, action_type, mutation, pubmed_ids (from
 mechanism_refs, PubMed refs only) for a mechanism item; pchembl_value,
 standard_type, standard_value, standard_units, assay_description,
-molecule_chembl_id for an activity item. The full ChEMBL record (which carries
+molecule_chembl_id for an activity item; both kinds also carry `pref_name`
+(see NAME RESOLUTION below), curated the same way — just the resolved
+string, never the full molecule blob. The full ChEMBL record (which carries
 many more fields no caller reads) is never stored.
 
 NO OFF-DOMAIN / QUALITY FILTER: `filter_quality` (sources/base.py) exists for
@@ -42,6 +44,21 @@ CAP: `cap` is split across the two record kinds (half mechanism, half
 activity, at least 1 each) so a single gene with a huge mechanism table
 doesn't starve activity results or vice versa; the combined list is then
 truncated to `cap` total, same contract as every other fetcher's `cap` param.
+
+NAME RESOLUTION: mechanism/activity records only carry `molecule_chembl_id`
+— the human-readable name (`pref_name`) lives on ChEMBL's separate molecule
+record. Resolving it one molecule at a time would add one HTTP call per
+compound item (e.g. 7 extra calls for a typical KRAS G12C query — one per
+mechanism/activity row). ChEMBL's `/molecule.json` supports a Django-style
+`__in` filter (`molecule_chembl_id__in=ID1,ID2,...`), confirmed against the
+live API, so instead: collect the distinct molecule ids from the already-
+fetched (capped) items, resolve ALL of them in ONE batch request, then map
+`pref_name` back onto each item by id. `pref_name` is curated into `raw`
+just like every other named field; the full molecule record is never
+stored. When a molecule has no `pref_name` (null/missing from ChEMBL), the
+item's title/summary fall back to the ChEMBL id exactly as before — never a
+fabricated name. The id is always kept in `raw.molecule_chembl_id` and in
+the title as secondary text even when a name resolves.
 """
 
 from __future__ import annotations
@@ -58,6 +75,7 @@ from .base import get_json, to_iso
 _TARGET_SEARCH = "https://www.ebi.ac.uk/chembl/api/data/target/search"
 _MECHANISM = "https://www.ebi.ac.uk/chembl/api/data/mechanism.json"
 _ACTIVITY = "https://www.ebi.ac.uk/chembl/api/data/activity.json"
+_MOLECULE = "https://www.ebi.ac.uk/chembl/api/data/molecule.json"
 
 
 def _molecule_url(molecule_chembl_id: str) -> str:
@@ -76,6 +94,38 @@ async def _resolve_target(client: httpx.AsyncClient, gene_symbol: str) -> str | 
         return None
     target_id = targets[0].get("target_chembl_id")
     return target_id or None
+
+
+async def _resolve_molecule_names(
+    client: httpx.AsyncClient, molecule_ids: list[str]
+) -> dict[str, str | None]:
+    """Batch-resolve `pref_name` for every distinct molecule id in ONE request via
+    ChEMBL's `molecule_chembl_id__in` filter (confirmed supported against the live
+    API — e.g. CHEMBL4535757,CHEMBL4594350 -> SOTORASIB, ADAGRASIB in a single
+    call), instead of one `/molecule/<id>.json` call per compound item. Ids with no
+    `pref_name` (null/missing) map to None — the caller falls back to showing the
+    id alone, never a fabricated name. Ids ChEMBL doesn't return at all (dropped
+    row, transient issue) are simply absent from the result and also fall back."""
+    if not molecule_ids:
+        return {}
+    url = f"{_MOLECULE}?molecule_chembl_id__in={quote(','.join(molecule_ids))}&format=json"
+    data = await get_json(client, url)
+    names: dict[str, str | None] = {}
+    for mol in (data or {}).get("molecules") or []:
+        mid = mol.get("molecule_chembl_id")
+        if mid:
+            names[mid] = mol.get("pref_name") or None
+    return names
+
+
+def _display_title(molecule_id: str, pref_name: str | None, suffix: str) -> str:
+    """Resolved name as the title's primary text, falling back to the bare id when
+    no name resolved. The id itself is NEVER dropped from the item even when a
+    name resolves — it stays in `raw.molecule_chembl_id` and ItemCard renders it
+    as secondary text next to the title, same pattern as a trial card's title
+    plus phase/status."""
+    primary = pref_name if pref_name else molecule_id
+    return f"{primary} — {suffix}"
 
 
 def _pubmed_refs(mechanism_refs: list[dict]) -> list[str]:
@@ -99,7 +149,10 @@ async def _fetch_mechanisms(client: httpx.AsyncClient, target_chembl_id: str, ca
         moa = m.get("mechanism_of_action") or None
         mutation = ((m.get("variant_sequence") or {}) or {}).get("mutation") or None
 
-        title = f"{molecule_id} — {action_type or 'mechanism of action'}"
+        # Name not resolved yet — this fetch runs before the batch molecule lookup
+        # (fetch_chembl collects ids from both mechanism and activity items first).
+        # _apply_pref_names() rewrites `title` and `raw.pref_name` afterward.
+        title = _display_title(molecule_id, None, action_type or "mechanism of action")
         summary = moa or f"Mechanism-of-action record for {molecule_id}."
         url_out = _molecule_url(molecule_id)
 
@@ -117,6 +170,7 @@ async def _fetch_mechanisms(client: httpx.AsyncClient, target_chembl_id: str, ca
                 dedupe_key=dedupe_key(url_out, title),
                 raw={
                     "molecule_chembl_id": molecule_id,
+                    "pref_name": None,
                     "mechanism_of_action": moa,
                     "max_phase": m.get("max_phase"),
                     "action_type": action_type,
@@ -144,7 +198,8 @@ async def _fetch_activities(client: httpx.AsyncClient, target_chembl_id: str, ca
         assay_desc = (a.get("assay_description") or "")[:220] or None
         pchembl_value = a.get("pchembl_value")
 
-        title = f"{molecule_id} bioactivity" + (f" ({standard_type})" if standard_type else "")
+        suffix = f"bioactivity ({standard_type})" if standard_type else "bioactivity"
+        title = _display_title(molecule_id, None, suffix)
         summary = assay_desc or f"Bioactivity record for {molecule_id}."
         url_out = _molecule_url(molecule_id)
         document_year = a.get("document_year")
@@ -164,6 +219,7 @@ async def _fetch_activities(client: httpx.AsyncClient, target_chembl_id: str, ca
                 dedupe_key=dedupe_key(url_out, title),
                 raw={
                     "molecule_chembl_id": molecule_id,
+                    "pref_name": None,
                     "pchembl_value": pchembl_value,
                     "standard_type": standard_type,
                     "standard_value": a.get("standard_value"),
@@ -173,6 +229,26 @@ async def _fetch_activities(client: httpx.AsyncClient, target_chembl_id: str, ca
             )
         )
     return items
+
+
+def _apply_pref_names(items: list[Item], names: dict[str, str | None]) -> None:
+    """Rewrite each item's `title` (name-primary, id-secondary — or id alone on a
+    miss) and `raw.pref_name` in place, using the batch-resolved name map. Item's
+    `dedupe_key` is intentionally left untouched: it's keyed off `url` (the stable
+    molecule id URL), not the display title, so renaming doesn't fragment dedup."""
+    for it in items:
+        molecule_id = it.raw.get("molecule_chembl_id") if it.raw else None
+        if not molecule_id:
+            continue
+        pref_name = names.get(molecule_id)
+        it.raw["pref_name"] = pref_name
+        is_mechanism = it.id.startswith("chembl:mechanism:")
+        if is_mechanism:
+            suffix = it.raw.get("action_type") or "mechanism of action"
+        else:
+            standard_type = it.raw.get("standard_type")
+            suffix = f"bioactivity ({standard_type})" if standard_type else "bioactivity"
+        it.title = _display_title(molecule_id, pref_name, suffix)
 
 
 async def fetch_chembl(client: httpx.AsyncClient, gene_symbol: str, cap: int) -> list[Item]:
@@ -196,4 +272,16 @@ async def fetch_chembl(client: httpx.AsyncClient, gene_symbol: str, cap: int) ->
     mechanisms = await _fetch_mechanisms(client, target_chembl_id, mech_cap)
     activities = await _fetch_activities(client, target_chembl_id, act_cap)
 
-    return (mechanisms + activities)[:cap]
+    items = (mechanisms + activities)[:cap]
+
+    # Resolve names for exactly the compounds about to be displayed (the capped
+    # list), not every raw row fetched above — one batch request regardless of
+    # how many distinct molecules that is. See module docstring: batch `__in`
+    # lookup confirmed against the live ChEMBL API, one call instead of N.
+    distinct_ids = list(dict.fromkeys(
+        it.raw.get("molecule_chembl_id") for it in items if it.raw and it.raw.get("molecule_chembl_id")
+    ))
+    names = await _resolve_molecule_names(client, distinct_ids)
+    _apply_pref_names(items, names)
+
+    return items
