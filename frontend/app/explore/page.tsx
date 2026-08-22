@@ -24,6 +24,7 @@ const SECTION_TITLE: Record<string, string> = {
   paper: "Latest Papers",
   dataset: "Datasets",
   geneset: "Gene sets",
+  compound: "Compounds",
   tool: "Trending Tools",
   trial: "Clinical Trials",
   grant: "Funding & Grants",

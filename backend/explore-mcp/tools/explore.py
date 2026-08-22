@@ -41,6 +41,7 @@ from cache import (
     cache,
     normalize_key,
 )
+from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
@@ -176,6 +177,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_tools":         "open-source software tools / repositories — GitHub",
     "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
     "search_pager":         "GENE SETS and PATHWAYS a gene/disease belongs to (not papers, not datasets) — PAGER",
+    "search_chembl":        "drug MECHANISMS and quantified BIOACTIVITY against a specific GENE target — ChEMBL (gene-only, not disease/topic text)",
     "search_lab_resources": "INTERNAL lab registry — techniques, equipment, models, cell lines, reagents, software for collaboration",
     "search_people":        "researchers — public platform profiles + internal collaborators",
     "search_wiki":          "INTERNAL podcast-derived episode wiki pages",
@@ -209,6 +211,11 @@ _ROUTING_SYSTEM = (
     "  • An explicit funding ask with NO disease named ('funding for a CRISPR screen', "
     "'grant for a high-throughput assay') → grants (and relevant tools) even though the "
     "disease-triggered rule above doesn't apply to it.\n"
+    "  • Whenever the scope names a GENE (e.g. 'KRAS G12C inhibitor', 'PHGDH glioblastoma') "
+    "→ ALSO include search_chembl for drug mechanisms and quantified bioactivity against "
+    "that gene target. GENES ONLY — a disease alone with no gene named is NOT enough to "
+    "route to search_chembl (ChEMBL's target lookup needs a gene/protein symbol; a "
+    "disease-only query has nothing to resolve to a target).\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
     'Return ONLY a JSON object of the form '
     '{"tools": ["search_papers", ...], "reasoning": "one sentence"}. '
@@ -233,6 +240,8 @@ def _heuristic_tools(scope: dict) -> list[str]:
     if scope["diseases"] or scope["genes"]:
         chosen.append("search_datasets")
         chosen.append("search_pager")
+    if scope["genes"]:
+        chosen.append("search_chembl")
     if scope["diseases"] or scope["methods"]:
         chosen.append("search_people")
     if topical:
@@ -389,6 +398,7 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_tools":         ("methods", "genes"),             # VESTIGIAL — _query_for special-cases this to _single_method_query(), which drops genes entirely. Left here as a record: "RNA ASO preclinical ATXN2 TARDBP" (this slice's output) returned 0 GitHub repos; RNA/ASO/preclinical alone each returned 16-20, ATXN2/TARDBP alone each returned 0 — genes are actively harmful here, not just diluting, since GitHub indexes what a repo DOES, not what gene it studies.
     "search_datasets":      ("diseases", "genes"),            # VESTIGIAL — _query_for's _SINGLE_TERM_TOOLS branch overrides this. Left here as a record of the slice that turned out still-too-diluted: "Amyotrophic lateral sclerosis ATXN2 TARDBP" (this slice's output) returned 1 dataset; "ATXN2"/"TARDBP"/"Amyotrophic lateral sclerosis" alone each returned 20. Same strict-AND behavior as PAGER, confirmed directly, not assumed.
     "search_pager":         ("genes",),                       # VESTIGIAL — see _SINGLE_TERM_TOOLS in _query_for, which is what actually runs for this tool now. Left here as a record only.
+    "search_chembl":        ("genes",),                       # GENE-ONLY — ChEMBL's target search resolves a gene/protein symbol to a target_chembl_id; a disease/topic string has nothing to resolve to. Single most specific gene, same _SINGLE_TERM_TOOLS-style handling as pager/datasets (see _query_for).
     "search_lab_resources": ("methods", "genes"),
     "search_people":        ("diseases", "methods"),
     "search_wiki":          ("topics",),
@@ -428,6 +438,7 @@ _KINDS: dict[str, str] = {
     "search_tools": "tool",
     "search_datasets": "dataset",
     "search_pager": "geneset",
+    "search_chembl": "compound",
     "search_lab_resources": "resource",
     "search_people": "person",
     "search_wiki": "episode",
@@ -555,11 +566,30 @@ def _datasets_query(scope: dict) -> str:
     return _join_unique(*[scope[k] for k in SCOPE_KEYS])
 
 
+def _chembl_query(scope: dict) -> str:
+    """ChEMBL (search_chembl) query composition — GENE ONLY, no disease/topic
+    fallback. See fetch_chembl's own docstring: the tool resolves a gene/
+    protein SYMBOL to a target_chembl_id via ChEMBL's target search; a
+    disease or topic string has no target to resolve to at all, unlike
+    trials/grants/GEO/PAGER, which at least accept a disease as a degraded
+    fallback. Only the single most specific gene is used — same "one term,
+    not several" reasoning as _SINGLE_TERM_TOOLS. Routing (_heuristic_tools /
+    _ROUTING_SYSTEM) only chooses this tool when scope has a gene, so the
+    empty-scope branch here is a defensive last resort, not the expected
+    path."""
+    genes = scope.get("genes") or []
+    if genes:
+        return genes[0].strip()
+    return _join_unique(*[scope[k] for k in SCOPE_KEYS])
+
+
 def _query_for(name: str, scope: dict) -> str:
     if name == "search_tools":
         return _single_method_query(scope)
     if name == "search_datasets":
         return _datasets_query(scope)
+    if name == "search_chembl":
+        return _chembl_query(scope)
     if name in _SINGLE_TERM_TOOLS:
         if scope["genes"]:
             return scope["genes"][0].strip()
@@ -717,6 +747,8 @@ def _dispatch(name: str, query: str):
         return search_datasets_async(query, _NET_LIMIT)
     if name == "search_pager":
         return search_pager_async(query, _NET_LIMIT)
+    if name == "search_chembl":
+        return search_chembl_async(query, _NET_LIMIT)
     if name == "search_lab_resources":
         return asyncio.to_thread(search_lab_resources, query, None, _INTERNAL_LIMIT)
     if name == "search_people":

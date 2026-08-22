@@ -13,6 +13,7 @@ episodes):
   • search_tools         — open-source software tools/repos (GitHub)
   • search_datasets      — gene-expression/functional-genomics DATASETS (NCBI GEO), not papers
   • search_pager         — gene sets / pathways (PAGER), not papers, not datasets
+  • search_chembl        — drug mechanisms / bioactivity against a gene target (ChEMBL)
   • search_lab_resources — internal lab-resource registry (read-only; never contact_info)
   • search_people        — researchers: public platform profiles + internal collaborators
   • search_wiki          — internal podcast-derived episode wiki pages
@@ -79,6 +80,7 @@ from response import trim_explore_result, trim_items
 from tools.explore import explore_async
 from tools.find_provider import classify_checklist_item_async, find_providers_for_item_async
 from tools.project_agent import run_project_agent_async
+from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources as _search_lab_resources
@@ -419,6 +421,32 @@ async def search_pager(query: str, limit: int = 20) -> list[dict]:
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_pager")
     items = await search_pager_async(query, limit)
+    return [item.model_dump() for item in items]
+
+
+@mcp.tool()
+async def search_chembl(query: str, limit: int = 20) -> list[dict]:
+    """Search ChEMBL for drug MECHANISMS and quantified BIOACTIVITY against a
+    GENE target — NOT papers, NOT datasets.
+
+    Returns up to `limit` records (kind="compound", source="chembl") of two
+    kinds: mechanism-of-action records (which molecule, action_type, max_phase,
+    the specific mutation targeted when known, e.g. "G12C") and quantified
+    bioactivity/assay records (pchembl_value, standard_type/value/units,
+    assay_description) — both scoped to the ChEMBL target resolved from
+    `query`. No ranking signal (signal=null): ChEMBL records don't cite each
+    other, so there is no citation graph to rank by.
+
+    GENE-ONLY: `query` must be a gene/protein SYMBOL (e.g. "KRAS", "PHGDH"),
+    resolved via ChEMBL's own target search. A disease or free-text query has
+    no ChEMBL target to resolve to and will return no results.
+
+    Args:
+        query: A gene/protein symbol, e.g. "KRAS" or "EGFR".
+        limit: Max items to return (default 20, capped at 50).
+    """
+    limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_chembl")
+    items = await search_chembl_async(query, limit)
     return [item.model_dump() for item in items]
 
 

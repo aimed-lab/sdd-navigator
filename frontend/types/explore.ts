@@ -8,7 +8,7 @@ export type Signal = {
 
 export type ExploreItem = {
   id: string;
-  kind: string; // paper | news | trial | grant | tool | dataset | geneset | resource | person | episode
+  kind: string; // paper | news | trial | grant | tool | dataset | geneset | compound | resource | person | episode
   title: string;
   summary: string | null;
   url: string | null;
@@ -54,6 +54,27 @@ export type TrialRaw = {
   overall_status?: string | null;
   why_stopped?: string | null;
   phase?: string | null;
+};
+
+/** backend/explore-mcp/sources/chembl.py's `raw` shape — a handful of
+ *  first-party fields, no top-level Item field for any of them. Two record
+ *  kinds share this shape: a mechanism-of-action record (mechanism_of_action/
+ *  max_phase/action_type/mutation/pubmed_ids populated, bioactivity fields
+ *  absent) and a bioactivity record (pchembl_value/standard_type/
+ *  standard_value/standard_units/assay_description populated, mechanism
+ *  fields absent). */
+export type ChemblRaw = {
+  molecule_chembl_id?: string;
+  mechanism_of_action?: string | null;
+  max_phase?: number | null;
+  action_type?: string | null;
+  mutation?: string | null;
+  pubmed_ids?: string[];
+  pchembl_value?: number | string | null;
+  standard_type?: string | null;
+  standard_value?: number | string | null;
+  standard_units?: string | null;
+  assay_description?: string | null;
 };
 
 export type ExploreResponse = {

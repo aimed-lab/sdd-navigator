@@ -16,7 +16,7 @@
 // why Explore without project context must stay exactly as it was.
 
 import { useState } from "react";
-import type { ExploreItem, TrialRaw } from "@/types/explore";
+import type { ChemblRaw, ExploreItem, TrialRaw } from "@/types/explore";
 import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 
 // Per-kind top-border accent (literal class strings so Tailwind compiles them).
@@ -28,6 +28,10 @@ const ACCENT: Record<string, string> = {
   grant: "border-t-amber-500",
   dataset: "border-t-emerald-500",
   geneset: "border-t-fuchsia-500",
+  // rose-500 — unused by every other kind (paper=primary, news=sky,
+  // tool=blue, trial=purple, grant=amber, dataset=emerald, geneset=fuchsia,
+  // episode=primary-container, resource=teal, person=secondary).
+  compound: "border-t-rose-500",
   episode: "border-t-primary-container",
   resource: "border-t-teal-500",
   person: "border-t-secondary",
@@ -75,6 +79,20 @@ function genesetFields(item: ExploreItem): GenesetRaw | null {
 function trialFields(item: ExploreItem): TrialRaw | null {
   if (item.kind !== "trial") return null;
   return (item.raw ?? {}) as TrialRaw;
+}
+
+// ChEMBL compound fields (backend/explore-mcp/sources/chembl.py) — all in
+// `raw`, no top-level Item field for any of them. Two record shapes share
+// this kind (see that module's docstring): a mechanism-of-action record
+// (mechanism_of_action/max_phase/action_type/mutation populated) or a
+// bioactivity record (pchembl_value/standard_type/standard_value/
+// standard_units populated) — never both on the same item, so the card
+// renders whichever fields are actually present. No WINNER badge here either:
+// signal is always null (no citation graph between compounds), same
+// "no fabricated ranking" idiom as GEO/PAGER above.
+function chemblFields(item: ExploreItem): ChemblRaw | null {
+  if (item.kind !== "compound") return null;
+  return (item.raw ?? {}) as ChemblRaw;
 }
 
 function compact(n: number): string {
@@ -206,6 +224,7 @@ export default function ItemCard({
   const geo = geoFields(item);
   const geneset = genesetFields(item);
   const trial = trialFields(item);
+  const chembl = chemblFields(item);
 
   const open = () => {
     if (item.url) window.open(item.url, "_blank", "noopener,noreferrer");
@@ -399,6 +418,35 @@ export default function ItemCard({
                   &ldquo;{trial.why_stopped}&rdquo;
                 </blockquote>
               )}
+            </div>
+          )}
+
+          {/* ChEMBL compound — mechanism fields (max_phase/action_type/mutation)
+              when present, else bioactivity fields (standard_type/value/units,
+              pchembl_value). mechanism_of_action / assay_description are
+              already the item's `summary` (rendered above), so this block
+              only surfaces the structured fields summary doesn't carry. */}
+          {chembl && (chembl.max_phase != null || chembl.action_type || chembl.mutation
+            || chembl.standard_type || chembl.pchembl_value != null) && (
+            <div className="mt-2 flex items-center gap-x-2 gap-y-1 flex-wrap text-secondary text-body-sm font-body-sm">
+              {chembl.max_phase != null && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-rose-500/10 text-rose-700 font-label-md text-label-md font-semibold">
+                  Phase {chembl.max_phase}
+                </span>
+              )}
+              {chembl.action_type && (
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-rose-500/10 text-rose-700 font-label-md text-label-md font-semibold">
+                  {chembl.action_type}
+                </span>
+              )}
+              {chembl.mutation && <span>{chembl.mutation}</span>}
+              {chembl.standard_type && chembl.standard_value != null && (
+                <span>
+                  {chembl.standard_type} {chembl.standard_value}
+                  {chembl.standard_units ? ` ${chembl.standard_units}` : ""}
+                </span>
+              )}
+              {chembl.pchembl_value != null && <span>pChEMBL {chembl.pchembl_value}</span>}
             </div>
           )}
         </div>
