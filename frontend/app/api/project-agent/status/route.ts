@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { saveProjectDigest } from "@/lib/server/projects";
 import { saveWikiNotes, type WikiNoteProposal } from "@/lib/server/wikiNotes";
+import { saveEvidence, type EvidenceFilingsBySlug, type EvidenceItemInput } from "@/lib/server/wikiEvidence";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
 // Poll a project-agent job's progress/result. Proxies to the Python
@@ -72,8 +73,31 @@ export async function GET(req: Request) {
         if (saved.status !== "ok") {
           console.error("project-agent status: saveWikiNotes failed", saved.error);
         }
+
+        // EVIDENCE PERSISTENCE (stage 2) — deliberately AFTER saveWikiNotes
+        // above, not in parallel with it: saveEvidence resolves a filing's
+        // note slug to a real note id by reading wiki_notes back from the
+        // database, so a note this same run just created has to actually
+        // exist there first. Same best-effort stance as every other save
+        // on this route.
+        if (data.result.evidence_filings || data.result.unfiled_items || data.result.project_level_items) {
+          const filings = (data.result.evidence_filings ?? {}) as EvidenceFilingsBySlug;
+          // Storage doesn't distinguish "unfiled" from "project-level" — both
+          // are just a project_evidence_items row with no wiki_note_evidence
+          // row pointing at it (see wikiEvidence.ts's splitUnfiled: it's a
+          // display/reporting split, computed at READ time from `unfiled`
+          // vs `filedItemIds`, not a persisted flag). Persist the union.
+          const unfiledItems = [
+            ...((data.result.unfiled_items ?? []) as EvidenceItemInput[]),
+            ...((data.result.project_level_items ?? []) as EvidenceItemInput[]),
+          ];
+          const evidenceSaved = await saveEvidence(projectId, filings, unfiledItems);
+          if (evidenceSaved.status !== "ok") {
+            console.error("project-agent status: saveEvidence failed", evidenceSaved.error);
+          }
+        }
       } catch (e) {
-        console.error("project-agent status: saveWikiNotes threw", e);
+        console.error("project-agent status: wiki persistence threw", e);
       }
     }
 

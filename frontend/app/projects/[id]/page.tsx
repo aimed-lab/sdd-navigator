@@ -12,6 +12,7 @@
 // way this page 404s, exactly like a mistyped id would, rather than leaking
 // which case it was.
 
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { getProject, getProposalFileUrl } from "@/lib/server/projects";
@@ -150,6 +151,14 @@ export default async function ProjectDetailPage({
               </div>
             </>
           )}
+          <div className="w-px h-4 bg-outline-variant/50" />
+          <Link
+            href={`/projects/${project.id}/wiki`}
+            className="flex items-center gap-2 hover:text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined text-[18px]">hub</span>
+            Project wiki
+          </Link>
         </div>
       </section>
 

@@ -63,7 +63,7 @@ from models import Item
 from tools.explore import explore_async
 from tools.prior_art_brief import RECRUITING_LIMIT, TRIAL_LIMIT, render_digest, trial_query as digest_trial_query
 from tools.search_trials import search_trials_async
-from tools.wiki_agent import build_wiki_notes
+from tools.wiki_agent import build_wiki_notes, file_evidence, split_unfiled, suggest_missing_notes
 
 logger = logging.getLogger(__name__)
 
@@ -762,6 +762,31 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
                                              # frontend/lib/server/wikiNotes.ts, same
                                              # "it proposes; the frontend persists" split
                                              # as everything else here
+        evidence_filings: {slug: [{item, shared_terms}]},  # every candidate filed
+                                             # under a note (tools/wiki_agent.py's
+                                             # file_evidence()), keyed by the note's
+                                             # slug, not a database id — see that
+                                             # function's own docstring for why
+        unfiled_items: [item],              # every candidate that matched no note AND
+                                             # isn't a grant/trial — a genuine "maybe a
+                                             # note is missing" signal. Never dropped,
+                                             # stored against the project with no note
+                                             # (see 2026-08-24_wiki_evidence.sql)
+        project_level_items: [item],        # every candidate that matched no note BUT
+                                             # is a grant or trial — evidence for the
+                                             # PROJECT, not a concept; see
+                                             # split_unfiled's own docstring for why
+                                             # this is a display distinction, not a
+                                             # storage one (same project_evidence_items
+                                             # row shape as unfiled_items)
+        missing_note_suggestions: [{term, count, item_ids}],  # computed over
+                                             # unfiled_items ONLY (never
+                                             # project_level_items — grant/trial
+                                             # boilerplate vocabulary isn't a missing-
+                                             # note signal) — only when unfiled items
+                                             # share a recurring term, see suggest_
+                                             # missing_notes' own docstring for why
+                                             # this is not a clustering system
         checklist_enabled: bool,            # False for a challenge project — the
                                              # frontend's cue to not render an empty
                                              # "Proposed checklist items (0)" heading;
@@ -863,6 +888,10 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             "checklist_items": [],
             "checklist_enabled": not is_challenge,
             "wiki_notes": [],
+            "evidence_filings": {},
+            "unfiled_items": [],
+            "project_level_items": [],
+            "missing_note_suggestions": [],
             "digest": digest,  # still rendered — it never called an LLM, so the
                                 # relevance pass failing doesn't make it untrustworthy
             "candidates_found": candidates_found,
@@ -923,6 +952,29 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             f"Dropped {dropped_notes} proposed wiki note(s) that weren't grounded in anything "
             "this run actually found."
         )
+
+    # EVIDENCE FILING (stage 2) — every retrieved candidate, not just the
+    # 5-8 selected/proposed, gets a shot at being filed under a note. Filed
+    # against the notes as they'll look AFTER this run's create/update
+    # proposals land (existing_notes with this run's wiki_notes proposals
+    # folded on top by slug) so a note created THIS run can still receive
+    # evidence in the same run — see file_evidence's own docstring for why
+    # this is keyed by slug rather than a database id that doesn't exist
+    # yet for a new note.
+    _stage("filing_evidence")
+    notes_by_slug = {n.get("slug"): n for n in existing_notes if n.get("slug")}
+    for note in wiki_notes:
+        notes_by_slug[note["slug"]] = {"slug": note["slug"], "title": note["title"], "body": note["body"]}
+    evidence_filings, unfiled_all = file_evidence(candidates, list(notes_by_slug.values()))
+
+    # unfiled/project-level split happens AFTER filing, never inside it — a
+    # grant or trial that matched a note (real vocabulary overlap) is
+    # already in evidence_filings and never reaches this split. Only items
+    # that matched NOTHING get reclassified here, purely by kind: a grant
+    # or trial that matched nothing is evidence for the PROJECT, not a sign
+    # the wiki is missing a note — see split_unfiled's own docstring.
+    unfiled_items, project_level_items = split_unfiled(unfiled_all)
+    missing_note_suggestions = suggest_missing_notes(unfiled_items)
     _stage("done")
 
     # Honest reporting when exclusion is *why* there's nothing to propose —
@@ -982,6 +1034,10 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "checklist_items": checklist_items,
         "checklist_enabled": not is_challenge,
         "wiki_notes": wiki_notes,
+        "evidence_filings": evidence_filings,
+        "unfiled_items": unfiled_items,
+        "project_level_items": project_level_items,
+        "missing_note_suggestions": missing_note_suggestions,
         "digest": digest,  # {markdown, generated_at, counts} or None if the search failed entirely
         "candidates_found": candidates_found,
         "tools_called": explore_result.get("tools_called") or [],

@@ -375,3 +375,218 @@ def build_wiki_notes(
     except Exception:
         logger.exception("wiki_agent: notes LLM call failed")
         return [], True, 0
+
+
+# ── evidence filing (stage 2) ─────────────────────────────────────────────────
+#
+# WHY CODE, NOT ANOTHER LLM CALL: an assignment must be "justifiable from
+# the item's own text, not guessed" (the spec's own words) — a direct
+# vocabulary-overlap check between the item's title/summary and the note's
+# title/body already IS that justification, visibly and reproducibly,
+# without spending a 57th LLM call asking the model to re-read every
+# candidate against every note. This is the same "the gate is code, not a
+# prompt" stance as _grounded() above and project_agent.py's checklist gate
+# — just applied here as the PRIMARY mechanism instead of a filter on top of
+# an LLM's own output, because there's no LLM output to filter in the first
+# place.
+#
+# WHY DISTINCTIVE WORDS, NOT ANY SHARED WORD: on a real single-target,
+# single-indication project (e.g. every candidate and every note mentions
+# "NLRP3" and "kidney") a plain content-word overlap check would file nearly
+# every candidate under nearly every note — technically grounded, useless as
+# organization. _distinctive_vocab() below drops any word that appears in
+# more than half of the project's OWN notes — the project-wide vocabulary
+# every note already shares — so a filing has to turn on what makes THIS
+# note different from the others, not on the target/indication every note
+# already mentions in its title.
+
+_DISTINCTIVE_DF_RATIO = 0.5   # a word in > this fraction of notes is "generic to the project"
+# 2, not 1 — confirmed necessary on a real run: a single shared word is too
+# easy to hit by accident on generic academic-writing filler ("through",
+# "insights", "molecular", "reviews") that survives _content_words' length
+# filter and isn't excluded by _distinctive_vocab either (it doesn't recur
+# across ENOUGH of a small note set to trip the >50% generic-to-the-project
+# cutoff, but it's still not evidence of anything). Two independent shared
+# words is a real, harder-to-fake signal that the item's own text and the
+# note's own text are actually about the same thing, not sharing one
+# incidental word. A LONG, unambiguous domain term (>= _LONG_TERM_CHARS)
+# still counts alone — "pyroptosis"/"inflammasome"/"gasdermin" are not
+# accidental matches at that length.
+_MIN_SHARED_DISTINCTIVE_WORDS = 2
+_LONG_TERM_CHARS = 10
+
+
+def _distinctive_vocab(notes_vocab: list[set[str]]) -> list[set[str]]:
+    """notes_vocab[i] is note i's raw content-word set (title + body). Returns
+    the same list with every word that recurs in more than
+    _DISTINCTIVE_DF_RATIO of the notes removed from EVERY note's set — e.g.
+    "nlrp3" and "kidney", present in nearly every note of an NLRP3-kidney
+    project, are dropped from all of them; a word specific to two or three
+    notes survives in exactly those. A single-note project has no generic
+    vocabulary to strip (nothing can recur in "more than half of 1 note"),
+    so this is a no-op there — the distinction only matters once a project
+    has enough notes to actually be generic across."""
+    if len(notes_vocab) <= 1:
+        return notes_vocab
+    df: dict[str, int] = {}
+    for words in notes_vocab:
+        for w in words:
+            df[w] = df.get(w, 0) + 1
+    threshold = _DISTINCTIVE_DF_RATIO * len(notes_vocab)
+    generic = {w for w, count in df.items() if count > threshold}
+    return [words - generic for words in notes_vocab]
+
+
+def curate_evidence_item(item: dict) -> dict:
+    """The persistence shape for one evidence item — same discipline as
+    ChEMBL's own `raw` curation (sources/chembl.py): named fields only,
+    never the item's `raw` dict (itself already curated per-source, but
+    shaped for that source's own ItemCard rendering, not for cross-source
+    storage — see 2026-08-24_wiki_evidence.sql's own CURATION note) and
+    never `dedupe_key` (an internal plumbing detail this table has no use
+    for). Matches project_evidence_items' columns 1:1 so
+    frontend/lib/server/wikiEvidence.ts can insert this dict close to
+    verbatim."""
+    signal = item.get("signal") or {}
+    return {
+        "item_id": item.get("id"),
+        "kind": item.get("kind"),
+        "title": item.get("title"),
+        "summary": item.get("summary"),
+        "url": item.get("url"),
+        "source": item.get("source"),
+        "date_iso": item.get("date_iso"),
+        "signal_metric": signal.get("metric"),
+        "signal_value": signal.get("value"),
+        "signal_as_of": signal.get("as_of"),
+    }
+
+
+def file_evidence(candidates: list[dict], notes: list[dict]) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Assigns each candidate item to zero or more notes. Returns
+    (filings, unfiled) where `filings` maps a note's `slug` — NOT its
+    database id — to the list of {item, shared_terms} filed under it, and
+    `unfiled` is every candidate that matched no note at all — never
+    dropped, see this migration's own "store them against the project with
+    no note" rule (2026-08-24_wiki_evidence.sql); the caller persists
+    `unfiled` too, just with no wiki_note_evidence row pointing at it.
+
+    KEYED BY SLUG, NOT ID: a note this same run just decided to CREATE
+    (action="create" in build_wiki_notes' output) has no database id yet —
+    it's only minted once frontend/lib/server/wikiNotes.ts actually inserts
+    the row. slug is deterministic (slugify(title), computed here in
+    Python) and known before that insert happens, so it's what this
+    function returns and what saveWikiNotes() resolves to a real note id
+    (via the same upsert that creates/updates the note) right before
+    inserting wiki_note_evidence rows. This mirrors _resolve_actions' own
+    slug-first design one function up.
+
+    `notes` is [{slug, title, body}, ...] — the project's notes AFTER this
+    run's build_wiki_notes proposals are folded in (so a brand-new note can
+    receive evidence filed in the same run), which the caller assembles
+    from existing_notes + this run's create/update proposals; it does not
+    need to be the database's current state. `candidates` is the same
+    dicts _flatten_candidates produces (id, kind, title, summary, source,
+    url, ...) — never mutated, only read.
+
+    An item may legitimately file under MORE than one note (a shared
+    dataset citing both a mechanism note and a drug note, the real case
+    that ruled out storing items inline on a note — see the migration's own
+    "an item can be evidence for more than one note" section)."""
+    if not candidates or not notes:
+        return {}, list(candidates)
+
+    notes_vocab_raw = [_content_words(n.get("title")) | _content_words(n.get("body")) for n in notes]
+    notes_vocab = _distinctive_vocab(notes_vocab_raw)
+
+    filings: dict[str, list[dict]] = {n["slug"]: [] for n in notes}
+    unfiled: list[dict] = []
+
+    for item in candidates:
+        item_words = _content_words(item.get("title")) | _content_words(item.get("summary"))
+        best_matches: list[tuple[dict, set[str]]] = []
+        for note, vocab in zip(notes, notes_vocab):
+            shared = item_words & vocab
+            long_enough_alone = any(len(w) >= _LONG_TERM_CHARS for w in shared)
+            if len(shared) >= _MIN_SHARED_DISTINCTIVE_WORDS or long_enough_alone:
+                best_matches.append((note, shared))
+        curated = curate_evidence_item(item)
+        if not best_matches:
+            unfiled.append(curated)
+            continue
+        for note, shared in best_matches:
+            filings[note["slug"]].append({"item": curated, "shared_terms": sorted(shared)})
+
+    return filings, unfiled
+
+
+# Kinds that are evidence FOR THE PROJECT rather than for any concept a note
+# could name. A grant record's own text is administrative (funding
+# mechanism, institute, amount) — it isn't a claim about a mechanism the way
+# a paper or dataset is, even when the target gene appears in its title, so
+# it was never going to be a hit under file_evidence()'s grounding gate. A
+# clinical trial is the same shape MOST of the time (a trial testing an
+# SGLT2 inhibitor's renal outcomes doesn't make a claim about GSDMD/IL-1beta
+# biology) but NOT always — a trial of a compound a note is specifically
+# about (e.g. tranilast) genuinely IS evidence for that note, and
+# file_evidence() already files it there correctly today, vocabulary
+# overlap and all. THIS SET IS NEVER USED TO GATE MATCHING — see
+# file_evidence() above, unchanged — it is used ONLY by split_unfiled()
+# below, after matching has already happened, to decide what an ITEM THAT
+# MATCHED NOTHING means: a grant/trial that matched nothing is not a sign
+# the wiki is missing a note, it's a sign the item was never conceptual in
+# the first place.
+_PROJECT_LEVEL_KINDS = {"grant", "trial"}
+
+
+def split_unfiled(unfiled: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Splits file_evidence()'s own `unfiled` list into (real_unfiled,
+    project_level) — called AFTER file_evidence(), never inside it, so a
+    grant/trial that DID match a note (real vocabulary overlap, same gate
+    as everything else) never reaches this function at all; it already
+    left `unfiled` before this split ever runs. Only an item that matched
+    NOTHING gets reclassified here, purely by kind:
+      real_unfiled   — everything else: a paper/dataset/tool/geneset/target
+                        that matched no note. This is what suggest_missing_
+                        notes() should run over — a genuine "maybe there's a
+                        concept missing" signal.
+      project_level  — a grant or trial that matched no note. Real evidence
+                        that the project has funding/a trial in its space,
+                        but not a claim to check a note's vocabulary
+                        against, so it doesn't belong in the "did we miss a
+                        note" pool. Still persisted identically to
+                        real_unfiled (same project_evidence_items row, no
+                        wiki_note_evidence row) — this is a display/
+                        reporting distinction, not a storage one; no schema
+                        change backs it."""
+    real_unfiled = [item for item in unfiled if item.get("kind") not in _PROJECT_LEVEL_KINDS]
+    project_level = [item for item in unfiled if item.get("kind") in _PROJECT_LEVEL_KINDS]
+    return real_unfiled, project_level
+
+
+def suggest_missing_notes(unfiled: list[dict], min_group_size: int = 3, top_terms: int = 3) -> list[dict]:
+    """"If unfiled items share obvious common terms, surface that as a
+    suggestion that a note may be missing. Only if it falls out naturally"
+    (the spec's own words) — this is deliberately NOT a clustering system:
+    it counts content-word document frequency across unfiled items ONLY
+    (never the filed ones — a term already covered by a note isn't a
+    missing-note signal) and reports a term as a suggestion only when it
+    recurs in at least `min_group_size` distinct unfiled items. No
+    similarity metric, no grouping algorithm — a term either recurs enough
+    to say something, or it doesn't. Returns
+    [{term, count, item_ids}, ...], most frequent first, capped at
+    `top_terms` — a longer list would be presenting noise as signal."""
+    if len(unfiled) < min_group_size:
+        return []
+    df: dict[str, list[str]] = {}
+    for item in unfiled:
+        words = _content_words(item.get("title")) | _content_words(item.get("summary"))
+        for w in words:
+            df.setdefault(w, []).append(item.get("item_id"))
+    candidates = [
+        {"term": term, "count": len(ids), "item_ids": ids}
+        for term, ids in df.items()
+        if len(ids) >= min_group_size
+    ]
+    candidates.sort(key=lambda c: c["count"], reverse=True)
+    return candidates[:top_terms]

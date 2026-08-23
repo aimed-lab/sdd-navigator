@@ -201,3 +201,41 @@ export async function saveWikiNotes(
 
   return { status: "ok", saved, skippedHumanEdited };
 }
+
+// ── human editing (stage 2) ──────────────────────────────────────────────────
+
+export type HumanEditNoteResult = { status: "ok" } | { status: "error"; error: string };
+
+/** The ONE write a human can make to a note, per this stage's own
+ *  constraints: edit the body, which sets is_human_edited=true in the same
+ *  statement — there is no note-creation UI (the agent creates) and no
+ *  version history (this REPLACES the body, it doesn't append a revision).
+ *  Once set, is_human_edited never gets cleared by this function or any
+ *  other path in this codebase — see this file's own header comment for
+ *  why the agent must never be able to undo it. RLS ("Wiki notes: member
+ *  update") is the only membership gate; any project member may edit any
+ *  note, same "any member" stance as every other write in this feature. */
+export async function humanEditNote(
+  projectId: string,
+  noteId: string,
+  body: string
+): Promise<HumanEditNoteResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("wiki_notes")
+    .update({
+      body,
+      is_human_edited: true,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", noteId)
+    .eq("project_id", projectId);
+
+  if (error) {
+    console.error("humanEditNote: update failed", noteId, error);
+    return { status: "error", error: "Couldn't save your edit." };
+  }
+  return { status: "ok" };
+}
