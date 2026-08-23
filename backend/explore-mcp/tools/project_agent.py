@@ -462,14 +462,33 @@ def _apply_kind_cap(ranked: list[dict]) -> list[dict]:
     return kept
 
 
+# Same discipline as ChEMBL's own raw-payload curation (sources/chembl.py),
+# applied one level down: an already-curated `summary` field can still be
+# too long for what THIS prompt needs. Measured directly, 2026-08-23: GEO
+# dataset summaries averaged 314 tokens/item — 38% of the entire relevance
+# prompt from just 10 items, several times longer than every other kind's
+# summary (papers ~75, trials ~107, grants ~77). This is prompt-only: the
+# item's own stored `summary` (what persists to project_evidence_items, what
+# the digest renders, what a wiki note cites) is never touched — only the
+# copy _candidate_summary() hands to the relevance prompt is cut.
+_PROMPT_SUMMARY_MAX_CHARS = 400
+
+
+def _truncate_for_prompt(summary: str | None) -> str | None:
+    if not summary or len(summary) <= _PROMPT_SUMMARY_MAX_CHARS:
+        return summary
+    return summary[:_PROMPT_SUMMARY_MAX_CHARS].rstrip() + "…"
+
+
 def _candidate_summary(item: dict) -> dict:
     """The slice of an Item the LLM actually needs to judge relevance —
-    everything else (raw, dedupe_key, ...) would just spend tokens."""
+    everything else (raw, dedupe_key, ...) would just spend tokens. `summary`
+    is truncated for the prompt specifically — see _truncate_for_prompt."""
     return {
         "id": item.get("id"),
         "kind": item.get("kind"),
         "title": item.get("title"),
-        "summary": item.get("summary"),
+        "summary": _truncate_for_prompt(item.get("summary")),
         "source": item.get("source"),
     }
 
