@@ -270,8 +270,118 @@ def _flatten_candidates(
     return items, failed, excluded_count, len(seen)
 
 
-# ── step 2: relevance pass ────────────────────────────────────────────────────
+# ── step 2: relevance pass (MAP-REDUCE, batched) ──────────────────────────────
+#
+# WHY BATCHED: a single call listing every candidate keeps growing every time
+# a source is added — confirmed the hard way (2026-08-23): adding ChEMBL and
+# Open Targets pushed this prompt over Groq's 8000 TPM limit on every run.
+# Measured directly, not assumed: the single-call prompt for the NLRP3
+# project was 8298 tokens (56 candidates: system 285 + user 8013). Excluding
+# ChEMBL and Open Targets entirely only brought it to 7929 — STILL against
+# the ceiling. The actual dominant cost was GEO dataset summaries (313.7
+# tokens/item average, 3137 of the 8013 candidate tokens from just 10 items)
+# and PAGER gene sets (171.6/item), both already in the pipeline before
+# today; ChEMBL contributed 0 items that run (no ChEMBL records exist for
+# this target) and Open Targets contributed 369 tokens. The real problem:
+# this prompt was already within ~70 tokens of the ceiling for reasons
+# unrelated to either new source, so ANY addition — a new source, one
+# longer GEO abstract landing in the top 10 — was going to tip it over
+# eventually. A single call was never going to stay under budget as sources
+# keep getting added; only batching is a structural fix.
+#
+# TWO STAGES:
+#   MAP    — candidates are packed into fixed-TOKEN-BUDGET batches, not a
+#            flat item count (a batch of 15 papers and a batch of 15 GEO
+#            datasets are wildly different sizes per the measurement above,
+#            so packing by estimated tokens is what actually keeps every
+#            batch under budget regardless of which kinds land in it). Each
+#            batch is scored independently on a 0-10 rubric (not a bare
+#            yes/no) — the rubric's fixed anchors are what keep scores AT
+#            LEAST roughly comparable across independent calls that never
+#            see each other's candidates; a bare "is this relevant" judgment
+#            has no shared reference point call to call.
+#   REDUCE — the highest-scoring survivors across ALL batches, packed into
+#            ANOTHER fixed token budget (so REDUCE's own prompt size is
+#            constant regardless of how many total candidates or sources
+#            exist — the other half of the structural fix: MAP absorbs
+#            unbounded growth into more, still-small, batches; REDUCE always
+#            sees the same bounded pool), go through ONE MORE relevance
+#            call — the ORIGINAL single-call prompt, unchanged, full
+#            cross-item visibility, the real _apply_kind_cap diversity logic
+#            and MAX_SELECTED cutoff exactly as before today.
+#
+# HOW RANKING STAYS CONSISTENT ACROSS BATCHES, AND WHERE IT CAN'T: MAP's
+# scores decide who gets a SEAT in the final round, never the final ranking
+# itself — the actual `selected` decision still comes from REDUCE's own
+# holistic judgment over everything that made it in. This means calibration
+# drift between independently-run MAP batches (a "9/10" in one batch is not
+# guaranteed to mean the same thing as a "9/10" in another — there is no way
+# to make batches that never see each other perfectly comparable) can only
+# cost a strong candidate ITS SEAT, never let a weak one WIN a seat it then
+# loses anyway. The REDUCE token budget is set well above what MAX_SELECTED
+# (=8) needs specifically to absorb ordinary cross-batch scoring noise
+# without losing genuinely strong candidates to it. THIS IS A REAL, NAMED
+# TRADE-OFF, not a free fix: the old single call had perfect cross-item
+# visibility over the whole pool; batching trades some of that recall for a
+# hard token ceiling that no longer grows with the number of sources. If a
+# run's selection quality visibly degrades, the first things to check are
+# _REDUCE_TOKEN_BUDGET (raise it) and _MAP_SYSTEM's rubric (sharpen it) —
+# not reverting to one call, which is exactly what broke on 2026-08-23.
 
+_CHARS_PER_TOKEN_ESTIMATE = 3.5   # conservative: measured 3.94 chars/token for
+                                  # this JSON shape. Estimating from chars, not
+                                  # adding a tokenizer dependency, matches
+                                  # podcast-agent/extract.py's own _MAX_CHARS
+                                  # convention. Using 3.5, not the measured
+                                  # 3.94, means this OVER-estimates token count
+                                  # (fewer chars needed to hit a budget) —
+                                  # erring toward smaller batches, never toward
+                                  # underestimating and blowing through one.
+_MAP_BATCH_TOKEN_BUDGET = 3500    # a batch this size, all-GEO-dataset (the
+                                  # heaviest kind measured, ~314 tokens/item),
+                                  # is ~11 items; a batch of all-paper/trial/
+                                  # grant (~75-107 tokens/item) is 30+ items.
+                                  # Either way, system prompt (~320 tokens) +
+                                  # this budget stays under half of Groq's
+                                  # free-tier 8000 TPM ceiling, with real
+                                  # headroom for reasoning tokens and further
+                                  # growth in any one kind's verbosity.
+_MAP_SCORE_MIN_TO_ADVANCE = 5     # 0-10 rubric (see _MAP_SYSTEM) — below the
+                                  # midpoint is "tangential at best," not
+                                  # worth a seat in the bounded reduce pool.
+_REDUCE_TOKEN_BUDGET = 5000       # bounds REDUCE's OWN prompt size directly by
+                                  # tokens, not item count, so a survivor pool
+                                  # that happens to be mostly GEO-dataset-heavy
+                                  # still can't blow the ceiling. system (~285)
+                                  # + this budget leaves ~2700 tokens of
+                                  # headroom under 8000 for reasoning tokens.
+
+_MAP_SYSTEM = (
+    "You are screening ONE BATCH of candidate items (papers, datasets, gene "
+    "sets, trials, grants, tools, etc.) found by searching for a lab "
+    "project's stated GOAL. You are NOT seeing the project's other "
+    "candidates from other batches — do not assume this batch is complete "
+    "or representative of everything found.\n\n"
+    "Score EVERY item in this batch 0-10 for how relevant it is to the GOAL "
+    "specifically (not just topical keyword overlap):\n"
+    "  0-2  — unrelated, or shares a keyword only by coincidence\n"
+    "  3-5  — topically related but tangential to what the team is actually "
+    "trying to resolve\n"
+    "  6-8  — directly relevant to the goal\n"
+    "  9-10 — directly relevant AND names a specific mechanism, compound, "
+    "cohort, or dataset the goal explicitly asks about\n\n"
+    "For every item scored 5 or above, write ONE SHORT SENTENCE explaining "
+    "why, tied to the goal. Do not include items scored below 5 at all.\n\n"
+    'Return ONLY a JSON object: {"scored": [{"id": "<item id>", "score": '
+    '<0-10>, "reason": "<one sentence>"}, ...]}. Use the exact `id` field '
+    "from the candidate list. No prose, no code fences."
+)
+
+# This is now the REDUCE-stage prompt (see the module docstring above) —
+# unchanged from before batching existed. It runs over the bounded,
+# pre-scored survivor pool _select_relevant assembles below, with full
+# cross-item visibility, and is where the actual `selected` decision and
+# diversity cap (_apply_kind_cap) still happen, exactly as before today.
 _RELEVANCE_SYSTEM = (
     "You are a research assistant helping a lab team decide what to save to their "
     "project. You will be given the team's stated GOAL and a list of candidate "
@@ -411,47 +521,187 @@ def _try_select_relevant_once(
     return out or None
 
 
+def _estimate_tokens(text: str) -> int:
+    return max(1, int(len(text) / _CHARS_PER_TOKEN_ESTIMATE))
+
+
+def _batch_by_token_budget(trimmed: list[dict], token_budget: int) -> list[list[dict]]:
+    """Greedily packs candidate summaries into batches that each stay under
+    `token_budget` (estimated, see _estimate_tokens) — by TOKENS, not a flat
+    item count, since kinds vary 4x+ in verbosity (GEO datasets ~314
+    tokens/item vs. Open Targets ~62, measured directly — see this
+    section's own module docstring). A single item that alone exceeds the
+    budget still gets its own one-item batch rather than being dropped —
+    that batch's own call may run over budget in a genuinely pathological
+    case, but that is one oversized item away from the ceiling, not the
+    entire candidate pool away from it, and is a visible input to fix
+    (report it, don't silently drop it)."""
+    batches: list[list[dict]] = []
+    current: list[dict] = []
+    current_tokens = 0
+    for item in trimmed:
+        item_tokens = _estimate_tokens(json.dumps(item))
+        if current and current_tokens + item_tokens > token_budget:
+            batches.append(current)
+            current = []
+            current_tokens = 0
+        current.append(item)
+        current_tokens += item_tokens
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _try_map_batch_once(goal_summary: str, batch: list[dict], by_id: dict[str, dict]) -> list[dict] | None:
+    """One attempt at scoring one MAP batch. Returns [{**item, _map_score,
+    reason}] for every item scored >= _MAP_SCORE_MIN_TO_ADVANCE — an empty
+    list is a legitimate "nothing in this batch cleared the bar" outcome,
+    not unusable JSON. Returns None only when the JSON itself couldn't be
+    parsed (caller decides whether to retry). Raises on an actual LLM-call
+    exception, same distinction as the reduce stage below."""
+    resp = llm.complete(
+        [
+            {"role": "system", "content": _MAP_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"GOAL: {goal_summary}\n\n"
+                    f"Candidate items (this batch only):\n{json.dumps(batch)}\n\n"
+                    'Return ONLY {"scored": [{"id": "...", "score": 0, "reason": "..."}]}.'
+                ),
+            },
+        ],
+        temperature=0.2,
+    )
+    data = _loads_lenient(resp.content)
+    raw = data.get("scored") if isinstance(data, dict) else None
+    if not isinstance(raw, list):
+        return None
+    out: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        item_id = entry.get("id")
+        score = entry.get("score")
+        reason = entry.get("reason")
+        if not isinstance(item_id, str) or item_id not in by_id or item_id in seen:
+            continue
+        if not isinstance(score, (int, float)) or score < _MAP_SCORE_MIN_TO_ADVANCE:
+            continue
+        if not isinstance(reason, str) or not reason.strip():
+            continue
+        seen.add(item_id)
+        out.append({**by_id[item_id], "_map_score": float(score), "reason": reason.strip()})
+    return out
+
+
+def _map_batch(goal_summary: str, batch: list[dict], by_id: dict[str, dict], batch_label: str) -> list[dict]:
+    """One batch's full attempt, including the standard one-retry-on-bad-
+    JSON policy. A batch that fails outright (bad JSON twice, or a real
+    LLM-call exception) contributes NOTHING to the survivor pool and logs a
+    warning NAMING which batch — it does not fail the whole run. REDUCE
+    still runs over whatever the OTHER batches produced; only if every
+    batch fails does the pool end up empty, which is handled the same way
+    as "no candidates found" always has been."""
+    try:
+        out = _try_map_batch_once(goal_summary, batch, by_id)
+        if out is not None:
+            return out
+        logger.warning("project_agent: map batch %s JSON unusable (attempt 1/2), retrying once", batch_label)
+        time.sleep(_JSON_RETRY_BACKOFF_SEC)
+        out = _try_map_batch_once(goal_summary, batch, by_id)
+        if out is not None:
+            return out
+        logger.warning(
+            "project_agent: map batch %s JSON unusable (attempt 2/2) — this batch contributes nothing",
+            batch_label,
+        )
+    except Exception:
+        logger.exception(
+            "project_agent: map batch %s LLM call failed — this batch contributes nothing", batch_label
+        )
+    return []
+
+
 def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[dict], bool]:
     """Returns (selected item dicts each carrying `reason`, used_fallback).
-    Falls back to the first MAX_SELECTED candidates with a generic reason if
-    the LLM call or its JSON can't be used — the proposal must never come back
-    empty just because the relevance pass failed (see CLAUDE.md's partial-
-    failure requirement).
 
-    RETRY: malformed JSON (the model returned something _loads_lenient can't
-    use) gets exactly ONE retry after a short backoff — that failure mode is
-    usually a one-off bad sample, not a quota, so a single retry turns most
-    of these into a ~2s delay instead of a dead run. An actual exception from
-    llm.complete() itself (the call failing outright — a real rate limit,
-    network error, etc.) is NOT retried here; that's a different failure
-    class and immediately retrying a quota error only makes it worse."""
+    `used_fallback=True` means the run could NOT complete a trustworthy
+    relevance judgment at all — the caller (run_project_agent_async) fails
+    CLOSED on this: `selected` is always `[]` in that case, and the caller
+    discards it and proposes nothing rather than showing anything unranked.
+    NOTHING here builds an "unranked top-N" list to hand back on failure any
+    more — that used to exist, and its own log line ("falling back to top
+    candidates") was actively misleading, since the caller always discarded
+    that list and proposed nothing regardless. A log describing behavior
+    the code doesn't actually have cost real time to debug mid-incident on
+    2026-08-23 — fixed here by describing what actually happens (nothing is
+    proposed), not by re-wording around the same gap.
+
+    See this section's own module docstring for the MAP-REDUCE design this
+    runs (batches candidates by token budget, scores each batch
+    independently, reduces the highest-scoring survivors through one final
+    holistic call) and why it exists."""
     if not candidates:
         return [], False
 
     by_id = {c["id"]: c for c in candidates}
     trimmed = [_candidate_summary(c) for c in candidates[:MAX_CANDIDATES]]
 
+    batches = _batch_by_token_budget(trimmed, _MAP_BATCH_TOKEN_BUDGET)
+    survivors: list[dict] = []
+    for i, batch in enumerate(batches):
+        survivors.extend(_map_batch(goal_summary, batch, by_id, batch_label=f"{i + 1}/{len(batches)}"))
+
+    if not survivors:
+        logger.warning(
+            "project_agent: no candidate scored >= %s across %d map batch(es) — nothing to propose this run",
+            _MAP_SCORE_MIN_TO_ADVANCE, len(batches),
+        )
+        return [], True
+
+    # REDUCE input: highest-scoring survivors first, packed into ANOTHER
+    # fixed token budget (not a flat item count — same reasoning as the MAP
+    # batches themselves) so this stage's prompt size is constant regardless
+    # of how many total candidates or sources exist.
+    survivors.sort(key=lambda s: s["_map_score"], reverse=True)
+    reduce_ids: list[str] = []
+    reduce_tokens = 0
+    seen_ids: set[str] = set()
+    for s in survivors:
+        item_id = s["id"]
+        if item_id in seen_ids:
+            continue
+        item_tokens = _estimate_tokens(json.dumps(_candidate_summary(by_id[item_id])))
+        if reduce_ids and reduce_tokens + item_tokens > _REDUCE_TOKEN_BUDGET:
+            break
+        seen_ids.add(item_id)
+        reduce_ids.append(item_id)
+        reduce_tokens += item_tokens
+
+    reduce_by_id = {item_id: by_id[item_id] for item_id in reduce_ids}
+    reduce_trimmed = [_candidate_summary(reduce_by_id[item_id]) for item_id in reduce_ids]
+
     try:
-        out = _try_select_relevant_once(goal_summary, trimmed, by_id)
+        out = _try_select_relevant_once(goal_summary, reduce_trimmed, reduce_by_id)
         if out is not None:
             return out, False
-        logger.warning("project_agent: relevance JSON unusable (attempt 1/2), retrying once")
+        logger.warning("project_agent: reduce-stage relevance JSON unusable (attempt 1/2), retrying once")
         time.sleep(_JSON_RETRY_BACKOFF_SEC)
-        out = _try_select_relevant_once(goal_summary, trimmed, by_id)
+        out = _try_select_relevant_once(goal_summary, reduce_trimmed, reduce_by_id)
         if out is not None:
-            logger.info("project_agent: relevance JSON usable on retry (attempt 2/2)")
+            logger.info("project_agent: reduce-stage relevance JSON usable on retry (attempt 2/2)")
             return out, False
         logger.warning(
-            "project_agent: relevance JSON unusable (attempt 2/2) — falling back to top candidates"
+            "project_agent: reduce-stage relevance JSON unusable after retry — nothing will be proposed this run"
         )
     except Exception:
-        logger.exception("project_agent: relevance LLM call failed, falling back to top candidates")
+        logger.exception(
+            "project_agent: reduce-stage relevance LLM call failed — nothing will be proposed this run"
+        )
 
-    fallback = [
-        {**c, "reason": "Surfaced by the search for this project's goal (relevance ranking unavailable)."}
-        for c in candidates[:MAX_SELECTED]
-    ]
-    return fallback, True
+    return [], True
 
 
 # ── step 3: checklist proposal ────────────────────────────────────────────────

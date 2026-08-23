@@ -65,7 +65,14 @@ export default async function ProjectWikiPage({
         <h1 className="font-display-lg text-display-lg text-on-background mt-2 mb-2">Project wiki</h1>
         <p className="font-body-md text-body-md text-secondary max-w-2xl">
           The concepts and open questions the agent has written down for this project, and every
-          item its runs have retrieved — including the ~85% that never made it into a proposal.
+          item its runs have retrieved.
+          {graphResult.totalItems > 0 && (() => {
+            const notFiled = graphResult.unfiled.length + graphResult.projectLevel.length;
+            const pct = Math.round((100 * notFiled) / graphResult.totalItems);
+            return notFiled > 0
+              ? ` ${pct}% of what it found (${notFiled} of ${graphResult.totalItems}) isn't filed under any note yet.`
+              : null;
+          })()}
         </p>
       </div>
 

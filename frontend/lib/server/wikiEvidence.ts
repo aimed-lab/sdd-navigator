@@ -198,6 +198,11 @@ export type WikiGraphResult =
       projectLevel: EvidenceItemRow[];
       ghostLinks: WikiGraphGhostLink[];
       missingNoteSuggestions: MissingNoteSuggestion[];
+      totalItems: number; // every distinct item ever retrieved for this
+                           // project (project_evidence_items row count) —
+                           // the real denominator for "% not filed under any
+                           // note," computed here rather than left as a
+                           // number the page would otherwise have to invent
     }
   | { status: "not_found" }
   | { status: "error"; error: string };
@@ -365,6 +370,7 @@ export async function getProjectWikiGraph(projectId: string): Promise<WikiGraphR
     notes: notes.map((n) => ({ ...n, evidence: evidenceByNoteId.get(n.id) ?? [] })),
     unfiled,
     projectLevel,
+    totalItems: allItems.length,
     ghostLinks: Array.from(ghostMap.values()),
     // Computed over the REAL unfiled pool only — projectLevel (grant/trial
     // administrative boilerplate) is never a missing-note signal, see

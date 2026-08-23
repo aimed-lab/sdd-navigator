@@ -67,6 +67,46 @@ const GHOST_FILL = "none";
 const GHOST_STROKE = "#94a3b8"; // slate-400
 const LINK_RE = /\[\[([^\]]+)\]\]/g;
 
+// Note titles are full concepts and questions by design ("Is there a
+// diabetic kidney disease cohort stratified by inflammasome activation?"),
+// not short tags — a single truncated line loses the actual content, not
+// just some decoration. Wraps greedily onto up to two lines by character
+// budget (not real text measurement — this is an SVG label under a node,
+// not a layout-critical paragraph, so a per-line character budget matched
+// to the font size is the pragmatic choice here); the second line ellipses
+// if the title still doesn't fit. The full, unwrapped title is ALSO set as
+// this node's native SVG <title> (see the JSX below), which every browser
+// already renders as a hover tooltip for free — belt-and-suspenders for
+// whatever a two-line wrap still cuts off.
+const LABEL_LINE_CHARS = 22;
+const LABEL_MAX_LINES = 2;
+
+function wrapLabel(title: string): string[] {
+  const words = title.split(/\s+/);
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > LABEL_LINE_CHARS && current) {
+      lines.push(current);
+      current = word;
+      if (lines.length === LABEL_MAX_LINES - 1) break;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) lines.push(current);
+
+  // Whatever's left of `title` beyond what made it onto LABEL_MAX_LINES
+  // lines — ellipsis the last line if there's more title than fit.
+  const consumed = lines.join(" ").length;
+  if (consumed < title.replace(/\s+/g, " ").trim().length) {
+    const last = lines[lines.length - 1];
+    lines[lines.length - 1] = last.length > 3 ? `${last.slice(0, last.length - 1)}…` : `${last}…`;
+  }
+  return lines.slice(0, LABEL_MAX_LINES);
+}
+
 function normalizeTitle(title: string): string {
   return title
     .replace(/[‐-―]/g, "-")
@@ -88,12 +128,34 @@ type GraphNode = d3.SimulationNodeDatum & {
 
 type GraphLink = { source: string; target: string };
 
+// RELATIVE, not absolute, sizing — a graph with evidence counts of 6-19
+// and one with 2-80 should both use the full MIN_RADIUS..MAX_RADIUS range,
+// not the same sqrt(count) formula producing wildly different absolute
+// sizes (and, at the low end, next-to-no visible difference) depending on
+// how big any one project's numbers happen to be. Confirmed on a real
+// project: sqrt(6)=2.45 vs sqrt(19)=4.36 is only a 1.78x ratio before a
+// fixed +22 base compresses it further to 1.34x — visually "all the same
+// size" while the largest node alone was already more than a tenth of the
+// whole canvas. Normalizing to the graph's own min/max evidence count and
+// interpolating LINEARLY (not through another sqrt) between two much
+// smaller radii both widens the size range that's actually on screen and
+// shrinks the overall footprint every node takes up.
+const MIN_NODE_RADIUS = 14;
+const MAX_NODE_RADIUS = 30;
+const GHOST_RADIUS = 11;
+
 function buildGraph(notes: WikiGraphNote[], ghostLinks: WikiGraphGhostLink[]) {
   const nodes: GraphNode[] = [];
   const byNormalizedTitle = new Map<string, string>(); // normalized title -> node id
 
+  const evidenceCounts = notes.map((n) => n.evidence.length);
+  const minCount = evidenceCounts.length > 0 ? Math.min(...evidenceCounts) : 0;
+  const maxCount = evidenceCounts.length > 0 ? Math.max(...evidenceCounts) : 0;
+  const countSpread = maxCount - minCount;
+
   for (const note of notes) {
-    const radius = 22 + Math.sqrt(note.evidence.length) * 7;
+    const t = countSpread > 0 ? (note.evidence.length - minCount) / countSpread : 0.5;
+    const radius = MIN_NODE_RADIUS + t * (MAX_NODE_RADIUS - MIN_NODE_RADIUS);
     nodes.push({
       id: note.id,
       kind: "note",
@@ -112,7 +174,7 @@ function buildGraph(notes: WikiGraphNote[], ghostLinks: WikiGraphGhostLink[]) {
       kind: "ghost",
       title: ghost.title,
       evidenceCount: 0,
-      radius: 16,
+      radius: GHOST_RADIUS,
       ghost,
     });
   }
@@ -133,8 +195,14 @@ function buildGraph(notes: WikiGraphNote[], ghostLinks: WikiGraphGhostLink[]) {
   return { nodes, links };
 }
 
-const WIDTH = 900;
-const HEIGHT = 560;
+// Smaller than the original 900x560 on purpose: a handful to a few dozen
+// notes were spreading across a canvas sized for a much bigger graph,
+// reading as "scattered circles" rather than a connected structure. The
+// canvas still scales with the viewport (viewBox, not a fixed pixel size)
+// — this only changes the coordinate space the force simulation packs
+// nodes into, which is what actually controls how tight the layout reads.
+const WIDTH = 640;
+const HEIGHT = 440;
 
 export default function WikiGraph({
   projectId,
@@ -168,14 +236,26 @@ export default function WikiGraph({
             links.map((l) => ({ source: l.source, target: l.target }))
           )
           .id((d) => d.id)
-          .distance(140)
-          .strength(0.5)
+          // Distance tuned to the new, much smaller node radii (14-30, was
+          // 22-52.5) — the old 140 was already shorter than two large
+          // nodes' combined diameter, so a genuinely-linked pair's own
+          // collide force fought the link force to a near-standstill right
+          // on top of each other, rendering the edge between them as a
+          // sliver hidden behind the circles rather than a visible line.
+          .distance(80)
+          .strength(0.6)
       )
-      .force("charge", d3.forceManyBody().strength(-320))
+      // Weaker repulsion, tuned to the smaller WIDTH/HEIGHT and smaller
+      // nodes — the old -320 was calibrated for a much bigger canvas and
+      // spread even a handful of nodes across nearly all of it.
+      .force("charge", d3.forceManyBody().strength(-120))
       .force("center", d3.forceCenter(WIDTH / 2, HEIGHT / 2))
       .force(
         "collide",
-        d3.forceCollide<GraphNode>().radius((d) => d.radius + 14)
+        // Padding shrunk to match the smaller radii — 14px of padding on a
+        // 14-30px-radius node is proportionally much bigger than it was on
+        // a 22-52.5px one.
+        d3.forceCollide<GraphNode>().radius((d) => d.radius + 6)
       )
       .on("tick", () => {
         // Clamp every node inside the SVG's own viewBox. Without this, the
@@ -283,6 +363,10 @@ export default function WikiGraph({
                   onClick={() => setSelected({ type: isGhost ? "ghost" : "note", id: n.id })}
                   className="cursor-pointer"
                 >
+                  {/* Native SVG tooltip — free, browser-rendered hover text
+                      carrying the FULL title, regardless of how the label
+                      below wraps or ellipses. */}
+                  <title>{n.title}</title>
                   <circle
                     r={n.radius}
                     fill={isGhost ? GHOST_FILL : color}
@@ -293,11 +377,14 @@ export default function WikiGraph({
                   />
                   <text
                     textAnchor="middle"
-                    dy={n.radius + 16}
                     className="font-label-sm select-none pointer-events-none"
                     style={{ fontSize: 11, fill: "var(--color-on-background, #1f2937)" }}
                   >
-                    {n.title.length > 34 ? `${n.title.slice(0, 34)}…` : n.title}
+                    {wrapLabel(n.title).map((line, i) => (
+                      <tspan key={i} x={0} dy={i === 0 ? n.radius + 14 : 13}>
+                        {line}
+                      </tspan>
+                    ))}
                   </text>
                 </g>
               );
