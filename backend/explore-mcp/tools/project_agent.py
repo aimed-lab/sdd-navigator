@@ -63,6 +63,7 @@ from models import Item
 from tools.explore import explore_async
 from tools.prior_art_brief import RECRUITING_LIMIT, TRIAL_LIMIT, render_digest, trial_query as digest_trial_query
 from tools.search_trials import search_trials_async
+from tools.wiki_agent import build_wiki_notes
 
 logger = logging.getLogger(__name__)
 
@@ -755,6 +756,12 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         summary: str,                       # what the agent did, one paragraph
         selected_items: [Item + {reason}],  # full item shape, ready for ItemCard
         checklist_items: [{label, rationale}],  # always [] for a challenge project
+        wiki_notes: [{action, note_id, slug, title, note_type, body}],  # proposed
+                                             # project-wiki writes (tools/wiki_agent.py) —
+                                             # persisted server-side by
+                                             # frontend/lib/server/wikiNotes.ts, same
+                                             # "it proposes; the frontend persists" split
+                                             # as everything else here
         checklist_enabled: bool,            # False for a challenge project — the
                                              # frontend's cue to not render an empty
                                              # "Proposed checklist items (0)" heading;
@@ -855,6 +862,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             "selected_items": [],
             "checklist_items": [],
             "checklist_enabled": not is_challenge,
+            "wiki_notes": [],
             "digest": digest,  # still rendered — it never called an LLM, so the
                                 # relevance pass failing doesn't make it untrustworthy
             "candidates_found": candidates_found,
@@ -893,6 +901,27 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
             f"Dropped {dropped_ungrounded} proposed checklist item(s) that weren't grounded in "
             "anything this run actually found, or were about analysing already-found data beyond "
             "this run's cap on that kind of item."
+        )
+
+    # WIKI NOTES — runs for every project, challenge or not (see
+    # tools/wiki_agent.py). `existing_wiki_notes` is read by the frontend
+    # BEFORE this run starts (frontend/lib/server/wikiNotes.ts's
+    # listWikiNoteSummaries, same "server reads the caller's own data,
+    # never trusts the request body" stance as existing_checklist and
+    # saved_item_ids above) and forwarded on `project`. Skipped, not run-
+    # then-discarded, when the search itself found nothing — an empty
+    # candidate/selected/checklist pool has nothing for a note to cite.
+    _stage("writing_notes")
+    existing_notes = project.get("existing_wiki_notes") or []
+    wiki_notes, wiki_fallback, dropped_notes = build_wiki_notes(
+        goal_summary, candidates, selected, checklist_items, existing_notes
+    )
+    if wiki_fallback:
+        warnings.append("Couldn't update the project wiki this run.")
+    if dropped_notes:
+        warnings.append(
+            f"Dropped {dropped_notes} proposed wiki note(s) that weren't grounded in anything "
+            "this run actually found."
         )
     _stage("done")
 
@@ -952,6 +981,7 @@ async def run_project_agent_async(project: dict, on_stage=None) -> dict:
         "selected_items": selected,
         "checklist_items": checklist_items,
         "checklist_enabled": not is_challenge,
+        "wiki_notes": wiki_notes,
         "digest": digest,  # {markdown, generated_at, counts} or None if the search failed entirely
         "candidates_found": candidates_found,
         "tools_called": explore_result.get("tools_called") or [],

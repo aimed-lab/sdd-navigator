@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { saveProjectDigest } from "@/lib/server/projects";
+import { saveWikiNotes, type WikiNoteProposal } from "@/lib/server/wikiNotes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
 // Poll a project-agent job's progress/result. Proxies to the Python
@@ -57,6 +58,22 @@ export async function GET(req: Request) {
         // is waiting on — the run already succeeded, digest saving is
         // purely a side effect of reporting it back.
         console.error("project-agent status: saveProjectDigest threw", e);
+      }
+    }
+
+    // WIKI NOTES PERSISTENCE — same "here, server-side, the moment a run
+    // comes back done" placement as the digest above, and the same
+    // best-effort stance: never let a save failure affect the response the
+    // client is waiting on.
+    if (projectId && data?.status === "done" && Array.isArray(data?.result?.wiki_notes)) {
+      try {
+        const notes = data.result.wiki_notes as WikiNoteProposal[];
+        const saved = await saveWikiNotes(projectId, notes);
+        if (saved.status !== "ok") {
+          console.error("project-agent status: saveWikiNotes failed", saved.error);
+        }
+      } catch (e) {
+        console.error("project-agent status: saveWikiNotes threw", e);
       }
     }
 

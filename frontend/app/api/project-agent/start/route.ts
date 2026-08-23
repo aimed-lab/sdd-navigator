@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProject } from "@/lib/server/projects";
 import { listProjectResources } from "@/lib/server/projectResources";
+import { listWikiNoteSummaries } from "@/lib/server/wikiNotes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
 // Kick off a project-agent run in the Python backend (see
@@ -65,6 +66,19 @@ export async function POST(req: Request) {
     console.error("project-agent start: listProjectResources failed", resourcesResult.error);
   }
 
+  // The project wiki's own memory — every note it already has, so
+  // tools/wiki_agent.py can decide update-vs-create and build its own
+  // capped "what did we already conclude" context. Same "degrade, don't
+  // block" stance as the resources lookup above: a failed read just means
+  // this run starts with no wiki memory, not that the run fails to start.
+  let existingWikiNotes: unknown[] = [];
+  const wikiResult = await listWikiNoteSummaries(projectId);
+  if (wikiResult.status === "ok") {
+    existingWikiNotes = wikiResult.notes;
+  } else {
+    console.error("project-agent start: listWikiNoteSummaries failed", wikiResult.error);
+  }
+
   try {
     const res = await fetch(`${EXPLORE_API_URL}/api/project-agent/start`, {
       method: "POST",
@@ -79,6 +93,7 @@ export async function POST(req: Request) {
         challenge_key: project.challenge_key,
         existing_checklist: project.checklist.map((c) => c.label),
         saved_item_ids: savedItemIds,
+        existing_wiki_notes: existingWikiNotes,
       }),
     });
     if (!res.ok) throw new Error(`agent backend responded ${res.status}`);
