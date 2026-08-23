@@ -231,7 +231,7 @@ export type SubmitProposalResult =
 export type SignedUrlResult = { status: "ok"; url: string } | { status: "error"; error: string };
 
 export type AddChecklistItemResult =
-  | { status: "ok"; item: ChecklistItem }
+  | { status: "ok"; item: ChecklistItem; classificationFailed: boolean }
   | { status: "error"; error: string };
 
 export type ChecklistWriteResult = { status: "ok" } | { status: "error"; error: string };
@@ -242,7 +242,7 @@ export type ChecklistWriteResult = { status: "ok" } | { status: "error"; error: 
 // the client rather than the client guessing/keeping the stale value from
 // before the edit. See updateChecklistItemLabel below.
 export type UpdateChecklistLabelResult =
-  | { status: "ok"; matched_capabilities: string[] }
+  | { status: "ok"; matched_capabilities: string[]; classificationFailed: boolean }
   | { status: "error"; error: string };
 
 export type SetSharedFolderResult =
@@ -1210,7 +1210,8 @@ export async function addChecklistItem(
   // classification hiccup here degrades to [] (Ask for help), it never
   // blocks or fails the add itself.
   const trimmedLabel = trimmed.slice(0, 300);
-  const matchedCapabilities = await classifyChecklistItem(trimmedLabel);
+  const { capabilities: matchedCapabilities, classificationFailed } =
+    await classifyChecklistItem(trimmedLabel);
 
   const { data, error } = await db
     .from("checklist_items")
@@ -1246,6 +1247,7 @@ export async function addChecklistItem(
         ? (data.matched_capabilities as string[])
         : [],
     },
+    classificationFailed,
   };
 }
 
@@ -1294,7 +1296,8 @@ export async function updateChecklistItemLabel(
   if (!trimmed) return { status: "error", error: "A checklist item needs a label." };
 
   const trimmedLabel = trimmed.slice(0, 300);
-  const matchedCapabilities = await classifyChecklistItem(trimmedLabel);
+  const { capabilities: matchedCapabilities, classificationFailed } =
+    await classifyChecklistItem(trimmedLabel);
 
   const { error } = await db
     .from("checklist_items")
@@ -1310,7 +1313,7 @@ export async function updateChecklistItemLabel(
     console.error("updateChecklistItemLabel: update failed", error);
     return { status: "error", error: "Couldn't rename that item." };
   }
-  return { status: "ok", matched_capabilities: matchedCapabilities };
+  return { status: "ok", matched_capabilities: matchedCapabilities, classificationFailed };
 }
 
 /** Move an item up or down one position, swapping with its neighbor. Moving

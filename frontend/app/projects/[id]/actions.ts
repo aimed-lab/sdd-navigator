@@ -172,7 +172,7 @@ export async function deleteProjectAction(projectId: string): Promise<ActionResu
 // *") is the whole gate.
 
 export type AddChecklistItemActionResult =
-  | { ok: true; item: ChecklistItem }
+  | { ok: true; item: ChecklistItem; classificationFailed: boolean }
   | { ok: false; error: string };
 
 export async function addChecklistItemAction(
@@ -185,7 +185,7 @@ export async function addChecklistItemAction(
     const result = await addChecklistItem(projectId, label);
     if (result.status !== "ok") return { ok: false, error: result.error };
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, item: result.item };
+    return { ok: true, item: result.item, classificationFailed: result.classificationFailed };
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to add checklist items." };
     console.error("addChecklistItemAction failed", e);
@@ -222,7 +222,7 @@ export async function updateChecklistStatusAction(
 // which action (Ask for help / Find a service provider) it shows without a
 // full page reload.
 export type UpdateChecklistLabelActionResult =
-  | { ok: true; matched_capabilities: string[] }
+  | { ok: true; matched_capabilities: string[]; classificationFailed: boolean }
   | { ok: false; error: string };
 
 export async function updateChecklistLabelAction(
@@ -236,7 +236,11 @@ export async function updateChecklistLabelAction(
     const result = await updateChecklistItemLabel(projectId, itemId, label);
     if (result.status !== "ok") return { ok: false, error: result.error };
     revalidatePath(`/projects/${projectId}`);
-    return { ok: true, matched_capabilities: result.matched_capabilities };
+    return {
+      ok: true,
+      matched_capabilities: result.matched_capabilities,
+      classificationFailed: result.classificationFailed,
+    };
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to edit the checklist." };
     console.error("updateChecklistLabelAction failed", e);

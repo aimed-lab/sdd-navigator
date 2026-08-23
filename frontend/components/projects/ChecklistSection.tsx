@@ -167,11 +167,21 @@ export default function ChecklistSection({
   const router = useRouter();
   const [list, setList] = useState<ChecklistItem[]>(items);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // Distinct from rowErrors on purpose — the write itself SUCCEEDED here;
+  // only the capability classification that rides along with it couldn't
+  // run (the provider catalog was unavailable). Same "failed, not empty"
+  // distinction as Explore's CategoryEmptyCard, rendered as a notice, not
+  // an error, and never blocking anything.
+  const [rowWarnings, setRowWarnings] = useState<Record<string, string>>({});
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
 
   const [draft, setDraft] = useState("");
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [addWarning, setAddWarning] = useState<string | null>(null);
+
+  const CLASSIFICATION_UNAVAILABLE_NOTICE =
+    "Couldn't check whether this needs outside help right now — the provider catalog is unavailable. It'll be checked again next time you edit this item.";
 
   const [confirmTarget, setConfirmTarget] = useState<ChecklistItem | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -233,11 +243,13 @@ export default function ChecklistSection({
     if (adding || !draft.trim()) return;
     setAdding(true);
     setAddError(null);
+    setAddWarning(null);
 
     const res = await addChecklistItemAction(projectId, draft);
     if (res.ok) {
       setList((prev) => [...prev, res.item]);
       setDraft("");
+      if (res.classificationFailed) setAddWarning(CLASSIFICATION_UNAVAILABLE_NOTICE);
     } else {
       setAddError(res.error);
     }
@@ -274,6 +286,10 @@ export default function ChecklistSection({
     setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, label: trimmed } : i)));
     setEditingId(null);
     setBusy(item.id, true);
+    setRowWarnings((prev) => {
+      const { [item.id]: _drop, ...rest } = prev;
+      return rest;
+    });
 
     const res = await updateChecklistLabelAction(projectId, item.id, trimmed);
     setBusy(item.id, false);
@@ -288,6 +304,9 @@ export default function ChecklistSection({
           i.id === item.id ? { ...i, matched_capabilities: res.matched_capabilities } : i
         )
       );
+      if (res.classificationFailed) {
+        setRowWarnings((prev) => ({ ...prev, [item.id]: CLASSIFICATION_UNAVAILABLE_NOTICE }));
+      }
     } else {
       setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, label: previous } : i)));
       setRowErrors((prev) => ({ ...prev, [item.id]: res.error }));
@@ -410,6 +429,11 @@ export default function ChecklistSection({
                       {rowErrors[item.id]}
                     </p>
                   )}
+                  {rowWarnings[item.id] && (
+                    <p className="mt-1 font-body-sm text-body-sm text-amber-700">
+                      {rowWarnings[item.id]}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
@@ -510,6 +534,11 @@ export default function ChecklistSection({
       {addError && (
         <p className="font-body-sm text-body-sm text-error mt-1" role="alert">
           {addError}
+        </p>
+      )}
+      {addWarning && (
+        <p className="font-body-sm text-body-sm text-amber-700 mt-1">
+          {addWarning}
         </p>
       )}
 

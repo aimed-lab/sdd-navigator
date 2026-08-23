@@ -156,8 +156,13 @@ export default function ServiceProvidersSection({
 
           {state.status === "error" && (
             <div>
-              <p className="font-body-md text-body-md text-secondary">
-                Couldn&apos;t reach the provider catalog right now.
+              {/* Distinct from the genuine-zero-match state below on
+                  purpose — same shape as Explore's CategoryEmptyCard
+                  `failed` case. A catalog outage and "nothing matched"
+                  read identically to a user unless the copy itself says
+                  which one happened. */}
+              <p className="font-body-md text-body-md text-secondary" role="alert">
+                The provider catalog is unavailable right now — this isn&apos;t about your project.
               </p>
               <Link
                 href={selectedItem.askForHelpHref}
