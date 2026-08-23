@@ -31,3 +31,38 @@ export type FindProviderResponse = {
   count?: number;
   error?: boolean | string;
 };
+
+// ── project-level lookup (POST /api/find-providers-for-project) ────────────
+//
+// The SAME matcher as FindProviderResponse above, applied to the union of
+// capability terms already stored across a project's checklist items — see
+// backend/explore-mcp/tools/find_provider.py's find_providers_for_project_
+// async(). Zero new LLM calls, zero new classification.
+
+/** One checklist item a provider was matched against — `label` is quoted
+ *  directly in the UI's one-line "how this helps you" sentence, never
+ *  paraphrased (same "never generate, only quote/forward verbatim"
+ *  discipline as `description` above — a paraphrase would need an LLM call
+ *  this feature deliberately doesn't spend). */
+export type MatchedChecklistItem = { id: string; label: string };
+
+export type ProjectProvider = Provider & {
+  // Every checklist item this provider covers, computed by intersecting
+  // its own capability_tags against each item's stored matched_capabilities
+  // — see _attach_matched_items in find_provider.py. Never empty: a
+  // provider with no matched item is dropped before this ever reaches the
+  // frontend.
+  matched_items: MatchedChecklistItem[];
+};
+
+export type FindProvidersForProjectResponse = {
+  providers?: ProjectProvider[];
+  // Distinguishes "nothing to search for" (no checklist item has a matched
+  // capability) from "searched and found nothing" — both are legitimate
+  // zero-provider outcomes the UI treats the same way (a plain "no match"
+  // state), but the counts are still forwarded in case that ever needs to
+  // change.
+  items_with_capabilities?: number;
+  total_items?: number;
+  error?: boolean | string;
+};

@@ -27,6 +27,7 @@ import {
 import TeamSection from "@/components/projects/TeamSection";
 import ProposalSection from "@/components/projects/ProposalSection";
 import ChecklistSection from "@/components/projects/ChecklistSection";
+import WhoCanHelpSection from "@/components/projects/WhoCanHelpSection";
 import SharedFolderSection from "@/components/projects/SharedFolderSection";
 import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
@@ -217,6 +218,10 @@ export default async function ProjectDetailPage({
         items={project.checklist}
         isColabofest={project.challenge_key === "colabofest_2026"}
       />
+
+      <hr className="border-t border-outline-variant/30 w-full mb-16" />
+
+      <WhoCanHelpSection projectId={project.id} />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 

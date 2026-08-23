@@ -380,17 +380,26 @@ def _format_provider(raw: dict) -> dict:
 
 
 async def find_providers_for_capabilities(
-    capabilities: list[str], limit: int = FIND_PROVIDERS_LIMIT
+    capabilities: list[str], limit: int = FIND_PROVIDERS_LIMIT, match_all: bool = True
 ) -> list[dict]:
     """find_providers over the given (already-vocabulary-validated)
-    capability terms, ANDed, up to `limit` (always explicit — the catalog's
-    own default is 3). A clean unknown_capability/other error envelope from
-    the catalog is treated as zero results, not raised — this module only
-    ever passes terms it just got from list_capabilities_async(), so that
+    capability terms, up to `limit` (always explicit — the catalog's own
+    default is 3). A clean unknown_capability/other error envelope from the
+    catalog is treated as zero results, not raised — this module only ever
+    passes terms it just got from list_capabilities_async(), so that
     envelope would indicate the vocabulary drifted out from under the cache,
-    not a caller bug; logged so it's visible either way."""
+    not a caller bug; logged so it's visible either way.
+
+    `match_all` (the catalog's own param, default True = ANDed): True for
+    the single-item lookup (find_providers_for_item_async) — a checklist
+    item's own 0-3 capability terms came from the SAME piece of text and
+    should co-occur in a good match. find_providers_for_project_async below
+    passes False (ANY) — a project-wide combined term set spans DIFFERENT
+    checklist items describing unrelated gaps; ANDing them would only
+    surface a provider that happens to do everything at once, which is not
+    what "who can help with any of this project's gaps" means."""
     data = await _call_catalog(
-        "find_providers", {"capabilities": capabilities, "limit": limit}
+        "find_providers", {"capabilities": capabilities, "limit": limit, "match_all": match_all}
     )
     if isinstance(data, dict) and data.get("error"):
         logger.warning(
@@ -464,4 +473,106 @@ async def find_providers_for_item_async(item_text: str, capabilities: list[str])
         "matched_capabilities": capabilities,
         "providers": providers,
         "count": len(providers),
+    }
+
+
+# ── Step 3: project-level — the SAME matcher, reused, not rebuilt ─────────────
+#
+# "New section on the project page" does NOT mean a new matcher. This
+# collects the capability terms ALREADY stored on the project's checklist
+# items (computed once each, at add/edit time, by classify_checklist_item_
+# async — see that function's own docstring), queries the catalog ONCE for
+# their combined set, and maps each returned provider back to which
+# checklist item(s) it covers. Zero LLM calls, same as find_providers_for_
+# item_async above — this is a different SHAPE of the same already-known
+# data, not a new classification pass.
+
+
+def find_providers_for_project(checklist_items: list[dict]) -> tuple[list[dict], int]:
+    """Pure, synchronous helper (no network) that decides WHICH capability
+    terms are worth searching for and — once results come back — which
+    checklist item(s) each result covers. Split out from the async function
+    below so the matching logic itself (the part actually worth testing) has
+    no network dependency.
+
+    `checklist_items` is [{"id", "label", "matched_capabilities"}, ...] —
+    exactly the shape frontend/lib/server/projects.ts's ChecklistItem
+    already carries. Items with matched_capabilities=[] contribute nothing
+    (nothing to search for) and are silently skipped here, same as they are
+    everywhere else in this feature.
+
+    Returns (all_capabilities_to_search, items_with_capabilities_count) —
+    the caller does the actual catalog round trip with the first element."""
+    items_with_caps = [
+        i for i in checklist_items if isinstance(i.get("matched_capabilities"), list) and i["matched_capabilities"]
+    ]
+    all_caps = sorted({c for i in items_with_caps for c in i["matched_capabilities"]})
+    return all_caps, items_with_caps
+
+
+def _attach_matched_items(providers: list[dict], items_with_caps: list[dict]) -> list[dict]:
+    """For each provider the catalog returned, which of THIS project's
+    checklist items does it actually cover? Pure set intersection between
+    the provider's own capability_tags (from the catalog) and each item's
+    stored matched_capabilities — no second catalog call, no LLM, just
+    cross-referencing data this function already has in hand. A provider
+    the catalog returned that doesn't intersect ANY item (shouldn't happen
+    given match_all=False was built from exactly these items' terms, but
+    the catalog's own matching logic is not ours to assume perfect) is
+    dropped rather than shown with an empty, meaningless "matches: []"."""
+    out = []
+    for provider in providers:
+        provider_tags = set(provider.get("capability_tags") or [])
+        matched_items = [
+            {"id": i["id"], "label": i["label"]}
+            for i in items_with_caps
+            if provider_tags & set(i["matched_capabilities"])
+        ]
+        if not matched_items:
+            continue
+        out.append({**provider, "matched_items": matched_items})
+    return out
+
+
+async def find_providers_for_project_async(checklist_items: list[dict]) -> dict:
+    """The project-level lookup. Returns
+    {"providers": [...], "items_with_capabilities": N, "total_items": M} —
+    each provider dict is _format_provider's own shape plus "matched_items":
+    [{"id", "label"}, ...], naming exactly which checklist item(s) it
+    covers (the frontend builds the one-line "how this helps YOU" sentence
+    from that, not from anything generated here — see this module's own
+    "description is forwarded verbatim, never generated" rule; the same
+    discipline applies to the gap sentence: it quotes the item's own stored
+    label, never invents a paraphrase).
+
+    `items_with_capabilities` / `total_items` distinguish "nothing to
+    search for" (no item has a matched capability) from "searched and found
+    nothing" — both are legitimate zero-provider outcomes but mean
+    different things to a caller deciding what to render (see this
+    feature's own "genuinely no match" vs the exception path below).
+
+    Raises the SAME way find_providers_for_capabilities does — a real
+    catalog failure (the current 2026-08-23 outage, or any other) is NOT
+    caught here; the HTTP route's try/except is what turns that into a
+    distinct `error` field, same resilience contract as every other route
+    in this module. This function returning normally always means the
+    catalog answered, whether with providers or with nothing."""
+    all_caps, items_with_caps = find_providers_for_project(checklist_items)
+    if not all_caps:
+        logger.info(
+            "find_provider project lookup: 0 of %d checklist item(s) have matched capabilities — nothing to search",
+            len(checklist_items),
+        )
+        return {"providers": [], "items_with_capabilities": 0, "total_items": len(checklist_items)}
+
+    providers = await find_providers_for_capabilities(all_caps, match_all=False)
+    providers = _attach_matched_items(providers, items_with_caps)
+    logger.info(
+        "find_provider project lookup: items_with_capabilities=%d/%d capabilities=%r providers=%d",
+        len(items_with_caps), len(checklist_items), all_caps, len(providers),
+    )
+    return {
+        "providers": providers,
+        "items_with_capabilities": len(items_with_caps),
+        "total_items": len(checklist_items),
     }

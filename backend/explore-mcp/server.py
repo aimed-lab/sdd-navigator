@@ -29,6 +29,11 @@ Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
     from a teammate's external provider-catalog MCP server. Zero LLM calls.
     Deliberately NOT an MCP tool and NOT reachable through explore()'s
     routing — see tools/find_provider.py's module docstring for why.
+  • POST /api/find-providers-for-project — the SAME matcher, applied
+    project-wide: unions the capability terms already stored across a
+    project's checklist items, queries the catalog once, and maps each
+    provider back to which item(s) it covers. Zero LLM calls, zero new
+    classification — see tools/find_provider.py's own "Step 3" section.
   • POST /api/project-agent — the project agent. One search, two outputs:
     resources/checklist proposals for a human to review and accept (search ->
     relevance pass -> checklist proposal), AND a downloadable prior-art digest
@@ -79,7 +84,11 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
-from tools.find_provider import classify_checklist_item_async, find_providers_for_item_async
+from tools.find_provider import (
+    classify_checklist_item_async,
+    find_providers_for_item_async,
+    find_providers_for_project_async,
+)
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
@@ -858,6 +867,68 @@ async def find_provider_http(request):
                 "matched_capabilities": capabilities,
                 "providers": [],
                 "count": 0,
+                "error": str(exc),
+            },
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/find-providers-for-project", methods=["POST"])
+async def find_providers_for_project_http(request):
+    """Plain-HTTP-only bridge to find_providers_for_project_async() — the
+    project-level "who can help with ANY of this project's gaps" lookup.
+    Same matcher as /api/find-provider, reused: this queries the catalog
+    over the UNION of capability terms already stored across the project's
+    checklist items, zero LLM calls, zero re-classification.
+
+    Deliberately NOT an MCP tool and NOT registered in explore()'s routing
+    — same reasoning as the other two routes in this module.
+
+      POST { "checklist_items": [{"id", "label", "matched_capabilities"}, ...] } ->
+        { providers: [...], items_with_capabilities, total_items }
+
+    `checklist_items` comes from the project's own STORED checklist rows
+    (see frontend/lib/server/projects.ts) — this route does not classify,
+    it only searches and cross-references.
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js
+    proxy route BEFORE it ever calls this route (getProject()'s RLS-backed
+    gate) — same as /api/find-provider.
+
+    Resilience: same contract as /api/find-provider — never 500s the
+    caller. On any failure (catalog unreachable/slow) this returns HTTP 200
+    with an `error` field so the frontend can distinguish "the catalog is
+    down" from "searched and found nothing" rather than showing the same
+    empty state for both — see this feature's own spec on that distinction."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/find-providers-for-project: request body is not valid JSON")
+        body = {}
+    raw_items = body.get("checklist_items") if isinstance(body, dict) else None
+    checklist_items = [
+        {
+            "id": i.get("id"),
+            "label": i.get("label"),
+            "matched_capabilities": [c for c in (i.get("matched_capabilities") or []) if isinstance(c, str)],
+        }
+        for i in raw_items
+        if isinstance(i, dict)
+    ] if isinstance(raw_items, list) else []
+
+    try:
+        result = await find_providers_for_project_async(checklist_items)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception(
+            "POST /api/find-providers-for-project failed: %d checklist item(s)", len(checklist_items)
+        )
+        return JSONResponse(
+            {
+                "providers": [],
+                "items_with_capabilities": 0,
+                "total_items": len(checklist_items),
                 "error": str(exc),
             },
             status_code=200,
