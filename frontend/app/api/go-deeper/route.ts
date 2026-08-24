@@ -69,6 +69,11 @@ export async function POST(req: Request) {
       evidence_filings?: EvidenceFilingsBySlug;
       unfiled_items?: EvidenceItemInput[];
       queries_tried?: { tool: string; query: string }[];
+      // The SAME count go_deeper.py already wove into the note body's own
+      // "searched N way(s)" narrative — see that module's own comment on
+      // why this must NOT be re-derived from queries_tried.length here
+      // (that's raw per-tool-call entries, a different, larger number).
+      ways_searched?: number;
       tools_called?: string[];
       judgment_failed?: boolean;
       error?: string;
@@ -84,6 +89,7 @@ export async function POST(req: Request) {
         resolved: false,
         judgmentFailed: true,
         queriesTried: data.queries_tried ?? [],
+        waysSearched: data.ways_searched ?? data.queries_tried?.length ?? 0,
         toolsCalled: data.tools_called ?? [],
       });
     }
@@ -127,6 +133,7 @@ export async function POST(req: Request) {
       filedCount,
       unfiledCount: (data.unfiled_items ?? []).length,
       queriesTried: data.queries_tried ?? [],
+      waysSearched: data.ways_searched ?? data.queries_tried?.length ?? 0,
       toolsCalled: data.tools_called ?? [],
     });
   } catch (e) {

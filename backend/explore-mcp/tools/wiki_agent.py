@@ -415,6 +415,120 @@ _DISTINCTIVE_DF_RATIO = 0.5   # a word in > this fraction of notes is "generic t
 _MIN_SHARED_DISTINCTIVE_WORDS = 2
 _LONG_TERM_CHARS = 10
 
+# WHY THIS EXISTS, ON TOP OF _distinctive_vocab: _distinctive_vocab only
+# strips a word that recurs in > half of THIS PROJECT'S OWN notes — it has
+# no idea a word is generic across biomedical literature AT LARGE unless
+# this particular project's notes happen to overuse it too. Confirmed on a
+# real run (NLRP3 project): a paper on immune regulation in a hypoxia-
+# stressed Tibetan fish (Gymnocypris eckloni) filed under a human kidney
+# inflammasome note on the strength of "however", "pathways", "signaling" —
+# none of those name anything about NLRP3, kidneys, or diabetes; they are
+# words that appear in nearly any molecular-biology abstract regardless of
+# organism or disease. Every one of them independently passed
+# _distinctive_vocab (this specific project's notes don't happen to repeat
+# them enough to trip that project-local >50% cutoff) and _content_words'
+# length filter, so the ONLY thing that stopped a fish paper from filing
+# under a kidney note was luck.
+#
+# THIS IS A STOPWORD LIST, NOT A HIGHER THRESHOLD — the user's own explicit
+# constraint. _MIN_SHARED_DISTINCTIVE_WORDS stays at 2; what changes is
+# which words are even eligible to count toward that 2. A word here is one
+# that describes HOW science is done or reported (a process, an effect, a
+# measurement, a hedge) rather than WHAT the science is about (a gene, a
+# disease, a cell type, a compound, an organism) — the latter is exactly
+# what _distinctive_vocab already can't reliably tell apart from the former
+# on its own, because both survive its recurrence check equally well on a
+# small note set. Domain nouns (gsdmd, pyroptosis, inflammasome, tubules,
+# diabetic) are deliberately NOT here — stripping those would thin the map,
+# which the user explicitly ruled out; this list only removes vocabulary
+# that was never going to be evidence of shared subject matter.
+_GENERIC_SCIENCE_STOPWORDS = {
+    # hedges / connectives that show up in nearly every abstract
+    "however", "therefore", "moreover", "furthermore", "additionally",
+    "thus", "whereas", "likewise", "similarly", "similar", "comparable",
+    "compared", "regarding", "following", "through", "them", "these",
+    "those", "several", "various", "different", "differences", "existing",
+    "exists", "remains", "remained", "provided", "including", "includes",
+    "also", "most", "under", "were",
+    # generic process/effect/measurement vocabulary — describes HOW a
+    # finding was made, not WHAT it's about
+    "showed", "shown", "observed", "identified", "investigated",
+    "elucidated", "highlight", "highlighted", "suggest", "suggests",
+    "suggested", "indicate", "indicates", "indicated", "demonstrate",
+    "demonstrated", "reveal", "revealed", "associated", "association",
+    "correlated", "correlation", "involved", "involvement", "regulation",
+    "regulated", "regulatory", "expression", "expressed", "levels",
+    "level", "signaling", "signalling", "pathway", "pathways", "effect",
+    "effects", "response", "responses", "mechanism", "mechanisms",
+    "process", "processes", "activation", "activated", "induced", "induce",
+    "inhibition", "inhibited", "treatment", "treated", "model", "models",
+    "function", "functional", "role", "roles", "target", "targets",
+    "targeting", "mediated", "driven", "dependent", "independent",
+    "significant", "significantly", "potential", "novel", "important",
+    "key", "critical", "major", "primary", "secondary", "further",
+    "additional", "recent", "current", "previous", "prior", "analysis",
+    "analyzed", "patterns", "profile", "profiles", "factor", "factors",
+    "system", "systems", "network", "networks", "stress", "damage",
+    "exposure", "outcome", "outcomes", "strategies", "strategy",
+    "enrichment", "enriched", "immune", "immune-related",
+    # generic clinical/methodology nouns that still cross-matched unrelated
+    # diseases on a real run (a transthyretin-amyloidosis trial filed under
+    # a diabetic-kidney-disease note on "cohort"+"patients" alone)
+    "patients", "patient", "cohort", "cohorts", "versus", "both", "human",
+    "humans", "small", "protein", "proteins", "single",
+    # long (>= _LONG_TERM_CHARS) but still generic — would otherwise stand
+    # alone under the long-unambiguous-term bypass below, exactly what let
+    # "measurements"/"transcriptomic"/"pharmacological" file a study or a
+    # KEGG pathway page under an unrelated note on a real run
+    "measurements", "measurement", "transcriptomic", "transcriptomics",
+    "pharmacological", "pharmacology", "structural", "experimental",
+    # pure function words / connectives — the >=4-char length filter in
+    # _content_words lets these through, and they carry zero topical signal
+    # in ANY context (unlike "structure"/"tissue"/"interaction", which
+    # sometimes do) — cheap to remove with no recall cost, confirmed on a
+    # real run: every match that used to rest on one of these also had
+    # independent real signal elsewhere, so removing them only dropped the
+    # weak half of an already-passing pair, never an item's only filing.
+    "where", "while", "have", "whether", "across", "such", "many",
+}
+
+
+def _distinctive_content_words(text: str) -> set[str]:
+    """Same as _content_words, minus vocabulary that's generic across
+    biomedical literature at large — see _GENERIC_SCIENCE_STOPWORDS' own
+    comment. Used ONLY for evidence filing's distinctive-overlap check
+    (file_evidence/_distinctive_vocab below); _grounded()'s gate keeps
+    using plain _content_words, since grounding a note's PROSE in what the
+    search found is a lower, deliberately looser bar than filing one item
+    under one specific concept."""
+    return {w for w in _content_words(text) if w not in _GENERIC_SCIENCE_STOPWORDS}
+
+
+_CANDIDATE_DF_RATIO = 0.10  # a word in >= this fraction of THIS RUN'S candidate
+# items is "generic to this project's domain" — the static stopword list above
+# catches vocabulary generic across ALL of biomedical literature ("however",
+# "expression", "signaling"), but on a real run a title-anchored match still
+# filed on lone words like "molecular", "cohort", "patients", "inhibitors",
+# "cells" — not on the static list (each is a real, sometimes-meaningful
+# word) but generic FOR THIS PROJECT: an NLRP3/kidney-disease project's own
+# candidate pool is saturated with them (nlrp3, disease, kidney, cell,
+# inflammasome, molecular, inflammation, cells, injury, inflammatory,
+# diabetes... each recurring in 10-35% of the 67 real candidates). A fixed
+# list can never anticipate that — it's a property of THIS project's search
+# results, not of English. Computed fresh per run, the same way
+# _distinctive_vocab already strips project-generic vocabulary from NOTES;
+# this does the same thing over the CANDIDATE POOL instead.
+def _candidate_generic_words(candidates: list[dict]) -> set[str]:
+    if len(candidates) < 5:
+        return set()
+    df: dict[str, int] = {}
+    for item in candidates:
+        words = _distinctive_content_words(item.get("title")) | _distinctive_content_words(item.get("summary"))
+        for w in words:
+            df[w] = df.get(w, 0) + 1
+    threshold = _CANDIDATE_DF_RATIO * len(candidates)
+    return {w for w, count in df.items() if count >= threshold}
+
 
 def _distinctive_vocab(notes_vocab: list[set[str]]) -> list[set[str]]:
     """notes_vocab[i] is note i's raw content-word set (title + body). Returns
@@ -496,14 +610,31 @@ def file_evidence(candidates: list[dict], notes: list[dict]) -> tuple[dict[str, 
     if not candidates or not notes:
         return {}, list(candidates)
 
-    notes_vocab_raw = [_content_words(n.get("title")) | _content_words(n.get("body")) for n in notes]
+    # WHY NO "TITLE ANCHOR" REQUIREMENT: an earlier version of this fix also
+    # required a shared word to be drawn from the note's own title, on top
+    # of the two checks below. Tried live against the same 67 real
+    # candidates: it did keep the fish and a cross-disease trial out, but
+    # it also cut filed items roughly in half (60% -> 30%) — most of what
+    # it removed was NOT further noise, it was ordinary items that
+    # genuinely share real vocabulary with a note's BODY but happen not to
+    # repeat a word from that note's (often short, narrow) title. Per this
+    # project's own stated tradeoff — a wrong-looking item costs less than
+    # a map that quietly went from 40% to 70% unfiled — that trade wasn't
+    # worth it, so it's gone; the two checks below carry the fix alone now.
+    generic = _candidate_generic_words(candidates)
+    notes_vocab_raw = [
+        (_distinctive_content_words(n.get("title")) | _distinctive_content_words(n.get("body"))) - generic
+        for n in notes
+    ]
     notes_vocab = _distinctive_vocab(notes_vocab_raw)
 
     filings: dict[str, list[dict]] = {n["slug"]: [] for n in notes}
     unfiled: list[dict] = []
 
     for item in candidates:
-        item_words = _content_words(item.get("title")) | _content_words(item.get("summary"))
+        item_words = (
+            _distinctive_content_words(item.get("title")) | _distinctive_content_words(item.get("summary"))
+        ) - generic
         best_matches: list[tuple[dict, set[str]]] = []
         for note, vocab in zip(notes, notes_vocab):
             shared = item_words & vocab

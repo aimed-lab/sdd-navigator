@@ -460,6 +460,7 @@ async def go_deeper_async(note: dict) -> dict:
             "evidence_filings": {},
             "unfiled_items": [],
             "queries_tried": queries_tried,
+            "ways_searched": n_ways,
             "tools_called": tools_called,
             "already_answered": already_answered,
             "judgment_failed": True,
@@ -516,6 +517,20 @@ async def go_deeper_async(note: dict) -> dict:
         # further to curate.
         "unfiled_items": unfiled,
         "queries_tried": queries_tried,
+        # THE FIX for the "6 ways / 4 ways" self-contradiction: n_ways —
+        # SPECIFIC queries counted individually, plus at most one more for
+        # every GENERIC bare-gene-symbol query combined — is the exact
+        # number _ways_searched_text already wove into the note body's own
+        # "Checked, still nothing" / "inconclusive" narrative above. Handing
+        # it back explicitly, rather than making the caller infer a count
+        # from `queries_tried` (raw per-tool entries — several tools legally
+        # share one identical query, so its length is a DIFFERENT, larger
+        # number measuring something else: "how many tool calls ran," not
+        # "how many distinct ways this searched"), is what lets the two
+        # surfaces that report a "ways searched" figure — this note's own
+        # body text and whatever summary the caller shows alongside it —
+        # say the same number instead of two.
+        "ways_searched": n_ways,
         "tools_called": tools_called,
         "already_answered": already_answered,
         "judgment_failed": False,

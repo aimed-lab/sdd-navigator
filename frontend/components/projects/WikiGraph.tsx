@@ -519,7 +519,14 @@ function SidePanel({
         );
         router.refresh();
       } else {
-        const n = data.queriesTried?.length ?? 0;
+        // waysSearched, not queriesTried.length — the latter is one entry
+        // PER TOOL CALL, and several tools legitimately share one identical
+        // query (see go_deeper.py's own _classify_queries), so its length
+        // is a bigger, different number than "how many distinct ways this
+        // searched." Using the same waysSearched the note body's own
+        // "Checked, still nothing" text is built from is what keeps this
+        // panel from stating two different counts for one run.
+        const n = data.waysSearched ?? data.queriesTried?.length ?? 0;
         setGoDeeperResult(
           data.noteUpdated
             ? `Searched ${n} way(s), still nothing — confirmed absence recorded on the note.`
