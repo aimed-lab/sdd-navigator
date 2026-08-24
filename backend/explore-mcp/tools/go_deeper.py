@@ -63,7 +63,7 @@ from datetime import datetime, timezone
 
 import llm
 from tools.explore import explore_async
-from tools.project_agent import _flatten_candidates
+from tools.project_agent import _GAP_PHRASES, _flatten_candidates
 from tools.wiki_agent import _content_words, file_evidence
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,78 @@ _JUDGE_SYSTEM = (
     'if not resolved>", "supporting_item_ids": [...]}. No prose, no code '
     "fences."
 )
+
+
+# SEPARATE prompt from _JUDGE_SYSTEM, not a reuse of it — confirmed live,
+# 2026-08-23: framing the note's OWN existing body as a "candidate found by
+# search" (the shape _JUDGE_SYSTEM expects) made the model refuse to call
+# it resolved even when the body plainly already states a grounded,
+# cited answer — a real research team's own note wasn't a "search result"
+# to it, so it always said resolved=false. This prompt asks the actual
+# question instead: does the text ALREADY answer this, regardless of
+# where it came from.
+_SELF_CHECK_SYSTEM = (
+    "You will be given a QUESTION and the CURRENT TEXT of a note about it, "
+    "written by a research team.\n\n"
+    "Decide: does this text, AS IT ALREADY STANDS, contain a grounded, "
+    "POSITIVE answer to the question — a specific claim with a stated "
+    "source or citation?\n\n"
+    "A text that states there is NO evidence, NO data, or that the "
+    "question remains OPEN or UNRESOLVED is NOT an answer, even though it "
+    "is a definite statement — that is a gap being recorded, not a "
+    "question being answered. Only say yes when the text asserts "
+    "something IS true/known, with support, not when it asserts that "
+    "nothing is known.\n\n"
+    "If yes: quote or closely paraphrase the positive answer already "
+    "present in the text (do not invent anything beyond what the text "
+    "already says).\n\n"
+    "If the text is phrased as an open question, a gap statement, an "
+    "absence of evidence, or has no cited support: say no.\n\n"
+    'Return ONLY JSON: {"already_answered": true|false, "answer": "<empty '
+    'string if false>"}. No prose, no code fences.'
+)
+
+
+def _try_self_check_once(question_text: str, note_body: str) -> dict | None:
+    """One attempt at the self-check call + parse. Returns
+    {"already_answered", "answer"} on success, None if unusable (caller
+    retries once). Raises on an actual LLM-call exception.
+
+    CODE GATE, same "prompt asks, code enforces" discipline as everywhere
+    else: confirmed live, 2026-08-23, that the model can say
+    already_answered=true for a body that literally states "no published
+    data link X to Y" — treating a recorded ABSENCE as if it were an
+    answer, because it's phrased as a confident, cited-sounding sentence.
+    The SAME gap-phrase list project_agent.py's own grounding gate uses
+    (_GAP_PHRASES) is checked against the returned answer text here — a
+    "yes" whose own answer contains a gap phrase is downgraded to no,
+    regardless of what the model asserted."""
+    resp = llm.complete(
+        [
+            {"role": "system", "content": _SELF_CHECK_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    f"QUESTION: {question_text}\n\nCURRENT TEXT:\n{note_body}\n\n"
+                    'Return ONLY {"already_answered": true|false, "answer": "..."}.'
+                ),
+            },
+        ],
+        temperature=0.1,
+    )
+    data = _loads_lenient(resp.content)
+    if not isinstance(data, dict) or not isinstance(data.get("already_answered"), bool):
+        return None
+    answer = data.get("answer") if isinstance(data.get("answer"), str) else ""
+    already = data["already_answered"] and bool(answer.strip())
+    if already and any(phrase in answer.lower() for phrase in _GAP_PHRASES):
+        logger.warning(
+            "go_deeper: self-check said already_answered=true but the answer itself reads as a "
+            "gap statement — downgrading to false. answer=%r", answer,
+        )
+        already = False
+        answer = ""
+    return {"already_answered": already, "answer": answer.strip() if already else ""}
 
 
 def _loads_lenient(content: str | None) -> dict:
@@ -235,6 +307,57 @@ def _queries_tried(explore_result: dict) -> list[dict]:
     return out
 
 
+def _classify_queries(queries_tried: list[dict], gene_terms: set[str]) -> dict:
+    """Splits queries_tried into SPECIFIC (reflects the question's own
+    content, beyond the bare gene/target symbol) and GENERIC (nothing but
+    a gene symbol scope extraction already knew). Confirmed live,
+    2026-08-23: search_datasets/pager/opentargets/chembl are GENE-PRIMARY
+    tools by design (see tools/explore.py's _chembl_query/_opentargets_
+    query docstrings — they resolve a target symbol, not free text), so
+    several of them searching the identical bare gene symbol is normal,
+    expected behavior, not four independent attempts at the specific
+    question. Grouped by EXACT query text (case-insensitive) so identical
+    generic queries from different tools collapse into ONE bucket — "four
+    sources searching bare LRRK2 is one way, not five," per this
+    feature's own spec, not five separate entries that inflate a
+    'searched N ways' claim."""
+    gene_terms_lower = {g.lower() for g in gene_terms}
+    specific: dict[str, list[str]] = {}
+    generic: dict[str, list[str]] = {}
+    for q in queries_tried:
+        query_text = (q.get("query") or "").strip()
+        tool = q.get("tool")
+        if not query_text or not tool:
+            continue
+        words = _content_words(query_text)
+        bucket = generic if words and words <= gene_terms_lower else specific
+        bucket.setdefault(query_text, []).append(tool)
+    return {
+        "specific": [{"query": q, "tools": tools} for q, tools in specific.items()],
+        "generic": [{"query": q, "tools": tools} for q, tools in generic.items()],
+    }
+
+
+def _ways_searched_text(classified: dict) -> tuple[int, str, bool]:
+    """Returns (n_ways, narrative, any_specific) — n_ways counts each
+    distinct SPECIFIC query as its own way, plus at most ONE more for all
+    generic (bare gene-level) queries combined, however many tools share
+    them. any_specific=False means NOTHING beyond a bare gene/target
+    symbol was ever searched — the caller uses this to downgrade language
+    from "confirmed absence" to "inconclusive," since a bare gene lookup
+    coming back empty says nothing about the SPECIFIC claim in the
+    question."""
+    specific = classified["specific"]
+    generic = classified["generic"]
+    parts = [f'{s["query"]!r} ({"/".join(s["tools"])})' for s in specific]
+    if generic:
+        all_tools = sorted({t for g in generic for t in g["tools"]})
+        generic_query = generic[0]["query"]
+        parts.append(f'a generic gene-level check ({generic_query!r}) across {len(all_tools)} database(s): {", ".join(all_tools)}')
+    n_ways = len(specific) + (1 if generic else 0)
+    return n_ways, "; ".join(parts), bool(specific)
+
+
 def _append_dated_section(body: str, heading: str, text: str) -> str:
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"{body.rstrip()}\n\n**{heading} ({date}):** {text}"
@@ -272,6 +395,11 @@ async def go_deeper_async(note: dict) -> dict:
                                                  # as everywhere else
         queries_tried: [{tool, query}],
         tools_called: [str],
+        already_answered: bool,                 # the note's OWN existing
+                                                 # body already grounds an
+                                                 # answer (see STEP 0 below)
+                                                 # — never combined with a
+                                                 # "still nothing" verdict
         judgment_failed: bool,                  # the LLM judgment itself
                                                  # broke (fail-closed) — NOT
                                                  # the same as a genuine
@@ -281,13 +409,46 @@ async def go_deeper_async(note: dict) -> dict:
                                                  # a rewrite at all in this
                                                  # case
       }
+
+    NEVER CONTRADICTS THE NOTE'S OWN BODY. Confirmed live, 2026-08-23: a
+    note whose body already stated a grounded, cited answer got a "Checked,
+    still nothing — confirmed absence" section appended underneath it —
+    both readable in the same panel. STEP 0 below is the fix: before
+    running the new search's own judgment, the SAME judge is asked whether
+    the note's EXISTING body, on its own, already answers the question. If
+    it does, this function NEVER produces a "still nothing" verdict — at
+    worst it says the fresh search didn't add anything NEW beyond what the
+    note already states, which is a true statement instead of a false one.
     """
     question_text = f"{note['title']}. {note.get('body') or ''}".strip()
+    existing_body = note.get("body") or ""
+
+    # STEP 0 — does the note's OWN existing body already answer this,
+    # independent of anything a new search finds? Own small prompt (see
+    # _SELF_CHECK_SYSTEM's own comment for why _JUDGE_SYSTEM itself doesn't
+    # work for this), same one-retry-on-bad-JSON policy as everything else.
+    already_answered = False
+    if existing_body.strip():
+        try:
+            self_check = _try_self_check_once(question_text, existing_body)
+            if self_check is None:
+                time.sleep(_JSON_RETRY_BACKOFF_SEC)
+                self_check = _try_self_check_once(question_text, existing_body)
+        except Exception:
+            self_check = None
+            logger.exception(
+                "go_deeper: self-check LLM call failed for note=%r — proceeding without it", note.get("slug")
+            )
+        if self_check and self_check["already_answered"]:
+            already_answered = True
 
     explore_result = await explore_async(question_text)
     candidates, _, _, _ = _flatten_candidates(explore_result, set(), max_candidates=MAX_CANDIDATES)
     tools_called = explore_result.get("tools_called") or []
     queries_tried = _queries_tried(explore_result)
+    gene_terms = set((explore_result.get("scope") or {}).get("genes") or [])
+    classified = _classify_queries(queries_tried, gene_terms)
+    n_ways, ways_narrative, any_specific = _ways_searched_text(classified)
 
     judgment, judgment_failed = _judge(question_text, candidates)
 
@@ -300,37 +461,49 @@ async def go_deeper_async(note: dict) -> dict:
             "unfiled_items": [],
             "queries_tried": queries_tried,
             "tools_called": tools_called,
+            "already_answered": already_answered,
             "judgment_failed": True,
         }
 
-    note_for_filing = [{"slug": note["slug"], "title": note["title"], "body": note.get("body") or ""}]
+    note_for_filing = [{"slug": note["slug"], "title": note["title"], "body": existing_body}]
     filings, unfiled = file_evidence(candidates, note_for_filing)
 
     if judgment["resolved"]:
-        new_body = _append_dated_section(note.get("body") or "", "Resolved", judgment["answer"])
-        new_note = {
-            "slug": note["slug"],
-            "title": note["title"],
-            "body": new_body,
-            "note_type": "concept",  # an answered question is a concept now
-        }
-    else:
-        query_summary = "; ".join(f"{q['tool']}: {q['query']}" for q in queries_tried if q.get("query"))
+        # New evidence, from THIS run's search, resolves it.
+        new_body = _append_dated_section(existing_body, "Resolved", judgment["answer"])
+        new_note = {"slug": note["slug"], "title": note["title"], "body": new_body, "note_type": "concept"}
+    elif already_answered:
+        # THE FIX: the note already had a grounded answer BEFORE this run
+        # — never say "still nothing" under it. Also corrects the
+        # mislabeling this exact case exposed: a note tagged "question"
+        # whose own body already reads as an answered concept.
+        text = "this question already has a grounded answer above — a fresh search did not surface additional evidence beyond it."
+        new_body = _append_dated_section(existing_body, "Re-checked, no new evidence", text)
+        new_note = {"slug": note["slug"], "title": note["title"], "body": new_body, "note_type": "concept"}
+    elif any_specific:
+        # A genuine, question-specific search came back empty.
         still_nothing_text = (
-            f"searched {len(queries_tried)} way(s) ({query_summary}) — no evidence found. "
+            f"searched {n_ways} way(s) — {ways_narrative}. No evidence found. "
             "Confirmed absence, not an unexamined gap."
         )
-        new_body = _append_dated_section(note.get("body") or "", "Checked, still nothing", still_nothing_text)
-        new_note = {
-            "slug": note["slug"],
-            "title": note["title"],
-            "body": new_body,
-            "note_type": "question",  # stays open — nothing resolved it
-        }
+        new_body = _append_dated_section(existing_body, "Checked, still nothing", still_nothing_text)
+        new_note = {"slug": note["slug"], "title": note["title"], "body": new_body, "note_type": "question"}
+    else:
+        # NOTHING beyond a bare gene/target symbol was ever searched — a
+        # generic lookup coming back empty says nothing about the
+        # SPECIFIC claim in the question. Do not claim a confirmed
+        # absence off that; say plainly that this wasn't a real test.
+        inconclusive_text = (
+            f"only a generic gene-level check was possible ({ways_narrative}) — no query reflecting "
+            "this question's specific claim could be formed. Not a confirmed gap; treat as inconclusive."
+        )
+        new_body = _append_dated_section(existing_body, "Checked, inconclusive", inconclusive_text)
+        new_note = {"slug": note["slug"], "title": note["title"], "body": new_body, "note_type": "question"}
 
     logger.info(
-        "go_deeper: note=%r resolved=%s candidates=%d filed=%d unfiled=%d tools=%r",
-        note.get("slug"), judgment["resolved"], len(candidates),
+        "go_deeper: note=%r resolved=%s already_answered=%s any_specific=%s candidates=%d filed=%d "
+        "unfiled=%d tools=%r",
+        note.get("slug"), judgment["resolved"], already_answered, any_specific, len(candidates),
         len(filings.get(note["slug"], [])), len(unfiled), tools_called,
     )
 
@@ -344,5 +517,6 @@ async def go_deeper_async(note: dict) -> dict:
         "unfiled_items": unfiled,
         "queries_tried": queries_tried,
         "tools_called": tools_called,
+        "already_answered": already_answered,
         "judgment_failed": False,
     }

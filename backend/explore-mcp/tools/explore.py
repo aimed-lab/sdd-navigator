@@ -749,13 +749,36 @@ def _entity_queries_for_papers(scope: dict) -> list[str]:
             queries.append(q)
 
     for gene in capped_genes:
-        terms = [gene] if gene == primary else [gene, primary]
+        # Drop a gene from its own anchor term when `context` ALREADY
+        # names it as a whole word — confirmed live: a short, gene-dense
+        # input (e.g. a go-deeper question quoting its own note title,
+        # "Reversibility of LRRK2 inhibitor-induced lung pathology")
+        # extracts a topic phrase that already starts with the gene
+        # symbol, and _join_unique only dedupes whole TERMS, not words
+        # inside a longer phrase — "LRRK2" and "LRRK2 inhibitor-induced
+        # lung pathology" are different strings to it, so both got kept,
+        # producing "LRRK2 LRRK2 inhibitor-induced lung pathology". This
+        # never changes which terms are SELECTED (still gene + single
+        # most-specific context term, unchanged), only removes a literal
+        # repeated word when the two already overlap.
+        terms = [g for g in ([gene] if gene == primary else [gene, primary]) if not _term_in_phrases(g, context)]
         _add(_join_unique(terms, context))
 
     if len(capped_genes) > 1:
         _add(_join_unique(context))
 
     return queries
+
+
+def _term_in_phrases(term: str, phrases: list[str]) -> bool:
+    """True if `term` already appears as a whole word inside any of
+    `phrases` (case-insensitive) — used to avoid literally repeating a
+    gene symbol that a context phrase already names. Whole-word match
+    only (via \\b), so "LRRK2" matches inside "LRRK2 inhibitor..." but a
+    short gene symbol that happens to be a substring of an unrelated
+    longer word would not false-positive."""
+    term_re = re.compile(r"\b" + re.escape(term) + r"\b", re.IGNORECASE)
+    return any(term_re.search(phrase) for phrase in phrases)
 
 
 # ── Steps 4–5: execute chosen tools in parallel and assemble the result ───────
