@@ -85,6 +85,33 @@ export async function listWikiNoteSummaries(projectId: string): Promise<ListWiki
   return { status: "ok", notes: (data ?? []) as WikiNoteSummary[] };
 }
 
+export type GetWikiNoteResult =
+  | { status: "ok"; note: WikiNoteSummary }
+  | { status: "not_found" }
+  | { status: "error"; error: string };
+
+/** ONE note, by id — for the "Go deeper" action (app/api/go-deeper/route.ts),
+ *  which operates on exactly the note the researcher picked, never a list.
+ *  RLS-scoped by project_id same as everything else here: a note id from a
+ *  DIFFERENT project a caller isn't on returns not_found, not the row. */
+export async function getWikiNote(projectId: string, noteId: string): Promise<GetWikiNoteResult> {
+  const { db } = await requireCurrentUser();
+
+  const { data, error } = await db
+    .from("wiki_notes")
+    .select("id, slug, title, note_type, body, is_human_edited")
+    .eq("project_id", projectId)
+    .eq("id", noteId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getWikiNote: select failed", error);
+    return { status: "error", error: "Couldn't load that note." };
+  }
+  if (!data) return { status: "not_found" };
+  return { status: "ok", note: data as WikiNoteSummary };
+}
+
 export type SaveWikiNotesResult = {
   status: "ok";
   saved: number;

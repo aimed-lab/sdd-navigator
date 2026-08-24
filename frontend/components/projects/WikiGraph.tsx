@@ -31,6 +31,7 @@
 // signal as a nested object, etc.).
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import * as d3 from "d3-force";
 import type {
   EvidenceItemRow,
@@ -481,12 +482,57 @@ function SidePanel({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  // "Go deeper" — the researcher-triggered single-question search (see
+  // backend/explore-mcp/tools/go_deeper.py). Only offered on a question
+  // note: it's the one action the RESEARCHER decides to take, never the
+  // agent picking its own next question, per this feature's own spec.
+  const [goingDeeper, setGoingDeeper] = useState(false);
+  const [goDeeperResult, setGoDeeperResult] = useState<string | null>(null);
+  const router = useRouter();
+
   useEffect(() => {
     panelRef.current?.focus();
     setDraft(note?.body ?? "");
     setEditing(false);
     setError(null);
+    setGoDeeperResult(null);
   }, [note?.id]);
+
+  async function goDeeper() {
+    if (!note || goingDeeper) return;
+    setGoingDeeper(true);
+    setGoDeeperResult(null);
+    try {
+      const res = await fetch("/api/go-deeper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, noteId: note.id }),
+      });
+      const data = await res.json();
+      if (data.judgmentFailed || data.error) {
+        setGoDeeperResult("Couldn't complete the search this time — try again in a moment.");
+      } else if (data.resolved) {
+        setGoDeeperResult(
+          data.noteUpdated
+            ? "Found evidence — this note is now a resolved concept."
+            : "Found evidence, but couldn't save the update (the note may have been edited since)."
+        );
+        router.refresh();
+      } else {
+        const n = data.queriesTried?.length ?? 0;
+        setGoDeeperResult(
+          data.noteUpdated
+            ? `Searched ${n} way(s), still nothing — confirmed absence recorded on the note.`
+            : `Searched ${n} way(s), still nothing. Couldn't save the note (it may have been edited since) — evidence was still filed.`
+        );
+        router.refresh();
+      }
+    } catch {
+      setGoDeeperResult("Couldn't reach the search — try again in a moment.");
+    } finally {
+      setGoingDeeper(false);
+    }
+  }
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -546,6 +592,25 @@ function SidePanel({
               </span>
             )}
           </div>
+
+          {note.note_type === "question" && (
+            <div className="mb-4">
+              <button
+                type="button"
+                onClick={goDeeper}
+                disabled={goingDeeper}
+                className="btn-primary text-label-sm px-4 py-2 disabled:opacity-50"
+              >
+                {goingDeeper ? "Searching…" : "Go deeper"}
+              </button>
+              <p className="mt-1 font-body-sm text-body-sm text-secondary">
+                Searches specifically for this question — not the project&apos;s broad topic again.
+              </p>
+              {goDeeperResult && (
+                <p className="mt-2 font-body-sm text-body-sm text-on-background">{goDeeperResult}</p>
+              )}
+            </div>
+          )}
 
           {editing ? (
             <div className="mb-6">

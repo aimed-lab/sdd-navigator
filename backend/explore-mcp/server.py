@@ -34,6 +34,9 @@ Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
     project's checklist items, queries the catalog once, and maps each
     provider back to which item(s) it covers. Zero LLM calls, zero new
     classification — see tools/find_provider.py's own "Step 3" section.
+  • POST /api/go-deeper — the researcher-triggered, single-question wiki
+    search. Reuses explore_async() verbatim, fed one open question's own
+    text instead of the project's goal text — see tools/go_deeper.py.
   • POST /api/project-agent — the project agent. One search, two outputs:
     resources/checklist proposals for a human to review and accept (search ->
     relevance pass -> checklist proposal), AND a downloadable prior-art digest
@@ -89,6 +92,7 @@ from tools.find_provider import (
     find_providers_for_item_async,
     find_providers_for_project_async,
 )
+from tools.go_deeper import go_deeper_async
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
@@ -929,6 +933,64 @@ async def find_providers_for_project_http(request):
                 "providers": [],
                 "items_with_capabilities": 0,
                 "total_items": len(checklist_items),
+                "error": str(exc),
+            },
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/go-deeper", methods=["POST"])
+async def go_deeper_http(request):
+    """Plain-HTTP-only bridge to go_deeper_async() — the researcher-
+    triggered, single-question search. See tools/go_deeper.py's module
+    docstring for the full design: reuses explore_async() verbatim, fed the
+    QUESTION's own text rather than the project's goal text.
+
+    Deliberately NOT an MCP tool and NOT reachable through explore()'s
+    routing — this is a project-wiki-scoped action a human triggers
+    explicitly ("Go deeper" on one open question), not a general research
+    tool.
+
+      POST { "note": {"id", "slug", "title", "body", "note_type"} } ->
+        { resolved, note, evidence_filings, unfiled_items, queries_tried,
+          tools_called, judgment_failed }
+
+    `note` comes from the project's own STORED wiki_notes row (see
+    frontend/lib/server/wikiNotes.ts) — this route does not choose which
+    question to deepen, it only searches the one it's handed.
+
+    Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
+    BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js
+    proxy route BEFORE it ever calls this route (getProject()'s RLS-backed
+    gate) — same as every other project-scoped proxy in this file.
+
+    Resilience: never 500s the caller. On any failure this returns HTTP 200
+    with note=null and an `error` field, so the frontend can tell "the
+    search itself broke" apart from a genuine STILL NOTHING outcome (which
+    is note!=null, resolved=false — a successful run, not a failure)."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/go-deeper: request body is not valid JSON")
+        body = {}
+    note = body.get("note") if isinstance(body, dict) else None
+    if not isinstance(note, dict) or not all(k in note for k in ("id", "slug", "title", "body")):
+        return JSONResponse({"error": "Missing or malformed note."}, status_code=400)
+
+    try:
+        result = await go_deeper_async(note)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/go-deeper failed: note=%r", note.get("slug"))
+        return JSONResponse(
+            {
+                "resolved": False,
+                "note": None,
+                "evidence_filings": {},
+                "unfiled_items": [],
+                "queries_tried": [],
+                "tools_called": [],
+                "judgment_failed": True,
                 "error": str(exc),
             },
             status_code=200,
