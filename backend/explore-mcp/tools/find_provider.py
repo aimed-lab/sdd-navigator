@@ -282,13 +282,13 @@ def _try_map_once(item_text: str, vocab: list[str]) -> list[str] | None:
 # the NLRP3 failure (see _MAPPING_SYSTEM_TEMPLATE's own comment) came from
 # the model latching onto a technique word and discounting the surrounding
 # "existing" qualifier. This is a small, EXPLICIT, closed list of phrases
-# (not a broad heuristic) checked verbatim, case-insensitive, against the
-# raw item text: if any is present, the classification is dropped to []
-# regardless of what the model returned, full stop. False negatives here
-# (a genuine service item that happens to also contain one of these words)
-# cost nothing — Ask for help still works — which is exactly the same
-# bias-toward-NOT-a-service the prompt itself asks for, just enforced in
-# code instead of trusted to hold.
+# (not a broad heuristic) checked verbatim, case-insensitive — if one is
+# present where it counts (see SENTENCE-SCOPED below), the classification
+# is dropped to [] regardless of what the model returned, full stop. False
+# negatives here (a genuine service item that happens to also contain one
+# of these words) cost nothing — Ask for help still works — which is
+# exactly the same bias-toward-NOT-a-service the prompt itself asks for,
+# just enforced in code instead of trusted to hold.
 _ALREADY_HAVE_SIGNALS = (
     "existing",
     "our own",
@@ -298,10 +298,87 @@ _ALREADY_HAVE_SIGNALS = (
     "retrospective",
 )
 
+# SENTENCE-SCOPED, NOT WHOLE-TEXT — the 2026-08-24 fix. A checklist item is
+# almost always one sentence, so checking the whole text was a fine proxy
+# for "checking the sentence with the candidate technique in it" — the two
+# were the same string. A project DESCRIPTION is a paragraph, and that proxy
+# breaks: the SPOP project's description matched "proteomics-ms" from "we
+# would validate in patient-derived organoids and need proteomics to map
+# the degradome," a real, current-tense ask — but the whole-text check also
+# saw "published" in an entirely different, unrelated sentence ("whether
+# any published cohort stratifies ovarian tumours...", a literature-review
+# question, not a claim of already having something) and dropped the
+# genuine match to []. Almost every real multi-sentence description
+# mentions prior work SOMEWHERE, so the old whole-text check was a
+# false-negative machine on anything longer than a checklist item.
+#
+# ONE SENTENCE -> UNCHANGED. When the text is a single sentence (the
+# checklist-item case), sentence-splitting is a no-op and this reduces to
+# exactly the old whole-text substring check — verified directly against
+# the NLRP3 case this gate exists for (_has_already_have_signal's own
+# tests): "Quantify GSDMD and IL1B expression in existing scRNA-seq biopsy
+# data" is one sentence, so "existing" still drops it, unconditionally, no
+# new logic in the way.
+#
+# MULTIPLE SENTENCES -> the signal must share a sentence with something
+# that actually looks like the technique being discussed. There's no
+# per-capability sentence attribution available (the model returns terms,
+# not spans), so this uses the one attribution-free signal already at
+# hand: the SAME fixed, controlled vocabulary (`vocab`) the classification
+# itself is restricted to. A sentence "mentions the technique" here means
+# it contains one of that vocabulary's own words (proteomics, organoid,
+# crispr, ...) — not a new heuristic dictionary, the same list the prompt
+# itself was given. A signal-bearing sentence with NO vocabulary word in it
+# (the SPOP "published cohort" sentence) can no longer drop a match that
+# lives in a different sentence entirely.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 
-def _has_already_have_signal(item_text: str) -> bool:
-    text = item_text.lower()
-    return any(signal in text for signal in _ALREADY_HAVE_SIGNALS)
+# Below this length a word fragment from a hyphenated vocab term ("ms",
+# "3d") is too generic/short to mean anything on its own and would just add
+# noise to the overlap check — real technique words in this vocabulary
+# ("proteomics", "organoid", "crispr", ...) all clear this easily.
+_MIN_VOCAB_WORD_LEN = 4
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Naive, code-level sentence split — good enough for the fixed-length
+    checklist-item / project-description text this module ever sees, same
+    "small and explicit, not a broad heuristic" spirit as the signal list
+    above. Never returns an empty list: unsplittable text is one sentence,
+    itself."""
+    sentences = [s.strip() for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+    return sentences or [text]
+
+
+def _vocab_words(vocab: list[str]) -> set[str]:
+    """The controlled vocabulary's own words, lowercased, split on its own
+    hyphens/underscores ("proteomics-ms" -> {"proteomics", "ms"}) and
+    filtered to real technique words (see _MIN_VOCAB_WORD_LEN) — this is
+    the vocabulary list that was already fetched for classification, not a
+    new list to keep in sync with anything."""
+    words: set[str] = set()
+    for term in vocab:
+        for part in re.split(r"[-_\s]+", term.lower()):
+            if len(part) >= _MIN_VOCAB_WORD_LEN and not part.isdigit():
+                words.add(part)
+    return words
+
+
+def _has_already_have_signal(item_text: str, vocab: list[str]) -> bool:
+    sentences = _split_sentences(item_text)
+    if len(sentences) <= 1:
+        # The checklist-item case — unchanged whole-text check, see this
+        # section's own "ONE SENTENCE -> UNCHANGED" note above.
+        text = item_text.lower()
+        return any(signal in text for signal in _ALREADY_HAVE_SIGNALS)
+
+    vocab_words = _vocab_words(vocab)
+    for sentence in sentences:
+        low = sentence.lower()
+        has_signal = any(signal in low for signal in _ALREADY_HAVE_SIGNALS)
+        if has_signal and any(word in low for word in vocab_words):
+            return True
+    return False
 
 
 def _map_item_to_capabilities(item_text: str, vocab: list[str]) -> list[str]:
@@ -318,7 +395,7 @@ def _map_item_to_capabilities(item_text: str, vocab: list[str]) -> list[str]:
         return []
 
     def _gated(caps: list[str]) -> list[str]:
-        if caps and _has_already_have_signal(item_text):
+        if caps and _has_already_have_signal(item_text, vocab):
             logger.info(
                 "find_provider: grounding gate dropped %r for item=%r "
                 "(already-have-it signal present)",
@@ -488,7 +565,21 @@ async def find_providers_for_item_async(item_text: str, capabilities: list[str])
 # data, not a new classification pass.
 
 
-def find_providers_for_project(checklist_items: list[dict]) -> tuple[list[dict], int]:
+
+# A synthetic "item" representing the project's own description, so it can
+# ride through the exact same union-and-intersect machinery as a real
+# checklist item below rather than needing a parallel code path. id stays
+# None throughout — that's what _attach_matched_items uses to tell a
+# description-sourced match from a checklist-sourced one, since the
+# frontend renders the two differently (a checklist match quotes the
+# item's own label; a description match just says "your project
+# description" — see WhoCanHelpSection.tsx's buildGapLine).
+_DESCRIPTION_SOURCE_ID = None
+
+
+def find_providers_for_project(
+    checklist_items: list[dict], description_capabilities: list[str] | None = None
+) -> tuple[list[dict], int]:
     """Pure, synchronous helper (no network) that decides WHICH capability
     terms are worth searching for and — once results come back — which
     checklist item(s) each result covers. Split out from the async function
@@ -501,55 +592,97 @@ def find_providers_for_project(checklist_items: list[dict]) -> tuple[list[dict],
     (nothing to search for) and are silently skipped here, same as they are
     everywhere else in this feature.
 
+    `description_capabilities` is the project's OWN stored classification
+    (frontend/lib/server/projects.ts's ProjectDetail.description_capabilities
+    — same prompt, same grounding gate as a checklist item, just run once
+    against the description instead of an item label; see createProject()).
+    None or [] contributes nothing, same as an unmatched checklist item.
+    When non-empty it's folded in as a synthetic "item" so a provider
+    matched from the description flows through the same
+    union-then-intersect logic as everything else here — not a second,
+    divergent code path to keep in sync.
+
     Returns (all_capabilities_to_search, items_with_capabilities_count) —
     the caller does the actual catalog round trip with the first element."""
     items_with_caps = [
         i for i in checklist_items if isinstance(i.get("matched_capabilities"), list) and i["matched_capabilities"]
     ]
+    if description_capabilities:
+        items_with_caps = items_with_caps + [
+            {
+                "id": _DESCRIPTION_SOURCE_ID,
+                "label": None,
+                "matched_capabilities": description_capabilities,
+            }
+        ]
     all_caps = sorted({c for i in items_with_caps for c in i["matched_capabilities"]})
     return all_caps, items_with_caps
 
 
 def _attach_matched_items(providers: list[dict], items_with_caps: list[dict]) -> list[dict]:
     """For each provider the catalog returned, which of THIS project's
-    checklist items does it actually cover? Pure set intersection between
-    the provider's own capability_tags (from the catalog) and each item's
-    stored matched_capabilities — no second catalog call, no LLM, just
+    checklist items (or its description — see _DESCRIPTION_SOURCE_ID above)
+    does it actually cover? Pure set intersection between the provider's own
+    capability_tags (from the catalog) and each item's stored
+    matched_capabilities — no second catalog call, no LLM, just
     cross-referencing data this function already has in hand. A provider
     the catalog returned that doesn't intersect ANY item (shouldn't happen
     given match_all=False was built from exactly these items' terms, but
     the catalog's own matching logic is not ours to assume perfect) is
-    dropped rather than shown with an empty, meaningless "matches: []"."""
+    dropped rather than shown with an empty, meaningless "matches: []".
+
+    RANKED, not just listed: providers are returned sorted by how many of
+    THIS project's needs each one covers (len(matched_items), descending) —
+    the whole point being that a provider covering three gaps is a better
+    answer to "who can help with this project" than one covering a single
+    narrow one. Ties keep the catalog's own relative order (Python's sort is
+    stable) rather than an arbitrary secondary key."""
     out = []
     for provider in providers:
         provider_tags = set(provider.get("capability_tags") or [])
         matched_items = [
-            {"id": i["id"], "label": i["label"]}
+            {
+                "id": i["id"],
+                "label": i["label"],
+                "source": "description" if i["id"] is _DESCRIPTION_SOURCE_ID else "checklist",
+            }
             for i in items_with_caps
             if provider_tags & set(i["matched_capabilities"])
         ]
         if not matched_items:
             continue
         out.append({**provider, "matched_items": matched_items})
+    out.sort(key=lambda p: len(p["matched_items"]), reverse=True)
     return out
 
 
-async def find_providers_for_project_async(checklist_items: list[dict]) -> dict:
+async def find_providers_for_project_async(
+    checklist_items: list[dict], description_capabilities: list[str] | None = None
+) -> dict:
     """The project-level lookup. Returns
     {"providers": [...], "items_with_capabilities": N, "total_items": M} —
     each provider dict is _format_provider's own shape plus "matched_items":
-    [{"id", "label"}, ...], naming exactly which checklist item(s) it
-    covers (the frontend builds the one-line "how this helps YOU" sentence
-    from that, not from anything generated here — see this module's own
-    "description is forwarded verbatim, never generated" rule; the same
-    discipline applies to the gap sentence: it quotes the item's own stored
-    label, never invents a paraphrase).
+    [{"id", "label", "source"}, ...], naming exactly which checklist
+    item(s) — and/or the project description — it covers (the frontend
+    builds the one-line "how this helps YOU" sentence from that, not from
+    anything generated here — see this module's own "description is
+    forwarded verbatim, never generated" rule; the same discipline applies
+    to the gap sentence: a checklist-sourced match quotes the item's own
+    stored label, a description-sourced match just says so, neither ever
+    invents a paraphrase). Providers come back RANKED by how many of this
+    project's needs they cover — see _attach_matched_items — highest first;
+    the frontend caps how many it shows.
 
     `items_with_capabilities` / `total_items` distinguish "nothing to
     search for" (no item has a matched capability) from "searched and found
     nothing" — both are legitimate zero-provider outcomes but mean
     different things to a caller deciding what to render (see this
     feature's own "genuinely no match" vs the exception path below).
+    `items_with_capabilities` counts checklist items only, same as before
+    this function learned about descriptions — the frontend route already
+    has the project's description_capabilities directly and folds it into
+    its own "has anything actually been assessed" decision (see
+    app/api/find-providers-for-project/route.ts).
 
     Raises the SAME way find_providers_for_capabilities does — a real
     catalog failure (the current 2026-08-23 outage, or any other) is NOT
@@ -557,10 +690,11 @@ async def find_providers_for_project_async(checklist_items: list[dict]) -> dict:
     distinct `error` field, same resilience contract as every other route
     in this module. This function returning normally always means the
     catalog answered, whether with providers or with nothing."""
-    all_caps, items_with_caps = find_providers_for_project(checklist_items)
+    all_caps, items_with_caps = find_providers_for_project(checklist_items, description_capabilities)
+    checklist_items_with_caps = [i for i in items_with_caps if i["id"] is not _DESCRIPTION_SOURCE_ID]
     if not all_caps:
         logger.info(
-            "find_provider project lookup: 0 of %d checklist item(s) have matched capabilities — nothing to search",
+            "find_provider project lookup: 0 of %d checklist item(s), no description capabilities — nothing to search",
             len(checklist_items),
         )
         return {"providers": [], "items_with_capabilities": 0, "total_items": len(checklist_items)}
@@ -568,11 +702,12 @@ async def find_providers_for_project_async(checklist_items: list[dict]) -> dict:
     providers = await find_providers_for_capabilities(all_caps, match_all=False)
     providers = _attach_matched_items(providers, items_with_caps)
     logger.info(
-        "find_provider project lookup: items_with_capabilities=%d/%d capabilities=%r providers=%d",
-        len(items_with_caps), len(checklist_items), all_caps, len(providers),
+        "find_provider project lookup: items_with_capabilities=%d/%d description_capabilities=%r "
+        "capabilities=%r providers=%d",
+        len(checklist_items_with_caps), len(checklist_items), description_capabilities or [], all_caps, len(providers),
     )
     return {
         "providers": providers,
-        "items_with_capabilities": len(items_with_caps),
+        "items_with_capabilities": len(checklist_items_with_caps),
         "total_items": len(checklist_items),
     }

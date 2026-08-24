@@ -9,7 +9,12 @@ import type { FindProvidersForProjectResponse } from "@/types/provider";
 // POST /api/find-providers-for-project). Same proxy pattern as
 // /api/find-provider, one level up: instead of one checklist item's
 // capabilities, this forwards EVERY item's — id, label, and
-// matched_capabilities, all already stored, all already classified.
+// matched_capabilities, all already stored, all already classified — PLUS
+// the project's own description_capabilities, classified the same way at
+// project-creation time (see lib/server/projects.ts's createProject()).
+// Both feed the same section; a provider matched from the description is
+// tagged "source": "description" rather than "checklist" so the UI can say
+// which.
 //
 // ZERO LLM CALLS, ZERO NEW CLASSIFICATION. Same reasoning as
 // /api/find-provider's own comment: matched_capabilities was computed once
@@ -56,20 +61,33 @@ export async function POST(req: Request) {
     label: item.label,
     matched_capabilities: item.matched_capabilities,
   }));
+  const descriptionCapabilities = result.project.description_capabilities;
+  // Has ANYTHING about this project actually been assessed yet? Never
+  // classified (null, see ProjectDetail's own comment on what that means)
+  // AND no checklist items at all is the one case where the section has
+  // literally nothing to go on — not "assessed, found nothing," but
+  // "hasn't looked." WhoCanHelpSection uses this to say the section will
+  // fill in as the project takes shape, instead of the wrong-sounding
+  // "nothing needs outside help" a brand-new project used to get before it
+  // had a chance to be assessed at all.
+  const assessed = descriptionCapabilities !== null || checklistItems.length > 0;
 
   // Nothing to search — the section shouldn't even be fetching for a
-  // project with no checklist items at all, but handle it defensively
-  // rather than spend a round trip to the backend proving what's already
-  // known.
-  if (checklistItems.length === 0) {
-    return NextResponse.json({ providers: [], items_with_capabilities: 0, total_items: 0 });
+  // project with no checklist items AND nothing (or nothing yet) from its
+  // description, but handle it defensively rather than spend a round trip
+  // to the backend proving what's already known.
+  if (checklistItems.length === 0 && !descriptionCapabilities?.length) {
+    return NextResponse.json({ providers: [], items_with_capabilities: 0, total_items: 0, assessed });
   }
 
   try {
     const res = await fetch(`${EXPLORE_API_URL}/api/find-providers-for-project`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ checklist_items: checklistItems }),
+      body: JSON.stringify({
+        checklist_items: checklistItems,
+        description_capabilities: descriptionCapabilities,
+      }),
     });
     if (!res.ok) throw new Error(`find-providers-for-project backend responded ${res.status}`);
 
@@ -80,6 +98,7 @@ export async function POST(req: Request) {
       providers: data.providers ?? [],
       items_with_capabilities: data.items_with_capabilities ?? 0,
       total_items: data.total_items ?? checklistItems.length,
+      assessed,
     });
   } catch {
     return NextResponse.json(
@@ -87,6 +106,7 @@ export async function POST(req: Request) {
         providers: [],
         items_with_capabilities: 0,
         total_items: checklistItems.length,
+        assessed,
         error: true,
       },
       { status: 200 }

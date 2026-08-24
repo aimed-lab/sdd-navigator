@@ -148,6 +148,20 @@ export type ProjectDetail = {
   id: string;
   name: string;
   description: string | null;
+  // The STORED result of classifying `description` against the provider
+  // catalog's capability vocabulary — same prompt, same
+  // _ALREADY_HAVE_SIGNALS grounding gate as a checklist item's own
+  // matched_capabilities (see lib/server/checklistClassify.ts), just run
+  // once against the description instead of an item label. Computed at
+  // createProject() time — the only place description is ever set, there
+  // being no edit path for it today — and NEVER re-derived at read time,
+  // same "store once, read forever" contract as the checklist. null means
+  // "never classified" (a project created before this column existed, or
+  // whose creation-time classification call itself failed); [] means
+  // "classified, confidently nothing to outsource" — that distinction is
+  // exactly why this is nullable where matched_capabilities is not (see
+  // database/migrations/2026-08-24_project_description_capabilities.sql).
+  description_capabilities: string[] | null;
   deadline: string | null;
   challenge_key: string | null;
   target: string | null;
@@ -399,7 +413,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   const { data: projectRow, error: projectErr } = await db
     .from("projects")
     .select(
-      "id, name, description, lead_id, deadline, challenge_key, target, indication, modality, stage, " +
+      "id, name, description, description_capabilities, lead_id, deadline, challenge_key, target, indication, modality, stage, " +
         "shared_folder_url, shared_folder_set_by, shared_folder_set_at"
     )
     .eq("id", id)
@@ -529,6 +543,9 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       id: row.id as string,
       name: row.name as string,
       description: (row.description as string | null) ?? null,
+      description_capabilities: Array.isArray(row.description_capabilities)
+        ? (row.description_capabilities as string[])
+        : null,
       deadline: (row.deadline as string | null) ?? null,
       challenge_key: (row.challenge_key as string | null) ?? null,
       target: (row.target as string | null) ?? null,
@@ -642,15 +659,37 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
   const name = input.name.trim();
   if (!name) return { status: "error", error: "A project name is required." };
 
+  const description = input.description?.trim() || null;
+
+  // Classify the description the SAME way a checklist item's label is
+  // classified — same prompt, same _ALREADY_HAVE_SIGNALS grounding gate
+  // (see checklistClassify.ts / find_provider.py's shared mapping step) —
+  // so "Who can help" has something real to show before a single checklist
+  // item exists. This is THE save action this feature hooks: description
+  // has no edit path anywhere in the frontend today, so creation is the
+  // only time it's ever set, and therefore the only time it needs
+  // classifying. classificationFailed is intentionally not surfaced to the
+  // caller here (a classification hiccup must never block project
+  // creation, same as it never blocks a checklist add) — a failure simply
+  // leaves description_capabilities NULL (see ProjectDetail's own comment
+  // on what NULL vs [] means here), same as a project created before this
+  // column existed.
+  let descriptionCapabilities: string[] | null = null;
+  if (description) {
+    const { capabilities, classificationFailed } = await classifyChecklistItem(description);
+    descriptionCapabilities = classificationFailed ? null : capabilities;
+  }
+
   const { data, error } = await db.rpc("create_project_with_lead", {
     p_name: name,
-    p_description: input.description?.trim() || null,
+    p_description: description,
     p_deadline: input.deadline || null,
     p_challenge_key: input.challenge_key || null,
     p_target: input.target?.trim() || null,
     p_indication: input.indication?.trim() || null,
     p_modality: input.modality || null,
     p_stage: input.stage || null,
+    p_description_capabilities: descriptionCapabilities,
   });
 
   if (error || !data) {

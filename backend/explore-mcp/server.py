@@ -888,12 +888,16 @@ async def find_providers_for_project_http(request):
     Deliberately NOT an MCP tool and NOT registered in explore()'s routing
     — same reasoning as the other two routes in this module.
 
-      POST { "checklist_items": [{"id", "label", "matched_capabilities"}, ...] } ->
+      POST { "checklist_items": [{"id", "label", "matched_capabilities"}, ...],
+             "description_capabilities": [...] | null } ->
         { providers: [...], items_with_capabilities, total_items }
 
-    `checklist_items` comes from the project's own STORED checklist rows
-    (see frontend/lib/server/projects.ts) — this route does not classify,
-    it only searches and cross-references.
+    `checklist_items` comes from the project's own STORED checklist rows,
+    and `description_capabilities` from the project's own STORED
+    classification of its description text (see
+    frontend/lib/server/projects.ts) — this route does not classify, it
+    only searches and cross-references. A provider's `matched_items` in the
+    response names both sources (`"source": "checklist" | "description"`).
 
     Auth (EXPLORE_API_TOKEN) is enforced ahead of this handler by
     BearerAuthMiddleware. Project MEMBERSHIP is enforced by the Next.js
@@ -920,9 +924,18 @@ async def find_providers_for_project_http(request):
         for i in raw_items
         if isinstance(i, dict)
     ] if isinstance(raw_items, list) else []
+    # Same "already-classified, stored" contract as checklist_items' own
+    # matched_capabilities — see frontend/lib/server/projects.ts's
+    # description_capabilities and this module's own find_providers_for_
+    # project_async docstring. Absent/malformed degrades to None, same as
+    # "never classified".
+    raw_desc_caps = body.get("description_capabilities") if isinstance(body, dict) else None
+    description_capabilities = (
+        [c for c in raw_desc_caps if isinstance(c, str)] if isinstance(raw_desc_caps, list) else None
+    )
 
     try:
-        result = await find_providers_for_project_async(checklist_items)
+        result = await find_providers_for_project_async(checklist_items, description_capabilities)
         return JSONResponse(result)
     except Exception as exc:
         logger.exception(

@@ -35,16 +35,26 @@ export type FindProviderResponse = {
 // ── project-level lookup (POST /api/find-providers-for-project) ────────────
 //
 // The SAME matcher as FindProviderResponse above, applied to the union of
-// capability terms already stored across a project's checklist items — see
-// backend/explore-mcp/tools/find_provider.py's find_providers_for_project_
-// async(). Zero new LLM calls, zero new classification.
+// capability terms already stored across a project's checklist items AND
+// the project's own description — see backend/explore-mcp/tools/
+// find_provider.py's find_providers_for_project_async(). Zero new LLM
+// calls, zero new classification: both sources were classified once, at
+// write time (checklist item add/edit, or project creation).
 
-/** One checklist item a provider was matched against — `label` is quoted
- *  directly in the UI's one-line "how this helps you" sentence, never
- *  paraphrased (same "never generate, only quote/forward verbatim"
- *  discipline as `description` above — a paraphrase would need an LLM call
- *  this feature deliberately doesn't spend). */
-export type MatchedChecklistItem = { id: string; label: string };
+/** One checklist item — or the project's own description — a provider was
+ *  matched against. For a checklist match, `label` is quoted directly in
+ *  the UI's one-line "how this helps you" sentence, never paraphrased
+ *  (same "never generate, only quote/forward verbatim" discipline as
+ *  `description` above — a paraphrase would need an LLM call this feature
+ *  deliberately doesn't spend). For a description match, `id`/`label` are
+ *  both null — the description has no single label to quote, so the UI
+ *  says "your project description" instead (see WhoCanHelpSection.tsx's
+ *  buildGapLine); `source` is what tells the two apart. */
+export type MatchedChecklistItem = {
+  id: string | null;
+  label: string | null;
+  source: "checklist" | "description";
+};
 
 export type ProjectProvider = Provider & {
   // Every checklist item this provider covers, computed by intersecting
@@ -64,5 +74,11 @@ export type FindProvidersForProjectResponse = {
   // change.
   items_with_capabilities?: number;
   total_items?: number;
+  // Set by the Next.js proxy route (not the Python backend), from data the
+  // route already has: has ANYTHING about this project been assessed yet —
+  // description_capabilities !== null, or at least one checklist item?
+  // false is the one case where "no providers" must NOT read as "nothing
+  // needed" — see WhoCanHelpSection.tsx.
+  assessed?: boolean;
   error?: boolean | string;
 };
