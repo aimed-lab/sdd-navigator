@@ -162,6 +162,15 @@ export type ProjectDetail = {
   // exactly why this is nullable where matched_capabilities is not (see
   // database/migrations/2026-08-24_project_description_capabilities.sql).
   description_capabilities: string[] | null;
+  // Which CLASSIFIER_GATE_VERSION produced description_capabilities — see
+  // checklistClassify.ts's CURRENT_CLASSIFIER_GATE_VERSION and
+  // database/migrations/2026-08-24_description_capabilities_gate_version.sql.
+  // null alongside description_capabilities=null means "never classified";
+  // a non-null description_capabilities whose version is BEHIND the
+  // current one means "classified, but under a gate we've since fixed" —
+  // find-providers-for-project's route treats that the same as
+  // unclassified, not as a trustworthy answer, until it's reclassified.
+  description_capabilities_gate_version: number | null;
   deadline: string | null;
   challenge_key: string | null;
   target: string | null;
@@ -413,7 +422,8 @@ export async function getProject(id: string): Promise<GetProjectResult> {
   const { data: projectRow, error: projectErr } = await db
     .from("projects")
     .select(
-      "id, name, description, description_capabilities, lead_id, deadline, challenge_key, target, indication, modality, stage, " +
+      "id, name, description, description_capabilities, description_capabilities_gate_version, " +
+        "lead_id, deadline, challenge_key, target, indication, modality, stage, " +
         "shared_folder_url, shared_folder_set_by, shared_folder_set_at"
     )
     .eq("id", id)
@@ -546,6 +556,8 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       description_capabilities: Array.isArray(row.description_capabilities)
         ? (row.description_capabilities as string[])
         : null,
+      description_capabilities_gate_version:
+        (row.description_capabilities_gate_version as number | null) ?? null,
       deadline: (row.deadline as string | null) ?? null,
       challenge_key: (row.challenge_key as string | null) ?? null,
       target: (row.target as string | null) ?? null,
@@ -675,9 +687,16 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
   // on what NULL vs [] means here), same as a project created before this
   // column existed.
   let descriptionCapabilities: string[] | null = null;
+  let descriptionCapabilitiesGateVersion: number | null = null;
   if (description) {
-    const { capabilities, classificationFailed } = await classifyChecklistItem(description);
+    const { capabilities, classificationFailed, gateVersion } =
+      await classifyChecklistItem(description);
+    // Store the pair together, or neither — a capabilities list without
+    // the version that produced it is exactly the ambiguity this column
+    // exists to remove (see ProjectDetail's own comment on
+    // description_capabilities_gate_version).
     descriptionCapabilities = classificationFailed ? null : capabilities;
+    descriptionCapabilitiesGateVersion = classificationFailed ? null : gateVersion;
   }
 
   const { data, error } = await db.rpc("create_project_with_lead", {
@@ -690,6 +709,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     p_modality: input.modality || null,
     p_stage: input.stage || null,
     p_description_capabilities: descriptionCapabilities,
+    p_description_capabilities_gate_version: descriptionCapabilitiesGateVersion,
   });
 
   if (error || !data) {

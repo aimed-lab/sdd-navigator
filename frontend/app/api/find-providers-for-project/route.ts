@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getProject } from "@/lib/server/projects";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { CURRENT_CLASSIFIER_GATE_VERSION } from "@/lib/server/checklistClassify";
 import type { FindProvidersForProjectResponse } from "@/types/provider";
 
 // Proxy for the Python backend's project-level "who can help with this
@@ -61,21 +62,37 @@ export async function POST(req: Request) {
     label: item.label,
     matched_capabilities: item.matched_capabilities,
   }));
-  const descriptionCapabilities = result.project.description_capabilities;
-  // Has ANYTHING about this project actually been assessed yet? Never
-  // classified (null, see ProjectDetail's own comment on what that means)
-  // AND no checklist items at all is the one case where the section has
-  // literally nothing to go on — not "assessed, found nothing," but
-  // "hasn't looked." WhoCanHelpSection uses this to say the section will
-  // fill in as the project takes shape, instead of the wrong-sounding
-  // "nothing needs outside help" a brand-new project used to get before it
-  // had a chance to be assessed at all.
+  // A description_capabilities value is only trustworthy if it was
+  // classified under the gate this deploy is currently running — see
+  // ProjectDetail's own comment on description_capabilities_gate_version.
+  // A STALE value (classified under an older gate we've since fixed, like
+  // the 2026-08-24 whole-text-vs-sentence-scoping change) is treated
+  // exactly like "never classified": not forwarded to the search, and not
+  // counted toward `assessed` below. Surfacing a stale answer — even
+  // "correctly" empty under a since-fixed gate — is exactly the ambiguity
+  // this column exists to remove; better to say "hasn't been assessed"
+  // and let a future backfill (or, once one exists, an edit) fix it for
+  // real than to quietly trust a number that might be wrong.
+  const descriptionCurrent =
+    result.project.description_capabilities !== null &&
+    result.project.description_capabilities_gate_version === CURRENT_CLASSIFIER_GATE_VERSION;
+  const descriptionCapabilities = descriptionCurrent ? result.project.description_capabilities : null;
+
+  // Has ANYTHING about this project actually been assessed yet, under
+  // logic we currently trust? Never classified — or classified but stale,
+  // see descriptionCurrent above — AND no checklist items at all is the
+  // one case where the section has literally nothing to go on — not
+  // "assessed, found nothing," but "hasn't looked." WhoCanHelpSection uses
+  // this to say the section will fill in as the project takes shape,
+  // instead of the wrong-sounding "nothing needs outside help" a
+  // brand-new (or not-yet-backfilled) project used to get before it had a
+  // chance to be assessed at all.
   const assessed = descriptionCapabilities !== null || checklistItems.length > 0;
 
   // Nothing to search — the section shouldn't even be fetching for a
-  // project with no checklist items AND nothing (or nothing yet) from its
-  // description, but handle it defensively rather than spend a round trip
-  // to the backend proving what's already known.
+  // project with no checklist items AND nothing (or nothing trustworthy
+  // yet) from its description, but handle it defensively rather than
+  // spend a round trip to the backend proving what's already known.
   if (checklistItems.length === 0 && !descriptionCapabilities?.length) {
     return NextResponse.json({ providers: [], items_with_capabilities: 0, total_items: 0, assessed });
   }

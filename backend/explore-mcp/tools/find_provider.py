@@ -97,6 +97,30 @@ _JSON_RETRY_BACKOFF_SEC = 2.0
 
 FIND_PROVIDERS_LIMIT = 25
 
+# CLASSIFICATION GATE VERSION — bump this integer whenever
+# _MAPPING_SYSTEM_TEMPLATE or the already-have-it grounding gate
+# (_has_already_have_signal, below) changes materially enough that a stored
+# classification computed under the OLD version should no longer be trusted
+# as current. This is what lets a caller who only stores 0-3 capability
+# terms (checklist_items.matched_capabilities, projects.
+# description_capabilities) tell "classified, confidently nothing" apart
+# from "classified before we fixed a known bug" apart from "never
+# classified at all" — three states an empty array alone cannot distinguish
+# (see database/migrations/2026-08-24_description_capabilities_gate_version.sql
+# for the incident this fixes: a project's description is classified ONCE,
+# at creation, with no edit path to ever re-trigger it, so a gate fix has no
+# way to reach an existing project without this). 1 = the sentence-scoped
+# already-have-it gate (2026-08-24) — the version this whole mechanism was
+# introduced alongside, so every classification from here forward carries a
+# real number instead of an implicit, unrecorded "whatever the code did
+# that day." Bump on: a change to _ALREADY_HAVE_SIGNALS, to how the gate
+# scopes text (sentence vs whole-text), or to _MAPPING_SYSTEM_TEMPLATE's own
+# wording that could plausibly change what gets matched. Do NOT bump for
+# unrelated changes in this module (catalog search, provider formatting,
+# ranking) — those don't touch what capabilities get matched in the first
+# place, so a value computed before them is still current after.
+CLASSIFIER_GATE_VERSION = 1
+
 
 def _redact_url(url: str) -> str:
     """Scheme+host+path only, matching sources/base.py's convention. No
@@ -496,23 +520,27 @@ async def classify_checklist_item_async(item_text: str) -> dict:
     LLM. Called once, at checklist-item create/edit time (see
     frontend/lib/server/projects.ts) — never at page-load or click time.
 
-    Returns {item_text, matched_capabilities}. matched_capabilities == [] IS
-    the "needs a person / an internal task, not a service" signal — never
-    raises for that normal outcome. DOES raise on a genuine service failure
-    (vocab fetch failed, the LLM call itself failing outright) — the HTTP
-    route in server.py turns that into a degraded (matched_capabilities=[],
+    Returns {item_text, matched_capabilities, gate_version}. matched_capabilities
+    == [] IS the "needs a person / an internal task, not a service" signal —
+    never raises for that normal outcome. DOES raise on a genuine service
+    failure (vocab fetch failed, the LLM call itself failing outright) — the
+    HTTP route in server.py turns that into a degraded (matched_capabilities=[],
     the safe fallback) response, same resilience contract as the rest of
-    this service.
+    this service. `gate_version` is CLASSIFIER_GATE_VERSION — see that
+    constant's own comment for why a caller that stores this result (a
+    project's description_capabilities, in particular — checklist items are
+    re-classified on every edit and don't currently need this) should store
+    the version alongside it, not just the capability list.
 
     Logs once: item text, matched terms."""
     text = (item_text or "").strip()
     if not text:
-        return {"item_text": item_text, "matched_capabilities": []}
+        return {"item_text": item_text, "matched_capabilities": [], "gate_version": None}
 
     vocab = await list_capabilities_async()
     matched = _map_item_to_capabilities(text, vocab)
     logger.info("find_provider classify: item=%r matched=%r", text, matched)
-    return {"item_text": item_text, "matched_capabilities": matched}
+    return {"item_text": item_text, "matched_capabilities": matched, "gate_version": CLASSIFIER_GATE_VERSION}
 
 
 async def find_providers_for_item_async(item_text: str, capabilities: list[str]) -> dict:
