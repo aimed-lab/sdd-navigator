@@ -76,11 +76,27 @@ MAX_CHECKLIST = 6        # cap on how many checklist items the agent proposes
 # usually a transient sampling hiccup, NOT a quota — a real 429/quota error
 # raises out of llm.complete() as an exception and is a SEPARATE code path
 # below (still not retried: hammering a quota error again immediately would
-# make it worse, not better). ONE retry, short backoff, on the JSON-unusable
-# path only. If the retry ALSO comes back unusable, this falls closed
-# exactly as before — no weakening of that guarantee, just fewer runs that
-# die to what's usually a one-off bad sample.
+# make it worse, not better).
+#
+# _MAX_JSON_ATTEMPTS = 4 (1 initial + 3 retries), short backoff between each
+# — was 2 (1 retry) until a live SPOP run failed closed twice in a row on
+# the reduce stage. Two attempts is thin for something probabilistic: if a
+# single attempt's true failure rate is p, two attempts fail (1-p)*... no —
+# fail on BOTH with probability p^2; going from 2 to 4 attempts takes that
+# to p^4, a large drop for any p worth worrying about, at the cost of at
+# most 3 extra ~2s-backoff round trips on the rare run that needs them. If
+# every attempt STILL comes back unusable, this falls closed exactly as
+# before — no weakening of that guarantee, just fewer runs that die to
+# what's usually a one-off bad sample.
+_MAX_JSON_ATTEMPTS = 4
 _JSON_RETRY_BACKOFF_SEC = 2.0
+
+# How much of a malformed response to log verbatim when parsing fails —
+# enough to tell truncated-mid-object apart from prose-wrapped or
+# code-fenced apart from genuinely invalid, without dumping an entire
+# multi-KB response (candidate lists included) into the log on every
+# transient sampling hiccup.
+_MALFORMED_LOG_CHARS = 500
 
 
 # ── input shaping ─────────────────────────────────────────────────────────────
@@ -121,13 +137,29 @@ def _goal_summary(project: dict) -> str:
 
 
 def _loads_lenient(content: str | None) -> dict:
+    """Tolerates the two common ways a model violates "no prose, no code
+    fences" while still having written valid JSON underneath: a ```/```json
+    fence wrapped around the object, and/or leading or trailing prose
+    ("Here's the result: {...}", "{...}\n\nLet me know if you need more.").
+    Stripped BEFORE the first json.loads attempt, not just as a last
+    resort — a fenced-and/or-prose-wrapped response is otherwise perfectly
+    valid JSON, not a real parse failure.
+
+    What this does NOT and cannot fix: a response truncated mid-object
+    (cut off before its closing brace). No amount of string surgery
+    recovers data that was never generated — that failure mode is what the
+    retry loop and the simpler {"selected_ids": [...]} reduce-stage shape
+    (see _RELEVANCE_SYSTEM) are for, not this function."""
     if not content:
         return {}
+    text = content.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
     try:
-        return json.loads(content)
+        return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         pass
-    m = re.search(r"\{.*\}", content, re.DOTALL)
+    m = re.search(r"\{.*\}", text, re.DOTALL)
     if m:
         try:
             return json.loads(m.group(0))
@@ -377,32 +409,47 @@ _MAP_SYSTEM = (
     "from the candidate list. No prose, no code fences."
 )
 
-# This is now the REDUCE-stage prompt (see the module docstring above) —
-# unchanged from before batching existed. It runs over the bounded,
-# pre-scored survivor pool _select_relevant assembles below, with full
-# cross-item visibility, and is where the actual `selected` decision and
-# diversity cap (_apply_kind_cap) still happen, exactly as before today.
+# This is the REDUCE-stage prompt (see the module docstring above). It runs
+# over the bounded, pre-scored survivor pool _select_relevant assembles
+# below, with full cross-item visibility, and is where the diversity cap
+# (_apply_kind_cap) happens.
+#
+# ASKS FOR IDS ONLY, NOT {id, reason} PAIRS — this changed after a live SPOP
+# run failed closed twice in a row on unusable JSON. Diagnosis: this stage
+# was doing a strictly harder generation job than the MAP stage ever does.
+# MAP scores each item in a small batch (~11-30 items) INDEPENDENTLY — no
+# cross-item comparison, one mechanical 0-10 judgment per item. REDUCE holds
+# up to _REDUCE_TOKEN_BUDGET (~54 items on a paper-heavy pool) in view AT
+# ONCE and has to rank across all of them, enforce an 8-item cap, AND write
+# a fresh one-sentence justification for every pick, in one holistic
+# completion — a much longer, harder-to-get-exactly-right generation, with
+# far more surface area for a truncation or formatting slip than MAP's
+# short per-item scores ever have. The old prompt also had the model
+# RE-WRITE a reason from scratch for every finalist, discarding the
+# perfectly good, already-goal-grounded `reason` MAP already wrote for it
+# (see _try_map_batch_once) — pure wasted generation, and wasted surface
+# area for exactly the kind of mistake this bug report is about. This
+# version asks for nothing but a short list of ids; _select_relevant reuses
+# each survivor's own MAP-stage reason on the way out (see reduce_by_id
+# below) rather than asking for a second one.
 _RELEVANCE_SYSTEM = (
     "You are a research assistant helping a lab team decide what to save to their "
     "project. You will be given the team's stated GOAL and a list of candidate "
-    "items found by searching papers, news, trials, grants, tools, datasets, gene "
-    "sets, internal lab resources, people and wiki pages.\n\n"
-    "Select ONLY the items that are genuinely relevant to what the team said they "
-    "are trying to do — judge against the GOAL, not just topical overlap with a "
-    "keyword. Skip anything generic or tangential. For each item you select, "
-    "write ONE SHORT SENTENCE explaining why it matters for THIS project's goal "
-    "specifically.\n\n"
+    "items that already passed an initial relevance screen — each carries a "
+    "`reason` a teammate already wrote for why it might matter, tied to the GOAL.\n\n"
+    "Your ONLY job here is picking the final DIVERSE shortlist from this list — "
+    "not writing new reasons, not re-judging relevance from scratch.\n\n"
     "PREFER A DIVERSE SELECTION when multiple kinds of candidate are genuinely "
     "relevant — a paper, a dataset, a gene set and a tool that are each relevant "
     "beat five relevant papers and nothing else. Do not let one kind (papers, "
     "most often) fill every slot just because that kind happens to have the most "
     "candidates; a candidate list dominated by papers is a fact about how the "
     "search works, not a sign that only papers are worth proposing.\n\n"
-    f"Select at most {MAX_SELECTED} items — fewer is fine if fewer are genuinely "
-    "relevant. Never select an item just to fill the quota.\n\n"
-    'Return ONLY a JSON object: {"selected": [{"id": "<item id>", "reason": '
-    '"<one sentence>"}, ...]}. Use the exact `id` field from the candidate list. '
-    "No prose, no code fences."
+    f"Select at most {MAX_SELECTED} ids, most relevant first — fewer is fine if "
+    "fewer are genuinely diverse-and-relevant. Never select an id just to fill "
+    "the quota.\n\n"
+    'Return ONLY a JSON object: {"selected_ids": ["<item id>", ...]}. Use the '
+    "exact `id` field from the candidate list. No prose, no code fences."
 )
 
 # THE GATE (same prompt-asks-code-enforces pattern as the checklist's
@@ -493,14 +540,26 @@ def _candidate_summary(item: dict) -> dict:
     }
 
 
+def _reduce_candidate_summary(item: dict) -> dict:
+    """Same as _candidate_summary, plus the MAP stage's own `reason` — the
+    REDUCE prompt shows this so a diversity pick can be informed by why an
+    item mattered, without asking the model to write that sentence itself
+    (see _RELEVANCE_SYSTEM's own note on why REDUCE stopped doing that)."""
+    return {**_candidate_summary(item), "reason": item.get("reason")}
+
+
 def _try_select_relevant_once(
     goal_summary: str, trimmed: list[dict], by_id: dict[str, dict]
 ) -> list[dict] | None:
-    """One attempt at the relevance call + parse. Returns the selected items
-    on success, or None if the JSON came back unusable (caller decides
-    whether to retry). Raises on an actual LLM-call failure (a real
-    exception, e.g. a quota error) — that's a distinct failure class the
-    caller does NOT retry, see the module-level note on _JSON_RETRY_BACKOFF_SEC."""
+    """One attempt at the final diversity-selection call + parse. `by_id`
+    here is REDUCE's own survivor map (see _select_relevant) — each value
+    already carries the MAP stage's `reason` and `_map_score`, so a
+    selected item is returned as-is (minus the internal `_map_score`), no
+    second reason ever generated here. Returns the selected items on
+    success, or None if the JSON came back unusable (caller decides whether
+    to retry). Raises on an actual LLM-call failure (a real exception, e.g.
+    a quota error) — that's a distinct failure class the caller does NOT
+    retry, see the module-level note on _JSON_RETRY_BACKOFF_SEC."""
     resp = llm.complete(
         [
             {"role": "system", "content": _RELEVANCE_SYSTEM},
@@ -508,16 +567,26 @@ def _try_select_relevant_once(
                 "role": "user",
                 "content": (
                     f"GOAL: {goal_summary}\n\n"
-                    f"Candidate items:\n{json.dumps(trimmed)}\n\n"
-                    'Return ONLY {"selected": [{"id": "...", "reason": "..."}]}.'
+                    f"Candidate items (each already has a reason):\n{json.dumps(trimmed)}\n\n"
+                    'Return ONLY {"selected_ids": ["...", ...]}.'
                 ),
             },
         ],
         temperature=0.2,
     )
     data = _loads_lenient(resp.content)
-    raw = data.get("selected") if isinstance(data, dict) else None
+    raw = data.get("selected_ids") if isinstance(data, dict) else None
     if not isinstance(raw, list):
+        # LOG THE ACTUAL MALFORMED OUTPUT, truncated — this is what was
+        # missing when a live SPOP run failed closed twice in a row with no
+        # way to tell truncated-mid-object, prose-wrapped, code-fenced, or
+        # genuinely invalid apart. _loads_lenient already tolerates fences
+        # and surrounding prose (see its own docstring), so if THIS still
+        # fired, whatever's below is either truncated or not JSON at all.
+        logger.warning(
+            "project_agent: reduce-stage relevance JSON unusable — raw response (truncated to %d chars): %r",
+            _MALFORMED_LOG_CHARS, (resp.content or "")[:_MALFORMED_LOG_CHARS],
+        )
         return None
     # No MAX_SELECTED cutoff in this loop — _apply_kind_cap below needs the
     # model's FULL ranked list (still capped implicitly by the model's own
@@ -525,17 +594,11 @@ def _try_select_relevant_once(
     # here) to decide what to keep vs. backfill from.
     out: list[dict] = []
     seen: set[str] = set()
-    for entry in raw:
-        if not isinstance(entry, dict):
-            continue
-        item_id = entry.get("id")
-        reason = entry.get("reason")
+    for item_id in raw:
         if not isinstance(item_id, str) or item_id not in by_id or item_id in seen:
             continue
-        if not isinstance(reason, str) or not reason.strip():
-            continue
         seen.add(item_id)
-        out.append({**by_id[item_id], "reason": reason.strip()})
+        out.append({k: v for k, v in by_id[item_id].items() if k != "_map_score"})
     out = _apply_kind_cap(out)
     return out or None
 
@@ -595,6 +658,10 @@ def _try_map_batch_once(goal_summary: str, batch: list[dict], by_id: dict[str, d
     data = _loads_lenient(resp.content)
     raw = data.get("scored") if isinstance(data, dict) else None
     if not isinstance(raw, list):
+        logger.warning(
+            "project_agent: map batch JSON unusable — raw response (truncated to %d chars): %r",
+            _MALFORMED_LOG_CHARS, (resp.content or "")[:_MALFORMED_LOG_CHARS],
+        )
         return None
     out: list[dict] = []
     seen: set[str] = set()
@@ -615,32 +682,51 @@ def _try_map_batch_once(goal_summary: str, batch: list[dict], by_id: dict[str, d
     return out
 
 
+def _call_with_json_retry(attempt_fn, label: str) -> list[dict] | None:
+    """Shared retry policy for both MAP and REDUCE's JSON-unusable path: up
+    to _MAX_JSON_ATTEMPTS attempts (was a single hand-rolled retry, i.e. 2
+    attempts total, duplicated once per stage — see _MAX_JSON_ATTEMPTS's own
+    module-level note for why that changed), short backoff between each.
+    `attempt_fn` raises on a real LLM-call failure (a 429/quota/etc) — the
+    caller decides whether that's retried (it currently is not, same as
+    before; llm.py's own 429 handling is a separate retry class already).
+    Returns the first non-None result, or None if every attempt's JSON came
+    back unusable — `attempt_fn` itself already logs the raw response on
+    each unusable attempt (see _try_map_batch_once / _try_select_relevant_once)."""
+    for attempt in range(1, _MAX_JSON_ATTEMPTS + 1):
+        out = attempt_fn()
+        if out is not None:
+            if attempt > 1:
+                logger.info(
+                    "project_agent: %s JSON usable on attempt %d/%d", label, attempt, _MAX_JSON_ATTEMPTS
+                )
+            return out
+        if attempt < _MAX_JSON_ATTEMPTS:
+            logger.warning(
+                "project_agent: %s JSON unusable (attempt %d/%d), retrying", label, attempt, _MAX_JSON_ATTEMPTS
+            )
+            time.sleep(_JSON_RETRY_BACKOFF_SEC)
+    logger.warning("project_agent: %s JSON unusable after %d attempt(s)", label, _MAX_JSON_ATTEMPTS)
+    return None
+
+
 def _map_batch(goal_summary: str, batch: list[dict], by_id: dict[str, dict], batch_label: str) -> list[dict]:
-    """One batch's full attempt, including the standard one-retry-on-bad-
-    JSON policy. A batch that fails outright (bad JSON twice, or a real
-    LLM-call exception) contributes NOTHING to the survivor pool and logs a
-    warning NAMING which batch — it does not fail the whole run. REDUCE
-    still runs over whatever the OTHER batches produced; only if every
-    batch fails does the pool end up empty, which is handled the same way
-    as "no candidates found" always has been."""
+    """One batch's full attempt, including the shared JSON-retry policy. A
+    batch that fails outright (bad JSON on every attempt, or a real
+    LLM-call exception) contributes NOTHING to the survivor pool — it does
+    not fail the whole run. REDUCE still runs over whatever the OTHER
+    batches produced; only if every batch fails does the pool end up empty,
+    which is handled the same way as "no candidates found" always has been."""
     try:
-        out = _try_map_batch_once(goal_summary, batch, by_id)
-        if out is not None:
-            return out
-        logger.warning("project_agent: map batch %s JSON unusable (attempt 1/2), retrying once", batch_label)
-        time.sleep(_JSON_RETRY_BACKOFF_SEC)
-        out = _try_map_batch_once(goal_summary, batch, by_id)
-        if out is not None:
-            return out
-        logger.warning(
-            "project_agent: map batch %s JSON unusable (attempt 2/2) — this batch contributes nothing",
-            batch_label,
-        )
+        return _call_with_json_retry(
+            lambda: _try_map_batch_once(goal_summary, batch, by_id),
+            label=f"map batch {batch_label}",
+        ) or []
     except Exception:
         logger.exception(
             "project_agent: map batch %s LLM call failed — this batch contributes nothing", batch_label
         )
-    return []
+        return []
 
 
 def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[dict], bool]:
@@ -684,7 +770,19 @@ def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[di
     # fixed token budget (not a flat item count — same reasoning as the MAP
     # batches themselves) so this stage's prompt size is constant regardless
     # of how many total candidates or sources exist.
+    #
+    # survivor_by_id, NOT by_id — a survivor already carries the MAP stage's
+    # own `reason` (and `_map_score`); REDUCE reuses that reason on the way
+    # out instead of asking the model to write a new one (see
+    # _RELEVANCE_SYSTEM's own note on why). A dict comprehension over
+    # already-sorted `survivors` keeps the HIGHEST-scoring copy of an id
+    # that appears more than once (shouldn't happen — _flatten_candidates
+    # dedupes upstream — but cheap to be safe about).
     survivors.sort(key=lambda s: s["_map_score"], reverse=True)
+    survivor_by_id: dict[str, dict] = {}
+    for s in survivors:
+        survivor_by_id.setdefault(s["id"], s)
+
     reduce_ids: list[str] = []
     reduce_tokens = 0
     seen_ids: set[str] = set()
@@ -692,29 +790,23 @@ def _select_relevant(goal_summary: str, candidates: list[dict]) -> tuple[list[di
         item_id = s["id"]
         if item_id in seen_ids:
             continue
-        item_tokens = _estimate_tokens(json.dumps(_candidate_summary(by_id[item_id])))
+        item_tokens = _estimate_tokens(json.dumps(_reduce_candidate_summary(survivor_by_id[item_id])))
         if reduce_ids and reduce_tokens + item_tokens > _REDUCE_TOKEN_BUDGET:
             break
         seen_ids.add(item_id)
         reduce_ids.append(item_id)
         reduce_tokens += item_tokens
 
-    reduce_by_id = {item_id: by_id[item_id] for item_id in reduce_ids}
-    reduce_trimmed = [_candidate_summary(reduce_by_id[item_id]) for item_id in reduce_ids]
+    reduce_by_id = {item_id: survivor_by_id[item_id] for item_id in reduce_ids}
+    reduce_trimmed = [_reduce_candidate_summary(reduce_by_id[item_id]) for item_id in reduce_ids]
 
     try:
-        out = _try_select_relevant_once(goal_summary, reduce_trimmed, reduce_by_id)
-        if out is not None:
-            return out, False
-        logger.warning("project_agent: reduce-stage relevance JSON unusable (attempt 1/2), retrying once")
-        time.sleep(_JSON_RETRY_BACKOFF_SEC)
-        out = _try_select_relevant_once(goal_summary, reduce_trimmed, reduce_by_id)
-        if out is not None:
-            logger.info("project_agent: reduce-stage relevance JSON usable on retry (attempt 2/2)")
-            return out, False
-        logger.warning(
-            "project_agent: reduce-stage relevance JSON unusable after retry — nothing will be proposed this run"
+        out = _call_with_json_retry(
+            lambda: _try_select_relevant_once(goal_summary, reduce_trimmed, reduce_by_id),
+            label="reduce-stage relevance",
         )
+        if out is not None:
+            return out, False
     except Exception:
         logger.exception(
             "project_agent: reduce-stage relevance LLM call failed — nothing will be proposed this run"
