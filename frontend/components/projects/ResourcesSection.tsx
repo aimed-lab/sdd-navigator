@@ -18,6 +18,7 @@ import { useState } from "react";
 import Link from "next/link";
 import ItemCard from "@/components/ItemCard";
 import type { ProjectResources } from "@/lib/server/projectResources";
+import { exportItems } from "@/lib/citations";
 
 const TILE_ICON: Record<string, string> = {
   paper: "article",
@@ -33,14 +34,17 @@ const TILE_ICON: Record<string, string> = {
 
 export default function ResourcesSection({
   projectId,
+  projectName,
   exploreHref,
   resources,
 }: {
   projectId: string;
+  projectName: string;
   exploreHref: string;
   resources: ProjectResources;
 }) {
   const [selectedKind, setSelectedKind] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const toggleKind = (kind: string) => {
     setSelectedKind((current) => (current === kind ? null : kind));
@@ -50,17 +54,67 @@ export default function ResourcesSection({
     ? resources.items.filter((item) => item.kind === selectedKind)
     : resources.recent;
 
+  // Export follows the tile filter, not the 3-item "recent" default view:
+  // the default view is a layout truncation, not something the user
+  // chose, so an unfiltered export downloads every saved item. A tile
+  // filter IS a deliberate choice, so a filtered export downloads only
+  // that kind.
+  const exportSet = selectedKind
+    ? resources.items.filter((item) => item.kind === selectedKind)
+    : resources.items;
+  const exportLabel = selectedKind
+    ? `Export ${exportSet.length} ${resources.tiles.find((t) => t.kind === selectedKind)?.label.toLowerCase() ?? "items"}`
+    : `Export all ${exportSet.length}`;
+
+  const handleExport = (format: "bibtex" | "ris") => {
+    exportItems(exportSet, format, projectName);
+    setExportOpen(false);
+  };
+
   return (
     <section className="mb-20">
       <div className="flex items-center justify-between mb-8">
         <h2 className="font-headline-md text-headline-md text-on-background">Resources</h2>
-        <Link
-          href={exploreHref}
-          className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2"
-        >
-          Explore for this project
-          <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          {resources.total > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setExportOpen((open) => !open)}
+                aria-expanded={exportOpen}
+                className="btn-outline px-4 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-[18px]">download</span>
+                {exportLabel}
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 mt-1 w-44 bg-surface-container-lowest border border-outline-variant/30 rounded-lg shadow-md z-10 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => handleExport("bibtex")}
+                    className="w-full text-left px-4 py-2.5 font-label-md text-label-md hover:bg-primary/10"
+                  >
+                    BibTeX (.bib)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport("ris")}
+                    className="w-full text-left px-4 py-2.5 font-label-md text-label-md hover:bg-primary/10"
+                  >
+                    RIS (.ris)
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <Link
+            href={exploreHref}
+            className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md flex items-center gap-2"
+          >
+            Explore for this project
+            <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+          </Link>
+        </div>
       </div>
 
       {resources.total === 0 ? (

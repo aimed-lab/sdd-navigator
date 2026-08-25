@@ -174,7 +174,12 @@ export default async function ProjectDetailPage({
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
-      <ResourcesSection projectId={project.id} exploreHref={exploreHref} resources={resources} />
+      <ResourcesSection
+        projectId={project.id}
+        projectName={project.name}
+        exploreHref={exploreHref}
+        resources={resources}
+      />
 
       <hr className="border-t border-outline-variant/30 w-full mb-16" />
 
