@@ -238,6 +238,7 @@ export default function WikiGraph({
   ghostLinks,
   missingNoteSuggestions,
   savedItemIds,
+  totalItems,
 }: {
   projectId: string;
   notes: WikiGraphNote[];
@@ -246,6 +247,18 @@ export default function WikiGraph({
   ghostLinks: WikiGraphGhostLink[];
   missingNoteSuggestions: MissingNoteSuggestion[];
   savedItemIds: string[];
+  // getProjectWikiGraph's own totalItems (every distinct item this project
+  // has ever retrieved) — passed through, NOT recomputed here. This used
+  // to be `notes.reduce((sum, n) => sum + n.evidence.length, 0) +
+  // unfiled.length + projectLevel.length`, which double-counts any item
+  // filed under more than one note (wiki_note_evidence is many-to-many —
+  // the same evidence item legitimately appears in two notes' `evidence`
+  // arrays, so summing note.evidence.length counts it twice). That's
+  // exactly how a real project showed "67" in the header above this panel
+  // and "70" here — one number, one source of truth, computed once
+  // server-side from a deduped item count, not summed twice from two
+  // different shapes of the same data.
+  totalItems: number;
 }) {
   const savedIdSet = useMemo(() => new Set(savedItemIds), [savedItemIds]);
   const { nodes: initialNodes, links } = useMemo(() => buildGraph(notes, ghostLinks), [notes, ghostLinks]);
@@ -258,15 +271,6 @@ export default function WikiGraph({
   // shown. See this feature's own note on that ordering.
   const [view, setView] = useState<"list" | "graph">("list");
   const simRef = useRef<d3.Simulation<GraphNode, undefined> | null>(null);
-
-  // Same number as getProjectWikiGraph's own totalItems (every distinct item
-  // this project has ever retrieved) — recomputed here from the props
-  // already on hand rather than threaded through as a second count that
-  // could drift from what's actually rendered.
-  const totalCount = useMemo(
-    () => notes.reduce((sum, n) => sum + n.evidence.length, 0) + unfiled.length + projectLevel.length,
-    [notes, unfiled, projectLevel]
-  );
 
   useEffect(() => {
     const sim = d3
@@ -335,7 +339,7 @@ export default function WikiGraph({
       <div className="glass-card rounded-2xl p-4 flex-1 min-w-0">
         <div className="flex items-start justify-between gap-4 mb-1 px-2">
           <p className="font-headline-sm text-headline-sm text-on-background">
-            {totalCount} item{totalCount === 1 ? "" : "s"} found
+            {totalItems} item{totalItems === 1 ? "" : "s"} found
           </p>
           <div className="flex items-center gap-1 bg-surface-container-low rounded-full p-1 shrink-0">
             <button
@@ -372,6 +376,7 @@ export default function WikiGraph({
             projectLevel={projectLevel}
             ghostLinks={ghostLinks}
             missingNoteSuggestions={missingNoteSuggestions}
+            totalItems={totalItems}
             selected={selected}
             onSelect={setSelected}
           />
@@ -504,6 +509,7 @@ function ListView({
   projectLevel,
   ghostLinks,
   missingNoteSuggestions,
+  totalItems,
   selected,
   onSelect,
 }: {
@@ -512,6 +518,7 @@ function ListView({
   projectLevel: EvidenceItemRow[];
   ghostLinks: WikiGraphGhostLink[];
   missingNoteSuggestions: MissingNoteSuggestion[];
+  totalItems: number;
   selected: Selected | null;
   onSelect: (s: Selected) => void;
 }) {
@@ -587,7 +594,26 @@ function ListView({
 
       {(unfiled.length > 0 || projectLevel.length > 0) && (
         <div>
-          <h2 className="font-label-md text-label-md text-secondary mb-2">Not filed under a note</h2>
+          <h2 className="font-label-md text-label-md text-secondary mb-1">Not filed under a note</h2>
+          {/* Moved here from the page's opening paragraph — a researcher's
+              first read of this page used to be "the agent failed to
+              organise most of what it found," which is the wrong headline
+              even when true, AND it's exactly where noticing the count
+              didn't match the panel below actually mattered. Down here the
+              same number sits next to the two rows it's the sum of, and
+              next to Ask for help / File — the thing to actually do about
+              it, not just a fact to read. */}
+          {totalItems > 0 &&
+            (() => {
+              const notFiled = unfiled.length + projectLevel.length;
+              const pct = Math.round((100 * notFiled) / totalItems);
+              return (
+                <p className="font-body-sm text-body-sm text-secondary mb-2">
+                  {pct}% of what was found ({notFiled} of {totalItems}) — browse below, or file an
+                  item into a note as you go.
+                </p>
+              );
+            })()}
           <div className="space-y-2">
             {unfiled.length > 0 && (
               <button

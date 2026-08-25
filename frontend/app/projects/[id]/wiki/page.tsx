@@ -75,13 +75,6 @@ export default async function ProjectWikiPage({
           These are the pieces the agent found this project depends on — concepts and entities
           it has evidence for, and open questions it couldn&apos;t yet answer — plus every item
           its runs have retrieved.
-          {graphResult.totalItems > 0 && (() => {
-            const notFiled = graphResult.unfiled.length + graphResult.projectLevel.length;
-            const pct = Math.round((100 * notFiled) / graphResult.totalItems);
-            return notFiled > 0
-              ? ` ${pct}% of what it found (${notFiled} of ${graphResult.totalItems}) isn't filed under any note yet.`
-              : null;
-          })()}
         </p>
       </div>
 
@@ -100,6 +93,17 @@ export default async function ProjectWikiPage({
           ghostLinks={graphResult.ghostLinks}
           missingNoteSuggestions={graphResult.missingNoteSuggestions}
           savedItemIds={savedItemIds}
+          // The ONE count of "every distinct item this project has ever
+          // retrieved" — getProjectWikiGraph's own totalItems, computed
+          // once from allItems.length server-side. Passed through rather
+          // than left for WikiGraph to recompute from notes/unfiled/
+          // projectLevel: an item filed under more than one note used to
+          // make a client-side recount (sum of each note's evidence.length)
+          // come out HIGHER than this — every filing counted, not every
+          // distinct item — which is exactly how the header above once
+          // said "67" while the list panel said "70" for the same
+          // project. One source of truth, no second count to drift.
+          totalItems={graphResult.totalItems}
         />
       )}
     </div>
