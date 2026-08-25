@@ -40,6 +40,31 @@ import type {
   WikiGraphNote,
 } from "@/lib/server/wikiEvidence";
 import { editNoteAction } from "@/app/projects/[id]/wiki/actions";
+import { saveToProjectAction } from "@/app/explore/actions";
+import type { ExploreItem } from "@/types/explore";
+
+// EvidenceItemRow -> ExploreItem, so EvidenceRow's save button can reuse the
+// exact same saveToProjectAction the review panel calls (lib/server/
+// projectResources.ts's saveToProject). Not a 1:1 shape: `doi`, `dedupe_key`,
+// and `raw` (the kind-specific fields ItemCard.tsx reads for e.g. a trial's
+// why_stopped) have no equivalent on a curated evidence row and are simply
+// absent here — nothing on this row carried them to begin with, so nothing
+// is lost that this page ever had. `signal` is reassembled from the three
+// flat signal_* columns, null when there's no metric.
+function toExploreItem(item: EvidenceItemRow): ExploreItem {
+  return {
+    id: item.item_id,
+    kind: item.kind,
+    title: item.title,
+    summary: item.summary,
+    url: item.url,
+    source: item.source,
+    date_iso: item.date_iso,
+    signal: item.signal_metric
+      ? { metric: item.signal_metric, value: item.signal_value ?? 0, as_of: item.signal_as_of ?? "" }
+      : null,
+  };
+}
 
 // Duplicated from components/ItemCard.tsx's own (unexported) ACCENT map —
 // see this file's header comment for why it isn't imported directly.
@@ -212,6 +237,7 @@ export default function WikiGraph({
   projectLevel,
   ghostLinks,
   missingNoteSuggestions,
+  savedItemIds,
 }: {
   projectId: string;
   notes: WikiGraphNote[];
@@ -219,13 +245,28 @@ export default function WikiGraph({
   projectLevel: EvidenceItemRow[];
   ghostLinks: WikiGraphGhostLink[];
   missingNoteSuggestions: MissingNoteSuggestion[];
+  savedItemIds: string[];
 }) {
+  const savedIdSet = useMemo(() => new Set(savedItemIds), [savedItemIds]);
   const { nodes: initialNodes, links } = useMemo(() => buildGraph(notes, ghostLinks), [notes, ghostLinks]);
   const [positions, setPositions] = useState<GraphNode[]>(initialNodes);
   const [selected, setSelected] = useState<{ type: "note" | "ghost" | "unfiled" | "projectLevel"; id: string } | null>(
     null
   );
+  // LIST FIRST — someone arriving wants to see what was found; the graph is
+  // for exploring once they already know what's there, not the first thing
+  // shown. See this feature's own note on that ordering.
+  const [view, setView] = useState<"list" | "graph">("list");
   const simRef = useRef<d3.Simulation<GraphNode, undefined> | null>(null);
+
+  // Same number as getProjectWikiGraph's own totalItems (every distinct item
+  // this project has ever retrieved) — recomputed here from the props
+  // already on hand rather than threaded through as a second count that
+  // could drift from what's actually rendered.
+  const totalCount = useMemo(
+    () => notes.reduce((sum, n) => sum + n.evidence.length, 0) + unfiled.length + projectLevel.length,
+    [notes, unfiled, projectLevel]
+  );
 
   useEffect(() => {
     const sim = d3
@@ -292,124 +333,145 @@ export default function WikiGraph({
   return (
     <div className="flex flex-col lg:flex-row gap-6">
       <div className="glass-card rounded-2xl p-4 flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-2 px-2">
-          <div className="flex items-center gap-4 font-label-sm text-label-sm text-secondary">
-            {Object.entries(NOTE_TYPE_COLOR).map(([type, { fill, label }]) => (
-              <span key={type} className="flex items-center gap-1.5">
-                <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: fill }} />
-                {label}
-              </span>
-            ))}
-            <span className="flex items-center gap-1.5">
-              <span
-                className="inline-block w-2.5 h-2.5 rounded-full border border-dashed"
-                style={{ borderColor: GHOST_STROKE }}
-              />
-              Ghost (no note yet)
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Grants/trials that matched no note are evidence FOR THE
-                PROJECT, not a "maybe a note is missing" signal — kept out
-                of the unfiled count and given their own button rather than
-                silently counted as unfiled noise. See wikiEvidence.ts's
-                splitUnfiled(). */}
-            {projectLevel.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelected({ type: "projectLevel", id: "projectLevel" })}
-                className="font-label-sm text-label-sm px-3 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container transition-colors"
-              >
-                {projectLevel.length} supporting the project
-              </button>
-            )}
+        <div className="flex items-start justify-between gap-4 mb-1 px-2">
+          <p className="font-headline-sm text-headline-sm text-on-background">
+            {totalCount} item{totalCount === 1 ? "" : "s"} found
+          </p>
+          <div className="flex items-center gap-1 bg-surface-container-low rounded-full p-1 shrink-0">
             <button
               type="button"
-              onClick={() => setSelected({ type: "unfiled", id: "unfiled" })}
-              className="font-label-sm text-label-sm px-3 py-1.5 rounded-full bg-surface-container-low hover:bg-surface-container transition-colors"
+              onClick={() => setView("list")}
+              className={`font-label-sm text-label-sm px-3 py-1 rounded-full transition-colors ${
+                view === "list" ? "bg-primary text-on-primary" : "text-secondary hover:text-on-background"
+              }`}
             >
-              {unfiled.length} unfiled item{unfiled.length === 1 ? "" : "s"}
+              List
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("graph")}
+              className={`font-label-sm text-label-sm px-3 py-1 rounded-full transition-colors ${
+                view === "graph" ? "bg-primary text-on-primary" : "text-secondary hover:text-on-background"
+              }`}
+            >
+              Graph
             </button>
           </div>
         </div>
 
-        <svg
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="w-full h-auto"
-          role="img"
-          aria-label="Project wiki graph"
-        >
-          <g>
-            {resolvedLinks.map((l, i) => (
-              <line
-                key={i}
-                x1={l.a.x}
-                y1={l.a.y}
-                x2={l.b.x}
-                y2={l.b.y}
-                stroke={l.a.kind === "ghost" || l.b.kind === "ghost" ? GHOST_STROKE : "#cbd5e1"}
-                strokeDasharray={l.a.kind === "ghost" || l.b.kind === "ghost" ? "4 4" : undefined}
-                strokeWidth={1.5}
-              />
-            ))}
-          </g>
-          <g>
-            {positions.map((n) => {
-              const isGhost = n.kind === "ghost";
-              const color = isGhost ? undefined : NOTE_TYPE_COLOR[n.noteType ?? "concept"]?.fill;
-              return (
-                <g
-                  key={n.id}
-                  transform={`translate(${n.x ?? 0}, ${n.y ?? 0})`}
-                  onClick={() => setSelected({ type: isGhost ? "ghost" : "note", id: n.id })}
-                  className="cursor-pointer"
-                >
-                  {/* Native SVG tooltip — free, browser-rendered hover text
-                      carrying the FULL title, regardless of how the label
-                      below wraps or ellipses. */}
-                  <title>{n.title}</title>
-                  <circle
-                    r={n.radius}
-                    fill={isGhost ? GHOST_FILL : color}
-                    stroke={isGhost ? GHOST_STROKE : selected?.id === n.id ? "#0f172a" : "none"}
-                    strokeWidth={selected?.id === n.id ? 3 : isGhost ? 2 : 0}
-                    strokeDasharray={isGhost ? "5 4" : undefined}
-                    opacity={isGhost ? 0.6 : 0.92}
-                  />
-                  <text
-                    textAnchor="middle"
-                    className="font-label-sm select-none pointer-events-none"
-                    style={{ fontSize: 11, fill: "var(--color-on-background, #1f2937)" }}
-                  >
-                    {wrapLabel(n.title).map((line, i) => (
-                      <tspan key={i} x={0} dy={i === 0 ? n.radius + 14 : 13}>
-                        {line}
-                      </tspan>
-                    ))}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
+        <p className="px-2 mb-3 font-body-sm text-body-sm text-secondary">
+          A concept or entity is something the agent found evidence for; an open question is
+          something it still couldn&apos;t answer.{" "}
+          {view === "list" ? "Click any row to see what's behind it." : "Click a node to see what's behind it."}
+        </p>
 
-        {missingNoteSuggestions.length > 0 && (
-          <div className="mt-2 px-2 py-3 border-t border-outline-variant/30">
-            <p className="font-label-sm text-label-sm text-secondary mb-1">
-              Unfiled items keep mentioning:
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {missingNoteSuggestions.map((s) => (
-                <span
-                  key={s.term}
-                  className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 font-label-sm text-label-sm"
-                  title={`${s.count} unfiled items mention "${s.term}" — possibly a missing note.`}
-                >
-                  {s.term} ({s.count})
+        {view === "list" ? (
+          <ListView
+            notes={notes}
+            unfiled={unfiled}
+            projectLevel={projectLevel}
+            ghostLinks={ghostLinks}
+            missingNoteSuggestions={missingNoteSuggestions}
+            selected={selected}
+            onSelect={setSelected}
+          />
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-2 px-2 font-label-sm text-label-sm text-secondary">
+              {Object.entries(NOTE_TYPE_COLOR).map(([type, { fill, label }]) => (
+                <span key={type} className="flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: fill }} />
+                  {label}
                 </span>
               ))}
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full border border-dashed"
+                  style={{ borderColor: GHOST_STROKE }}
+                />
+                Ghost (no note yet)
+              </span>
             </div>
-          </div>
+
+            <svg
+              viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+              className="w-full h-auto"
+              role="img"
+              aria-label="What we found — concept graph"
+            >
+              <g>
+                {resolvedLinks.map((l, i) => (
+                  <line
+                    key={i}
+                    x1={l.a.x}
+                    y1={l.a.y}
+                    x2={l.b.x}
+                    y2={l.b.y}
+                    stroke={l.a.kind === "ghost" || l.b.kind === "ghost" ? GHOST_STROKE : "#cbd5e1"}
+                    strokeDasharray={l.a.kind === "ghost" || l.b.kind === "ghost" ? "4 4" : undefined}
+                    strokeWidth={1.5}
+                  />
+                ))}
+              </g>
+              <g>
+                {positions.map((n) => {
+                  const isGhost = n.kind === "ghost";
+                  const color = isGhost ? undefined : NOTE_TYPE_COLOR[n.noteType ?? "concept"]?.fill;
+                  return (
+                    <g
+                      key={n.id}
+                      transform={`translate(${n.x ?? 0}, ${n.y ?? 0})`}
+                      onClick={() => setSelected({ type: isGhost ? "ghost" : "note", id: n.id })}
+                      className="cursor-pointer"
+                    >
+                      {/* Native SVG tooltip — free, browser-rendered hover text
+                          carrying the FULL title, regardless of how the label
+                          below wraps or ellipses. */}
+                      <title>{n.title}</title>
+                      <circle
+                        r={n.radius}
+                        fill={isGhost ? GHOST_FILL : color}
+                        stroke={isGhost ? GHOST_STROKE : selected?.id === n.id ? "#0f172a" : "none"}
+                        strokeWidth={selected?.id === n.id ? 3 : isGhost ? 2 : 0}
+                        strokeDasharray={isGhost ? "5 4" : undefined}
+                        opacity={isGhost ? 0.6 : 0.92}
+                      />
+                      <text
+                        textAnchor="middle"
+                        className="font-label-sm select-none pointer-events-none"
+                        style={{ fontSize: 11, fill: "var(--color-on-background, #1f2937)" }}
+                      >
+                        {wrapLabel(n.title).map((line, i) => (
+                          <tspan key={i} x={0} dy={i === 0 ? n.radius + 14 : 13}>
+                            {line}
+                          </tspan>
+                        ))}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            </svg>
+
+            {missingNoteSuggestions.length > 0 && (
+              <div className="mt-2 px-2 py-3 border-t border-outline-variant/30">
+                <p className="font-label-sm text-label-sm text-secondary mb-1">
+                  Unfiled items keep mentioning:
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {missingNoteSuggestions.map((s) => (
+                    <span
+                      key={s.term}
+                      className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 font-label-sm text-label-sm"
+                      title={`${s.count} unfiled items mention "${s.term}" — possibly a missing note.`}
+                    >
+                      {s.term} ({s.count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -420,6 +482,7 @@ export default function WikiGraph({
           ghost={selectedGhost}
           unfiled={selected.type === "unfiled" ? unfiled : null}
           projectLevel={selected.type === "projectLevel" ? projectLevel : null}
+          savedItemIds={savedIdSet}
           onClose={() => setSelected(null)}
         />
       )}
@@ -427,16 +490,252 @@ export default function WikiGraph({
   );
 }
 
-function EvidenceRow({ item }: { item: EvidenceItemRow }) {
+type Selected = { type: "note" | "ghost" | "unfiled" | "projectLevel"; id: string };
+
+// The list view — the default, per this feature's own reordering: someone
+// arriving wants "what's here", not a graph to first make sense of. Open
+// questions get their own section, ABOVE concepts/entities and visually
+// distinct (amber, not just another row) — they're what a researcher can
+// actually act on (Go deeper), the graph's amber dot otherwise being the
+// only place that distinction showed up.
+function ListView({
+  notes,
+  unfiled,
+  projectLevel,
+  ghostLinks,
+  missingNoteSuggestions,
+  selected,
+  onSelect,
+}: {
+  notes: WikiGraphNote[];
+  unfiled: EvidenceItemRow[];
+  projectLevel: EvidenceItemRow[];
+  ghostLinks: WikiGraphGhostLink[];
+  missingNoteSuggestions: MissingNoteSuggestion[];
+  selected: Selected | null;
+  onSelect: (s: Selected) => void;
+}) {
+  const questions = notes.filter((n) => n.note_type === "question");
+  const rest = notes.filter((n) => n.note_type !== "question");
+
+  return (
+    <div className="space-y-6 px-2">
+      {questions.length > 0 && (
+        <div>
+          <h2 className="font-label-md text-label-md text-amber-700 mb-2">
+            Open questions ({questions.length})
+          </h2>
+          <div className="space-y-2">
+            {questions.map((note) => (
+              <button
+                key={note.id}
+                type="button"
+                onClick={() => onSelect({ type: "note", id: note.id })}
+                className={`w-full text-left flex items-start gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                  selected?.id === note.id
+                    ? "border-amber-500 bg-amber-500/10"
+                    : "border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10"
+                }`}
+              >
+                <span className="material-symbols-outlined text-amber-600 text-[20px] mt-0.5">help</span>
+                <span className="min-w-0">
+                  <span className="block font-body-md text-body-md text-on-background">{note.title}</span>
+                  <span className="block font-label-sm text-label-sm text-amber-700 mt-0.5">
+                    {note.evidence.length === 0
+                      ? "No evidence yet"
+                      : `${note.evidence.length} item${note.evidence.length === 1 ? "" : "s"} filed`}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <div>
+          <h2 className="font-label-md text-label-md text-secondary mb-2">
+            Concepts &amp; entities ({rest.length})
+          </h2>
+          <div className="space-y-2">
+            {rest.map((note) => (
+              <button
+                key={note.id}
+                type="button"
+                onClick={() => onSelect({ type: "note", id: note.id })}
+                className={`w-full text-left flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                  selected?.id === note.id
+                    ? "border-primary bg-primary/5"
+                    : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
+                }`}
+              >
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: NOTE_TYPE_COLOR[note.note_type]?.fill }}
+                />
+                <span className="min-w-0 flex-1 font-body-md text-body-md text-on-background truncate">
+                  {note.title}
+                </span>
+                <span className="shrink-0 font-label-sm text-label-sm text-secondary">
+                  {note.evidence.length} item{note.evidence.length === 1 ? "" : "s"}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(unfiled.length > 0 || projectLevel.length > 0) && (
+        <div>
+          <h2 className="font-label-md text-label-md text-secondary mb-2">Not filed under a note</h2>
+          <div className="space-y-2">
+            {unfiled.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onSelect({ type: "unfiled", id: "unfiled" })}
+                className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                  selected?.id === "unfiled"
+                    ? "border-primary bg-primary/5"
+                    : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
+                }`}
+              >
+                <span className="font-body-md text-body-md text-on-background">Unfiled items</span>
+                <span className="font-label-sm text-label-sm text-secondary">
+                  {unfiled.length} item{unfiled.length === 1 ? "" : "s"}
+                </span>
+              </button>
+            )}
+            {projectLevel.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onSelect({ type: "projectLevel", id: "projectLevel" })}
+                className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                  selected?.id === "projectLevel"
+                    ? "border-primary bg-primary/5"
+                    : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
+                }`}
+              >
+                <span className="font-body-md text-body-md text-on-background">Supporting the project</span>
+                <span className="font-label-sm text-label-sm text-secondary">
+                  {projectLevel.length} item{projectLevel.length === 1 ? "" : "s"}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {ghostLinks.length > 0 && (
+        <div>
+          <h2 className="font-label-md text-label-md text-secondary mb-2">
+            Referenced but not written up yet ({ghostLinks.length})
+          </h2>
+          <div className="space-y-2">
+            {ghostLinks.map((ghost) => {
+              const id = `ghost:${normalizeTitle(ghost.title)}`;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onSelect({ type: "ghost", id })}
+                  className={`w-full text-left flex items-center gap-3 rounded-xl border border-dashed px-4 py-3 transition-colors ${
+                    selected?.id === id
+                      ? "border-outline bg-surface-container-low"
+                      : "border-outline-variant/50 hover:bg-surface-container-low"
+                  }`}
+                  style={{ borderColor: selected?.id === id ? undefined : GHOST_STROKE }}
+                >
+                  <span className="font-body-md text-body-md text-secondary">{ghost.title}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {missingNoteSuggestions.length > 0 && (
+        <div className="pt-2 border-t border-outline-variant/30">
+          <p className="font-label-sm text-label-sm text-secondary mb-1">Unfiled items keep mentioning:</p>
+          <div className="flex flex-wrap gap-2">
+            {missingNoteSuggestions.map((s) => (
+              <span
+                key={s.term}
+                className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-700 font-label-sm text-label-sm"
+                title={`${s.count} unfiled items mention "${s.term}" — possibly a missing note.`}
+              >
+                {s.term} ({s.count})
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EvidenceRow({
+  item,
+  projectId,
+  initiallySaved,
+}: {
+  item: EvidenceItemRow;
+  projectId: string;
+  initiallySaved: boolean;
+}) {
   const accent = KIND_ACCENT[item.kind] ?? "border-l-outline-variant";
+  const [saved, setSaved] = useState(initiallySaved);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reuses the SAME saveToProjectAction the review panel's ItemCard calls
+  // (app/explore/actions.ts -> lib/server/projectResources.ts:saveToProject)
+  // — one shared project-save, not a second one invented for this page.
+  // saved_items has a partial unique index on (user_id, item_id,
+  // project_id); a re-save of an already-saved item comes back as an
+  // ordinary { ok: false, error: "already saved..." } result (see
+  // saveToProject's 23505 branch), which this treats as success — the item
+  // WAS already saved, that's not a failure to surface.
+  async function handleSave() {
+    if (pending || saved) return;
+    setPending(true);
+    setError(null);
+    const res = await saveToProjectAction(projectId, toExploreItem(item));
+    setPending(false);
+    if (res.ok || res.error.toLowerCase().includes("already saved")) {
+      setSaved(true);
+    } else {
+      setError(res.error);
+    }
+  }
+
   return (
     <div className={`border-l-4 ${accent} bg-surface-container-lowest rounded-r-lg px-3 py-2`}>
-      <div className="flex items-center gap-2 mb-1">
-        <span className="px-2 py-0.5 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm">
-          {item.kind}
-        </span>
-        {item.source && (
-          <span className="font-label-sm text-label-sm text-secondary">{item.source}</span>
+      <div className="flex items-center justify-between gap-2 mb-1">
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded-full bg-surface-container text-secondary font-label-sm text-label-sm">
+            {item.kind}
+          </span>
+          {item.source && (
+            <span className="font-label-sm text-label-sm text-secondary">{item.source}</span>
+          )}
+        </div>
+        {saved ? (
+          <span className="flex items-center gap-1 font-label-sm text-label-sm text-primary">
+            <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+              bookmark
+            </span>
+            Saved to project
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={pending}
+            className="flex items-center gap-1 font-label-sm text-label-sm text-secondary hover:text-primary transition-colors disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[16px]">bookmark_border</span>
+            {pending ? "Saving…" : "Save"}
+          </button>
         )}
       </div>
       {item.url ? (
@@ -447,6 +746,7 @@ function EvidenceRow({ item }: { item: EvidenceItemRow }) {
         <p className="font-body-sm text-body-sm text-on-background">{item.title}</p>
       )}
       {item.summary && <p className="font-body-sm text-body-sm text-secondary mt-1 line-clamp-2">{item.summary}</p>}
+      {error && <p className="font-body-sm text-body-sm text-error mt-1">{error}</p>}
     </div>
   );
 }
@@ -467,6 +767,7 @@ function SidePanel({
   ghost,
   unfiled,
   projectLevel,
+  savedItemIds,
   onClose,
 }: {
   projectId: string;
@@ -474,6 +775,7 @@ function SidePanel({
   ghost: WikiGraphGhostLink | null;
   unfiled: EvidenceItemRow[] | null;
   projectLevel: EvidenceItemRow[] | null;
+  savedItemIds: Set<string>;
   onClose: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -514,7 +816,7 @@ function SidePanel({
       } else if (data.resolved) {
         setGoDeeperResult(
           data.noteUpdated
-            ? "Found evidence — this note is now a resolved concept."
+            ? "This search found evidence, so the question is answered now — it's marked as a resolved concept."
             : "Found evidence, but couldn't save the update (the note may have been edited since)."
         );
         router.refresh();
@@ -600,6 +902,12 @@ function SidePanel({
             )}
           </div>
 
+          <p className="mb-4 font-body-sm text-body-sm text-secondary">
+            {note.note_type === "question"
+              ? "The agent couldn't find an answer to this — it's a gap in what's known about the project."
+              : "The agent found evidence for this — see what's filed under it below."}
+          </p>
+
           {note.note_type === "question" && (
             <div className="mb-4">
               <button
@@ -674,7 +982,7 @@ function SidePanel({
                   </p>
                   <div className="space-y-2">
                     {items.map((item) => (
-                      <EvidenceRow key={item.id} item={item} />
+                      <EvidenceRow key={item.id} item={item} projectId={projectId} initiallySaved={savedItemIds.has(item.item_id)} />
                     ))}
                   </div>
                 </div>
@@ -711,7 +1019,7 @@ function SidePanel({
                 </p>
                 <div className="space-y-2">
                   {items.map((item) => (
-                    <EvidenceRow key={item.id} item={item} />
+                    <EvidenceRow key={item.id} item={item} projectId={projectId} initiallySaved={savedItemIds.has(item.item_id)} />
                   ))}
                 </div>
               </div>
@@ -735,7 +1043,7 @@ function SidePanel({
                 </p>
                 <div className="space-y-2">
                   {items.map((item) => (
-                    <EvidenceRow key={item.id} item={item} />
+                    <EvidenceRow key={item.id} item={item} projectId={projectId} initiallySaved={savedItemIds.has(item.item_id)} />
                   ))}
                 </div>
               </div>

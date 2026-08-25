@@ -158,7 +158,7 @@ export default async function ProjectDetailPage({
             className="flex items-center gap-2 hover:text-primary transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">hub</span>
-            Project wiki
+            What we found
           </Link>
         </div>
       </section>
