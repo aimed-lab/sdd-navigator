@@ -40,7 +40,7 @@ import type {
   WikiGraphNote,
 } from "@/lib/server/wikiEvidence";
 import { editNoteAction } from "@/app/projects/[id]/wiki/actions";
-import { saveToProjectAction } from "@/app/explore/actions";
+import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
 import type { ExploreItem } from "@/types/explore";
 
 // EvidenceItemRow -> ExploreItem, so EvidenceRow's save button can reuse the
@@ -713,22 +713,31 @@ function EvidenceRow({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reuses the SAME saveToProjectAction the review panel's ItemCard calls
-  // (app/explore/actions.ts -> lib/server/projectResources.ts:saveToProject)
-  // — one shared project-save, not a second one invented for this page.
-  // saved_items has a partial unique index on (user_id, item_id,
-  // project_id); a re-save of an already-saved item comes back as an
-  // ordinary { ok: false, error: "already saved..." } result (see
-  // saveToProject's 23505 branch), which this treats as success — the item
-  // WAS already saved, that's not a failure to surface.
-  async function handleSave() {
-    if (pending || saved) return;
+  // Reuses the SAME save/remove actions the review panel's ItemCard calls
+  // (app/explore/actions.ts -> lib/server/projectResources.ts's
+  // saveToProject/removeFromProject) — one shared pair, not a second one
+  // invented for this page. saved_items has a partial unique index on
+  // (user_id, item_id, project_id); a re-save of an already-saved item
+  // comes back as an ordinary { ok: false, error: "already saved..." }
+  // result (see saveToProject's 23505 branch), which this treats as
+  // success — the item WAS already saved, that's not a failure to surface.
+  //
+  // Toggle, not a one-way "Saved to project" label: removal goes through
+  // removeFromProjectAction, same as ItemCard's bookmark button and the
+  // Resources section it backs — any project member can unsave any
+  // member's save, matching that existing shared-workspace behavior. No
+  // confirm step, matching ItemCard's own unbookmark (single-item removal
+  // there has none either).
+  async function handleToggle() {
+    if (pending) return;
     setPending(true);
     setError(null);
-    const res = await saveToProjectAction(projectId, toExploreItem(item));
+    const res = saved
+      ? await removeFromProjectAction(projectId, item.item_id)
+      : await saveToProjectAction(projectId, toExploreItem(item));
     setPending(false);
-    if (res.ok || res.error.toLowerCase().includes("already saved")) {
-      setSaved(true);
+    if (res.ok || (!saved && res.error.toLowerCase().includes("already saved"))) {
+      setSaved(!saved);
     } else {
       setError(res.error);
     }
@@ -745,24 +754,23 @@ function EvidenceRow({
             <span className="font-label-sm text-label-sm text-secondary">{item.source}</span>
           )}
         </div>
-        {saved ? (
-          <span className="flex items-center gap-1 font-label-sm text-label-sm text-primary">
-            <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-              bookmark
-            </span>
-            Saved to project
-          </span>
-        ) : (
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={pending}
-            className="flex items-center gap-1 font-label-sm text-label-sm text-secondary hover:text-primary transition-colors disabled:opacity-50"
+        <button
+          type="button"
+          onClick={handleToggle}
+          disabled={pending}
+          aria-label={saved ? "Remove from project" : "Save to project"}
+          className={`flex items-center gap-1 font-label-sm text-label-sm transition-colors disabled:opacity-50 ${
+            saved ? "text-primary hover:text-secondary" : "text-secondary hover:text-primary"
+          }`}
+        >
+          <span
+            className="material-symbols-outlined text-[16px]"
+            style={{ fontVariationSettings: saved ? "'FILL' 1" : "'FILL' 0" }}
           >
-            <span className="material-symbols-outlined text-[16px]">bookmark_border</span>
-            {pending ? "Saving…" : "Save"}
-          </button>
-        )}
+            bookmark
+          </span>
+          {pending ? (saved ? "Removing…" : "Saving…") : saved ? "Saved to project" : "Save"}
+        </button>
       </div>
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer" className="font-body-sm text-body-sm text-primary hover:underline">
