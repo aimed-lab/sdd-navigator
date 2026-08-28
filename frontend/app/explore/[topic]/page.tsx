@@ -18,6 +18,7 @@
 // ItemCard's default (local-toggle) behavior untouched.
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
@@ -247,6 +248,23 @@ function SearchResults() {
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
+      {/* Way back to the project this search came from — same breadcrumb
+          pattern as /projects/[id]/wiki (arrow_back + the thing you're
+          returning to, text-secondary hover:text-primary). Without this,
+          arriving via "Explore for this project" was a one-way trip: the
+          only path back was the browser's own Back button. */}
+      {projectId && projectName && (
+        <div className="max-w-3xl mx-auto mb-4">
+          <Link
+            href={`/projects/${projectId}`}
+            className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            {projectName}
+          </Link>
+        </div>
+      )}
+
       {/* Saving-to-project indicator — a save from this page must never go
           somewhere the visitor didn't expect, so this is not subtle. */}
       {projectId && projectName && (
