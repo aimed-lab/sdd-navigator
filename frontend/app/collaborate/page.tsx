@@ -33,7 +33,7 @@ import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
 import CommunityPanel from "@/components/collaborate/CommunityPanel";
 import PostCard from "@/components/collaborate/PostCard";
 import ResourceCard from "@/components/collaborate/ResourceCard";
-import InlineFeedback from "@/components/feedback/InlineFeedback";
+import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
@@ -497,10 +497,7 @@ export default async function CollaboratePage({
       )}
 
       <div className="mt-14 pt-8 border-t border-outline-variant/30">
-        <InlineFeedback
-          prompt="What would make you post here?"
-          pagePath="/collaborate"
-        />
+        <GeneralFeedback pagePath="/collaborate" />
       </div>
     </div>
   );
