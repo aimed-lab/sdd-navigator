@@ -33,6 +33,7 @@ import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
+import InlineFeedback from "@/components/feedback/InlineFeedback";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -256,6 +257,18 @@ export default async function ProjectDetailPage({
           because it pushes proposals), this is pull-based: a member asks,
           nothing is proposed unprompted. */}
       <ProjectChatbot projectId={project.id} projectName={project.name} />
+
+      {/* Persistent, page-scoped, ignorable — same idiom as /explore,
+          /collaborate and /promote's own bottom InlineFeedback. Distinct
+          from the Accept/Discard capture in AgentSection: this is "anything
+          at all, any time," not tied to a specific run. */}
+      <div className="mt-16 pt-8 border-t border-outline-variant/30">
+        <InlineFeedback
+          prompt="Anything about this project page we should know?"
+          pagePath={`/projects/${project.id}`}
+          context={{ kind: "project_page", project_id: project.id, project_name: project.name }}
+        />
+      </div>
     </div>
   );
 }

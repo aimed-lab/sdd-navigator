@@ -49,6 +49,7 @@ import { useRouter } from "next/navigation";
 import ItemCard from "@/components/ItemCard";
 import { saveToProjectAction } from "@/app/explore/actions";
 import { addChecklistItemAction } from "@/app/projects/[id]/actions";
+import { submitFeedbackAction } from "@/app/feedback/actions";
 import type { ExploreItem } from "@/types/explore";
 
 type ProposedItem = ExploreItem & { reason: string };
@@ -117,6 +118,53 @@ const POLL_MS = 1500;
 // stuck, not just unreachable.
 const MAX_CONSECUTIVE_POLL_FAILURES = 4;
 const MAX_POLL_MS = 3 * 60 * 1000;
+
+// ── run feedback (Accept/Discard capture) ─────────────────────────────────
+//
+// THE MOMENT: not when the run finishes — the researcher hasn't read it yet.
+// Accept and Discard are the moments a judgement has actually been formed,
+// and neither needs a timer to know when to ask.
+//
+// THE BEHAVIOUR IS NOT OPTIONAL, THE OPINION IS: every Accept and every
+// Discard writes one row — action, run_id, and how much of what was offered
+// was actually kept — whether or not the researcher taps anything.
+// selected_count vs total_offered is itself a signal (2 of 8 kept reads
+// differently from 8 of 8, thumbs or no thumbs), so it's captured
+// unconditionally, with verdict/message left null. Tapping a verdict
+// afterward, and optionally adding a sentence, appends a SECOND row against
+// the same run_id rather than mutating the first — `feedback` is
+// insert-only (no UPDATE policy, no SELECT policy — see
+// database/migrations/2026-07-29_feedback.sql), so "add more detail later"
+// is naturally another append, not an edit. A reader groups by run_id in
+// SQL to see both.
+type RunFeedbackCtx = {
+  runId: string;
+  action: "accept" | "discard";
+  selectedCount: number;
+  totalOffered: number;
+};
+
+function agentRunContext(ctx: RunFeedbackCtx, project: { id: string; name: string }, query: string | null) {
+  return {
+    kind: "agent_run",
+    action: ctx.action,
+    run_id: ctx.runId,
+    project_id: project.id,
+    project_name: project.name,
+    query,
+    selected_count: ctx.selectedCount,
+    total_offered: ctx.totalOffered,
+  };
+}
+
+// "Not useful" and "useful" ask different questions on purpose — "want to
+// say why?" gets nothing a researcher hasn't already said with their tap.
+// Asking what they were hoping for (miss) vs. what it missed (gap) gets an
+// answer worth reading, and both stay one optional line.
+const VERDICT_FOLLOWUP: Record<"useful" | "not_useful", string> = {
+  useful: "Anything it missed?",
+  not_useful: "What were you hoping it would find?",
+};
 
 // ── markdown rendering (brief only) — see module docstring ───────────────────
 
@@ -356,6 +404,30 @@ export default function AgentSection({
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [acceptedSummary, setAcceptedSummary] = useState<string | null>(null);
 
+  // The backend-minted job_id for the run currently in `result` — this IS
+  // the run_id in every feedback row below, and what keeps a second render
+  // of the same run from asking for an opinion twice (see runFeedback's
+  // own comment).
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  // Set the instant Accept or Discard fires (see agentRunContext above) and
+  // kept around independent of `result`/`acceptedSummary` clearing, so the
+  // optional verdict prompt can render in the same spot regardless of
+  // which outcome closed the panel. `verdict`/`opinionSent` are this run's
+  // own tap state — reset to null/false every time a NEW run's Accept or
+  // Discard sets `runFeedback`, so the prompt is live exactly once per run.
+  const [runFeedback, setRunFeedback] = useState<RunFeedbackCtx | null>(null);
+  const [verdict, setVerdict] = useState<"useful" | "not_useful" | null>(null);
+  const [followupMessage, setFollowupMessage] = useState("");
+  // Tap and sentence are tracked separately: `opinionSent` flips true the
+  // instant a verdict is tapped (that row already went out with message:
+  // null — see sendOpinion), independent of whether a follow-up sentence
+  // is ever typed. `messageSent` gates the text box's own visibility so it
+  // disappears once the optional sentence has actually been sent, not the
+  // moment the tap alone lands.
+  const [opinionSent, setOpinionSent] = useState(false);
+  const [messageSent, setMessageSent] = useState(false);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -378,8 +450,15 @@ export default function AgentSection({
     setResult(null);
     setRunning(true);
     setStage("searching");
+    // A fresh run means a fresh run_id — clear any leftover feedback UI
+    // from the previous run rather than let it linger under a new result.
+    setJobId(null);
+    setRunFeedback(null);
+    setVerdict(null);
+    setFollowupMessage("");
+    setOpinionSent(false);
 
-    let jobId: string | null = null;
+    let startedJobId: string | null = null;
     try {
       const res = await fetch("/api/project-agent/start", {
         method: "POST",
@@ -390,7 +469,8 @@ export default function AgentSection({
       if (!res.ok || !data.job_id) {
         throw new Error(data.error || "Couldn't start the agent.");
       }
-      jobId = data.job_id as string;
+      startedJobId = data.job_id as string;
+      setJobId(startedJobId);
     } catch (e) {
       setRunning(false);
       setStage(null);
@@ -409,7 +489,7 @@ export default function AgentSection({
         // membership for the SAVE is enforced by RLS on that route's write,
         // not by anything checked here.
         const res = await fetch(
-          `/api/project-agent/status?job_id=${encodeURIComponent(jobId!)}&project_id=${encodeURIComponent(projectId)}`
+          `/api/project-agent/status?job_id=${encodeURIComponent(startedJobId!)}&project_id=${encodeURIComponent(projectId)}`
         );
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Lost track of the agent's progress.");
@@ -504,7 +584,57 @@ export default function AgentSection({
     });
   };
 
+  // Fires the UNCONDITIONAL behavioural row (see the module-level comment
+  // above RunFeedbackCtx) and arms the optional verdict prompt for this run.
+  // Never awaited by the caller — this must never slow down or fail the
+  // actual Accept/Discard it's observing (same "never throws to the user"
+  // stance submitFeedback itself already guarantees, belt-and-suspenders
+  // here with its own try/catch since this fires fire-and-forget).
+  const recordRunFeedback = (action: "accept" | "discard", selectedCount: number, totalOffered: number) => {
+    if (!jobId) return; // no run to attribute this to (shouldn't happen — accept/discard require `result`)
+    const ctx: RunFeedbackCtx = { runId: jobId, action, selectedCount, totalOffered };
+    setRunFeedback(ctx);
+    setVerdict(null);
+    setFollowupMessage("");
+    setOpinionSent(false);
+    setMessageSent(false);
+    try {
+      submitFeedbackAction({
+        page_path: `/projects/${projectId}`,
+        message: null,
+        context: agentRunContext(ctx, { id: projectId, name: projectName }, result?.digest?.goal_text ?? null),
+      });
+    } catch {
+      // best-effort — see comment above
+    }
+  };
+
+  // Tapping a verdict (optionally followed by typing the one-liner and
+  // pressing Send) appends a SECOND row against the same run_id — see the
+  // module comment on RunFeedbackCtx for why this is a second insert, not
+  // an update. Safe to call again after typing more, since `feedback` is
+  // insert-only regardless; opinionSent only gates the UI, not the table.
+  const sendOpinion = (v: "useful" | "not_useful", message: string | null) => {
+    if (!runFeedback) return;
+    setVerdict(v);
+    setOpinionSent(true);
+    if (message) setMessageSent(true);
+    try {
+      submitFeedbackAction({
+        page_path: `/projects/${projectId}`,
+        message,
+        context: {
+          ...agentRunContext(runFeedback, { id: projectId, name: projectName }, result?.digest?.goal_text ?? null),
+          verdict: v,
+        },
+      });
+    } catch {
+      // best-effort — see recordRunFeedback
+    }
+  };
+
   const discard = () => {
+    recordRunFeedback("discard", 0, result ? result.selected_items.length + result.checklist_items.length : 0);
     setResult(null);
     setAcceptError(null);
   };
@@ -516,6 +646,12 @@ export default function AgentSection({
 
     const itemsToSave = result.selected_items.filter((i) => selectedResourceIds.has(i.id));
     const checklistToAdd = result.checklist_items.filter((c) => selectedChecklistLabels.has(c.label));
+
+    recordRunFeedback(
+      "accept",
+      itemsToSave.length + checklistToAdd.length,
+      result.selected_items.length + result.checklist_items.length
+    );
 
     const [itemResults, checklistResults] = await Promise.all([
       Promise.all(itemsToSave.map((item) => saveToProjectAction(projectId, item))),
@@ -610,6 +746,67 @@ export default function AgentSection({
         <p className="font-body-sm text-body-sm text-error" role="alert">
           {acceptError}
         </p>
+      )}
+
+      {/* RUN FEEDBACK — the optional half. The behavioural row (action +
+          counts) already fired unconditionally, inside discard()/accept()
+          itself, the instant either was clicked — see recordRunFeedback.
+          This widget only ever captures the OPINION on top of that, and can
+          be ignored entirely: it sits in the flow, not a modal, and stays
+          rendered here (independent of `result`, which Accept/Discard both
+          already clear) so it survives the panel closing under it. */}
+      {runFeedback && (
+        <div className="mb-8 flex flex-wrap items-center gap-3 font-body-sm text-body-sm text-secondary">
+          {!verdict ? (
+            <>
+              <span>Was this useful?</span>
+              <button
+                type="button"
+                onClick={() => sendOpinion("useful", null)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">thumb_up</span>
+                Useful
+              </button>
+              <button
+                type="button"
+                onClick={() => sendOpinion("not_useful", null)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">thumb_down</span>
+                Not useful
+              </button>
+            </>
+          ) : (
+            <div className="w-full max-w-xl space-y-2">
+              <p className="font-body-sm text-body-sm text-secondary">Thanks — that helps.</p>
+              {!messageSent && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={followupMessage}
+                    onChange={(e) => setFollowupMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && followupMessage.trim()) {
+                        sendOpinion(verdict, followupMessage.trim());
+                      }
+                    }}
+                    placeholder={VERDICT_FOLLOWUP[verdict]}
+                    className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button
+                    type="button"
+                    disabled={!followupMessage.trim()}
+                    onClick={() => sendOpinion(verdict, followupMessage.trim())}
+                    className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* STORED digest from a prior run (getProject()'s own read, saved
