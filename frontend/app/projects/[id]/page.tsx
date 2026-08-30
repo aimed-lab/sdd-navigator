@@ -261,9 +261,12 @@ export default async function ProjectDetailPage({
       {/* Persistent, page-scoped, ignorable — same idiom as /explore,
           /collaborate and /promote's own bottom GeneralFeedback. Distinct
           from the Accept/Discard capture in AgentSection: this is "anything
-          at all, any time," not tied to a specific run. */}
-      <div className="mt-16 pt-8 border-t border-outline-variant/30">
+          at all, any time," not tied to a specific run. Same mt-16 rhythm
+          as the sections above (no isolating border-t) — see
+          GeneralFeedback's own docstring on placement. */}
+      <div className="mt-16">
         <GeneralFeedback
+          subject="this project"
           pagePath={`/projects/${project.id}`}
           context={{ project_id: project.id, project_name: project.name }}
         />

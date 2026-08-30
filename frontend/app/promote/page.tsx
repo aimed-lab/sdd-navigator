@@ -135,8 +135,10 @@ export default async function PromotePage({
         <GeneratorPanel />
       </div>
 
-      <div className="mt-16 pt-8 border-t border-outline-variant/30">
-        <GeneralFeedback pagePath="/promote" />
+      {/* Same mt-16 rhythm as the Generator section above (no isolating
+          border-t) — see GeneralFeedback's own docstring on placement. */}
+      <div className="mt-16">
+        <GeneralFeedback subject="this page" pagePath="/promote" />
       </div>
     </div>
   );

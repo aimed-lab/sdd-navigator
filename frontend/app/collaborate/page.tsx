@@ -496,8 +496,10 @@ export default async function CollaboratePage({
         </>
       )}
 
-      <div className="mt-14 pt-8 border-t border-outline-variant/30">
-        <GeneralFeedback pagePath="/collaborate" />
+      {/* Same mt-14 rhythm as the section above (no isolating border-t) —
+          see GeneralFeedback's own docstring on the placement reasoning. */}
+      <div className="mt-14">
+        <GeneralFeedback subject="the Collaborate board" pagePath="/collaborate" />
       </div>
     </div>
   );

@@ -371,8 +371,12 @@ function ExploreFeed() {
         );
       })()}
 
-      <div className="mt-16 pt-8 border-t border-outline-variant/30">
-        <GeneralFeedback pagePath="/explore" />
+      {/* Same mt-16 rhythm as the sections above (no isolating border-t) —
+          the last section of the page, not an afterthought below one. See
+          GeneralFeedback's own docstring on why it's placed right here,
+          against the content, rather than down by the footer. */}
+      <div className="mt-16">
+        <GeneralFeedback subject="these search results" pagePath="/explore" />
       </div>
     </div>
   );
