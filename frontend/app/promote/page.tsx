@@ -13,7 +13,6 @@
 import Link from "next/link";
 import GeneratorPanel from "@/components/promote/GeneratorPanel";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
-import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 import { listShowcase } from "@/lib/server/showcase";
 import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/showcaseTypes";
 
@@ -135,11 +134,6 @@ export default async function PromotePage({
         <GeneratorPanel />
       </div>
 
-      {/* Same mt-16 rhythm as the Generator section above (no isolating
-          border-t) — see GeneralFeedback's own docstring on placement. */}
-      <div className="mt-16">
-        <GeneralFeedback subject="this page" pagePath="/promote" />
-      </div>
     </div>
   );
 }

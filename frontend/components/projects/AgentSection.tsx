@@ -748,67 +748,6 @@ export default function AgentSection({
         </p>
       )}
 
-      {/* RUN FEEDBACK — the optional half. The behavioural row (action +
-          counts) already fired unconditionally, inside discard()/accept()
-          itself, the instant either was clicked — see recordRunFeedback.
-          This widget only ever captures the OPINION on top of that, and can
-          be ignored entirely: it sits in the flow, not a modal, and stays
-          rendered here (independent of `result`, which Accept/Discard both
-          already clear) so it survives the panel closing under it. */}
-      {runFeedback && (
-        <div className="mb-8 flex flex-wrap items-center gap-3 font-body-sm text-body-sm text-secondary">
-          {!verdict ? (
-            <>
-              <span>Was this useful?</span>
-              <button
-                type="button"
-                onClick={() => sendOpinion("useful", null)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
-              >
-                <span className="material-symbols-outlined text-[16px]">thumb_up</span>
-                Useful
-              </button>
-              <button
-                type="button"
-                onClick={() => sendOpinion("not_useful", null)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
-              >
-                <span className="material-symbols-outlined text-[16px]">thumb_down</span>
-                Not useful
-              </button>
-            </>
-          ) : (
-            <div className="w-full max-w-xl space-y-2">
-              <p className="font-body-sm text-body-sm text-secondary">Thanks — that helps.</p>
-              {!messageSent && (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={followupMessage}
-                    onChange={(e) => setFollowupMessage(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && followupMessage.trim()) {
-                        sendOpinion(verdict, followupMessage.trim());
-                      }
-                    }}
-                    placeholder={VERDICT_FOLLOWUP[verdict]}
-                    className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button
-                    type="button"
-                    disabled={!followupMessage.trim()}
-                    onClick={() => sendOpinion(verdict, followupMessage.trim())}
-                    className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
-                  >
-                    Send
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* STORED digest from a prior run (getProject()'s own read, saved
           server-side by app/api/project-agent/status/route.ts) — shown
           collapsed by default with Download as the PRIMARY action, per the
@@ -878,6 +817,68 @@ export default function AgentSection({
           <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest px-5 py-4 max-h-[70vh] overflow-y-auto">
             <MarkdownView markdown={result.digest.markdown} />
           </div>
+        </div>
+      )}
+
+      {/* RUN FEEDBACK — the optional half. The behavioural row (action +
+          counts) already fired unconditionally, inside discard()/accept()
+          itself, the instant either was clicked — see recordRunFeedback.
+          This widget only ever captures the OPINION on top of that.
+          Rendered exactly where the review panel (below) sat before
+          Accept/Discard cleared `result` — the panel closes and this takes
+          its place in the same spot, not blocking, not a modal, so their
+          eye is already there instead of on a popup. */}
+      {!result && runFeedback && (
+        <div className="glass-card rounded-2xl p-6 flex flex-wrap items-center gap-3 font-body-sm text-body-sm text-secondary">
+          {!verdict ? (
+            <>
+              <span>Was this useful?</span>
+              <button
+                type="button"
+                onClick={() => sendOpinion("useful", null)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">thumb_up</span>
+                Useful
+              </button>
+              <button
+                type="button"
+                onClick={() => sendOpinion("not_useful", null)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-full border border-outline-variant/50 hover:bg-surface-container-low transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">thumb_down</span>
+                Not useful
+              </button>
+            </>
+          ) : (
+            <div className="w-full max-w-xl space-y-2">
+              <p className="font-body-sm text-body-sm text-secondary">Thanks — that helps.</p>
+              {!messageSent && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={followupMessage}
+                    onChange={(e) => setFollowupMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && followupMessage.trim()) {
+                        sendOpinion(verdict, followupMessage.trim());
+                      }
+                    }}
+                    placeholder={VERDICT_FOLLOWUP[verdict]}
+                    className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  />
+                  <button
+                    type="button"
+                    disabled={!followupMessage.trim()}
+                    onClick={() => sendOpinion(verdict, followupMessage.trim())}
+                    className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+                  >
+                    Send
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

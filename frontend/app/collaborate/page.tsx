@@ -33,7 +33,6 @@ import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
 import CommunityPanel from "@/components/collaborate/CommunityPanel";
 import PostCard from "@/components/collaborate/PostCard";
 import ResourceCard from "@/components/collaborate/ResourceCard";
-import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
@@ -496,11 +495,6 @@ export default async function CollaboratePage({
         </>
       )}
 
-      {/* Same mt-14 rhythm as the section above (no isolating border-t) —
-          see GeneralFeedback's own docstring on the placement reasoning. */}
-      <div className="mt-14">
-        <GeneralFeedback subject="the Collaborate board" pagePath="/collaborate" />
-      </div>
     </div>
   );
 }

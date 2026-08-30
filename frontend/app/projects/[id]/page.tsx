@@ -33,7 +33,6 @@ import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
-import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -258,19 +257,6 @@ export default async function ProjectDetailPage({
           nothing is proposed unprompted. */}
       <ProjectChatbot projectId={project.id} projectName={project.name} />
 
-      {/* Persistent, page-scoped, ignorable — same idiom as /explore,
-          /collaborate and /promote's own bottom GeneralFeedback. Distinct
-          from the Accept/Discard capture in AgentSection: this is "anything
-          at all, any time," not tied to a specific run. Same mt-16 rhythm
-          as the sections above (no isolating border-t) — see
-          GeneralFeedback's own docstring on placement. */}
-      <div className="mt-16">
-        <GeneralFeedback
-          subject="this project"
-          pagePath={`/projects/${project.id}`}
-          context={{ project_id: project.id, project_name: project.name }}
-        />
-      </div>
     </div>
   );
 }

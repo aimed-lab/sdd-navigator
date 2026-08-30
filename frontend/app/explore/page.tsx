@@ -16,7 +16,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import ScopeChips from "@/components/ScopeChips";
-import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
@@ -371,13 +370,6 @@ function ExploreFeed() {
         );
       })()}
 
-      {/* Same mt-16 rhythm as the sections above (no isolating border-t) —
-          the last section of the page, not an afterthought below one. See
-          GeneralFeedback's own docstring on why it's placed right here,
-          against the content, rather than down by the footer. */}
-      <div className="mt-16">
-        <GeneralFeedback subject="these search results" pagePath="/explore" />
-      </div>
     </div>
   );
 }

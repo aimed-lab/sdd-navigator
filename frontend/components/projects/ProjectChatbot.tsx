@@ -140,10 +140,15 @@ export default function ProjectChatbot({
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open project assistant"
-          style={{ bottom: `${24 + footerClearance}px` }}
-          className="fixed right-6 z-[55] w-14 h-14 rounded-full bg-primary text-on-primary shadow-lg flex items-center justify-center hover:opacity-90 transition-opacity"
+          style={{ bottom: `${24 + footerClearance}px`, height: "56px" }}
+          // Label always visible, not hover-only — see GeneralFeedback's own
+          // docstring on why (a touch-screen visitor never gets a hover).
+          // Same height as GeneralFeedback's button (56px / h-14) so
+          // neither reads as the lesser of the two when they're stacked.
+          className="fixed right-6 z-[55] px-4 rounded-full bg-primary text-on-primary shadow-lg flex items-center gap-2 hover:opacity-90 transition-opacity"
         >
-          <span className="material-symbols-outlined text-[26px]">chat</span>
+          <span className="material-symbols-outlined text-[22px]">chat</span>
+          <span className="font-label-sm text-label-sm">Chat</span>
         </button>
       )}
 

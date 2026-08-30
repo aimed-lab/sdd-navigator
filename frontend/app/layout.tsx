@@ -5,6 +5,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import { AuthProvider } from "@/context/AuthContext";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
+import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 
 export const metadata: Metadata = {
   title: "SmartDrugDiscovery",
@@ -33,6 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Nav />
           <main className="flex-1 pt-16">{children}</main>
           <Footer />
+          {/* Floating, out of normal flow — available on every page, unlike
+              the per-page card it replaced. See its own docstring. */}
+          <GeneralFeedback />
         </AuthProvider>
         <Analytics />
         <SpeedInsights />
