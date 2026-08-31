@@ -51,6 +51,13 @@ export default async function CommunityDetailPage({
     : [[], []];
 
   const isMember = membership.state === "active";
+  // True only when the viewer IS an admin and the roster (fetched above,
+  // admin-only) shows no OTHER active admin. Meaningless for any other
+  // role — JoinLeaveControl only ever reads this when membership.role is
+  // "admin". Computed here, not in the component, because `members` is
+  // only ever fetched for an admin viewer in the first place.
+  const isLastAdmin =
+    membership.isAdmin && !members.some((m) => m.role === "admin" && m.user_id !== user?.id);
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-6 md:pt-8 pb-16 md:pb-20">
@@ -86,9 +93,11 @@ export default async function CommunityDetailPage({
           <div className="flex flex-col items-start sm:items-end gap-3 shrink-0">
             <JoinLeaveControl
               communityId={community.id}
+              communityName={community.name}
               slug={community.slug}
               isOpen={community.is_open}
               membership={membership}
+              isLastAdmin={isLastAdmin}
             />
             {membership.isAdmin && (
               <DeleteCommunityButton

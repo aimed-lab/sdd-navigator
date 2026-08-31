@@ -173,7 +173,9 @@ export async function leaveCommunityAction(
   if (!communityId) return { ok: false, error: "Missing community." };
 
   try {
-    await leaveCommunity(communityId);
+    const result = await leaveCommunity(communityId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
     revalidateCollaborate(path);
     return { ok: true };
   } catch (e) {

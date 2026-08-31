@@ -253,10 +253,30 @@ export async function joinCommunity(communityId: string, isOpen: boolean): Promi
   if (error) throw error;
 }
 
+export type LeaveCommunityResult = { status: "ok" } | { status: "error"; error: string };
+
 /** Leave a community — withdraws a pending request the same way it leaves an
- *  active membership. Self-only; community_members_self_delete (RLS) is the
- *  real gate, this .eq("user_id", ...) is belt-and-suspenders. */
-export async function leaveCommunity(communityId: string): Promise<void> {
+ *  active membership. Self-only; "Community members: self or admin delete"
+ *  (RLS) is the real gate, this .eq("user_id", ...) is belt-and-suspenders.
+ *
+ *  AN ADMIN LEAVING IS THE ONE CASE THIS CAN GENUINELY FAIL: deleting the
+ *  last active admin's own row trips enforce_community_admin_guard (P0001,
+ *  "A community must always keep at least one admin.") — the backstop for
+ *  LeaveCommunityButton's own pre-check (an admin with no other active
+ *  admin sees the control disabled with a reason before ever calling this,
+ *  see that component), not the primary defense. Withdrawing a pending
+ *  request or a non-admin leaving can never hit the trigger at all (it
+ *  only restricts an active admin row), so this still returns "ok" for
+ *  every path that isn't that one edge case.
+ *
+ *  Was Promise<void> (threw on any failure) before this — changed to a
+ *  result type so the P0001 split below (same shape as
+ *  createCommunity/addCommunityMemberByEmail/deleteCommunity) has
+ *  somewhere to put a message; requireCurrentUser() above still throws
+ *  UnauthorizedError for "not signed in", unchanged, since both callers
+ *  (app/collaborate/actions.ts and app/communities/actions.ts) already
+ *  catch that case separately. */
+export async function leaveCommunity(communityId: string): Promise<LeaveCommunityResult> {
   const { user, db } = await requireCurrentUser();
 
   const { error } = await db
@@ -265,7 +285,23 @@ export async function leaveCommunity(communityId: string): Promise<void> {
     .eq("community_id", communityId)
     .eq("user_id", user.id);
 
-  if (error) throw error;
+  if (error) {
+    console.error("leaveCommunity: delete failed", error);
+
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't leave — ${error.message}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't leave — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
 }
 
 export type PendingRequest = { id: string; email: string | null; requested_at: string };
