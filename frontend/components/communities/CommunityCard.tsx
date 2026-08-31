@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Community } from "@/lib/server/communities";
+import type { Community, CommunityRole } from "@/lib/server/communities";
 
 // One card, two contexts: "yours" (no join affordance — you're already in,
 // clicking the card is the action) and "other" (shows a Request-to-join
@@ -10,11 +10,18 @@ import type { Community } from "@/lib/server/communities";
 export default function CommunityCard({
   community,
   member,
+  role,
   pending,
 }: {
   community: Community;
   /** True if the viewer is an active member (admin/lead/member) already. */
   member: boolean;
+  /** The viewer's role when `member` is true — only ever read then.
+   *  "Admin" vs "Member" here, matching the detail page's own badge
+   *  (JoinLeaveControl); a lead reads as "Member" on the card the same way
+   *  it does everywhere a lead is just an ordinary active member with
+   *  posting rights, not membership-management rights. */
+  role?: CommunityRole;
   /** True if the viewer has an outstanding request into this community. */
   pending: boolean;
 }) {
@@ -33,7 +40,7 @@ export default function CommunityCard({
         {member ? (
           <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm text-primary">
             <span className="material-symbols-outlined text-base">check_circle</span>
-            Member
+            {role === "admin" ? "Admin" : "Member"}
           </span>
         ) : pending ? (
           <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">

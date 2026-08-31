@@ -1,9 +1,14 @@
 "use client";
 
-// Delete-community trigger + confirmation — same idiom, same markup, as
-// components/projects/DeleteProjectButton.tsx: a quiet text affordance
-// (not a red button) that opens an overlay dialog naming what's actually
-// being destroyed, rather than a bare "are you sure?".
+// Delete-community trigger + confirmation — same dialog markup as
+// components/projects/DeleteProjectButton.tsx, naming what's actually
+// being destroyed rather than a bare "are you sure?". Unlike that one, the
+// TRIGGER itself is plainly red (text-error, not the quiet
+// text-secondary/60 hover:text-error idiom DeleteProjectButton and every
+// other "Leave"/"Withdraw" control here use) — a request to make this one
+// read as destructive at a glance, not only on hover. Uses the same
+// text-error / bg-error / text-on-error design tokens the confirm
+// dialog's own destructive button already used, not a hardcoded hex.
 //
 // Only rendered for an admin (see app/communities/[slug]/page.tsx) — that's
 // a courtesy, not the gate. deleteCommunityAction re-derives the caller
@@ -59,7 +64,7 @@ export default function DeleteCommunityButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="font-label-sm text-label-sm text-secondary/60 hover:text-error transition-colors"
+        className="font-label-sm text-label-sm text-error hover:opacity-80 transition-opacity"
       >
         Delete community
       </button>

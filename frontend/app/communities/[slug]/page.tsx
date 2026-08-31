@@ -19,6 +19,9 @@ import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel"
 import MemberRoster from "@/components/communities/MemberRoster";
 import CommunityProjectsList from "@/components/communities/CommunityProjectsList";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
+import CopyLinkButton from "@/components/communities/CopyLinkButton";
+import LeaveButton from "@/components/communities/LeaveButton";
+import ManageCommunityCard from "@/components/communities/ManageCommunityCard";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -97,25 +100,17 @@ export default async function CommunityDetailPage({
               slug={community.slug}
               isOpen={community.is_open}
               membership={membership}
-              isLastAdmin={isLastAdmin}
             />
-            {membership.isAdmin && (
-              <DeleteCommunityButton
-                communityId={community.id}
-                communityName={community.name}
-                memberCount={members.length}
-                projectCount={projects.length}
-              />
-            )}
+            {/* Any active member, not just admins — the point is members
+                can bring people in themselves. */}
+            {isMember && <CopyLinkButton slug={community.slug} />}
           </div>
         </section>
 
         <CommunityProjectsList projects={projects} communityId={isMember ? community.id : null} />
 
         {membership.isAdmin && (
-          <section className="flex flex-col gap-8 glass-panel rounded-xl p-6 md:p-8">
-            <h2 className="font-headline-md text-headline-md text-on-background">Manage community</h2>
-
+          <ManageCommunityCard>
             <div className="flex flex-col gap-3">
               <h3 className="font-label-lg text-label-lg text-on-background">Pending requests</h3>
               <PendingRequestsPanel requests={pendingRequests} slug={community.slug} />
@@ -134,7 +129,30 @@ export default async function CommunityDetailPage({
                 viewerUserId={user?.id ?? ""}
               />
             </div>
-          </section>
+
+            {/* Below the member list, separated — Leave and Delete
+                community are the two "leave this behind" actions,
+                together on one line. Leave is here (not in the header
+                corner) because that corner was stacking too many
+                controls; it only ever moves here for an ADMIN — a
+                non-admin member never sees this card at all (admin-only),
+                so their own Leave stays up in the header
+                (JoinLeaveControl). */}
+            <div className="border-t border-outline-variant/20 pt-6 flex items-center gap-6">
+              <LeaveButton
+                communityId={community.id}
+                communityName={community.name}
+                slug={community.slug}
+                isLastAdmin={isLastAdmin}
+              />
+              <DeleteCommunityButton
+                communityId={community.id}
+                communityName={community.name}
+                memberCount={members.length}
+                projectCount={projects.length}
+              />
+            </div>
+          </ManageCommunityCard>
         )}
       </div>
     </div>

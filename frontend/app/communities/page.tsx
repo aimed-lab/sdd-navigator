@@ -50,7 +50,13 @@ export default async function CommunitiesPage() {
           {yours.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
               {yours.map((c) => (
-                <CommunityCard key={c.id} community={c} member pending={false} />
+                <CommunityCard
+                  key={c.id}
+                  community={c}
+                  member
+                  role={memberships[c.id]?.role}
+                  pending={false}
+                />
               ))}
             </div>
           ) : (
