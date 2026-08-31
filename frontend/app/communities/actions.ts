@@ -19,8 +19,10 @@ import {
   leaveCommunity,
   rejectMembership,
   removeCommunityMember,
+  updateCommunitySections,
   type CommunityRole,
 } from "@/lib/server/communities";
+import type { SectionConfig } from "@/lib/communityTypes";
 
 export type ActionResult = { ok: true; slug: string } | { ok: false; error: string };
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -226,5 +228,30 @@ export async function deleteCommunityAction(communityId: string): Promise<Simple
     }
     console.error("deleteCommunityAction failed", e);
     return { ok: false, error: "Couldn't delete the community. Please try again." };
+  }
+}
+
+/** Save the community's section list. Admin-only — see
+ *  updateCommunitySections's own comment: writes the whole array every
+ *  time, no diffing. */
+export async function updateCommunitySectionsAction(
+  communityId: string,
+  sections: SectionConfig[],
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateCommunitySections(communityId, sections);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunitySectionsAction failed", e);
+    return { ok: false, error: "Couldn't save sections. Please try again." };
   }
 }

@@ -7,21 +7,26 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getCommunityBySlug,
+  getCommunityStats,
   getMembership,
   listCommunityMembers,
   listCommunityProjects,
   listPendingRequests,
 } from "@/lib/server/communities";
+import { resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
 import { getCurrentUser } from "@/lib/auth";
 import JoinLeaveControl from "@/components/communities/JoinLeaveControl";
 import AddMemberByEmailForm from "@/components/communities/AddMemberByEmailForm";
 import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel";
 import MemberRoster from "@/components/communities/MemberRoster";
 import CommunityProjectsList from "@/components/communities/CommunityProjectsList";
+import MembersSection from "@/components/communities/MembersSection";
+import EmptySection from "@/components/communities/EmptySection";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
 import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
 import ManageCommunityCard from "@/components/communities/ManageCommunityCard";
+import SectionsEditor from "@/components/communities/SectionsEditor";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -40,11 +45,17 @@ export default async function CommunityDetailPage({
   const community = await getCommunityBySlug(slug);
   if (!community) notFound();
 
-  const [user, membership, projects] = await Promise.all([
+  const [user, membership, projects, stats] = await Promise.all([
     getCurrentUser(),
     getMembership(community.id),
     listCommunityProjects(community.id),
+    getCommunityStats(community.id),
   ]);
+
+  // NULL community.sections -> the full default order, every section
+  // enabled (see resolveSections' own comment) — every community that
+  // predates this feature renders exactly as it did before, unchanged.
+  const orderedSections = resolveSections(community.sections);
 
   // Admin-only reads — listPendingRequests/listCommunityMembers already
   // degrade to [] for a non-admin caller (RLS), so this isn't the real
@@ -107,11 +118,45 @@ export default async function CommunityDetailPage({
           </div>
         </section>
 
-        <CommunityProjectsList projects={projects} communityId={isMember ? community.id : null} />
+        {/* Enabled sections, in the configured order (default: every
+            section, projects first — the same position it's always
+            rendered in). Only "projects" and "members" have real content
+            today, per spec; the rest render a titled "nothing here yet"
+            placeholder deliberately, not as something to hide. */}
+        {orderedSections
+          .filter((s) => s.enabled)
+          .map((s) => {
+            switch (s.key) {
+              case "projects":
+                return (
+                  <CommunityProjectsList
+                    key={s.key}
+                    projects={projects}
+                    communityId={isMember ? community.id : null}
+                  />
+                );
+              case "members":
+                return (
+                  <MembersSection
+                    key={s.key}
+                    memberCount={stats.memberCount}
+                    joinedLast7d={stats.joinedLast7d}
+                  />
+                );
+              default:
+                return <EmptySection key={s.key} title={SECTION_LABEL[s.key]} />;
+            }
+          })}
 
         {membership.isAdmin && (
           <ManageCommunityCard>
-            <div className="flex flex-col gap-3">
+            <SectionsEditor
+              communityId={community.id}
+              slug={community.slug}
+              sections={orderedSections}
+            />
+
+            <div className="flex flex-col gap-3 border-t border-outline-variant/20 pt-8">
               <h3 className="font-label-lg text-label-lg text-on-background">Pending requests</h3>
               <PendingRequestsPanel requests={pendingRequests} slug={community.slug} />
             </div>

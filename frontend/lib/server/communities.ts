@@ -47,6 +47,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { getSession, requireCurrentUser } from "@/lib/auth";
 import { getAnonServerClient } from "./supabaseServer";
+import type { SectionConfig } from "@/lib/communityTypes";
 
 export type Community = {
   id: string;
@@ -54,6 +55,11 @@ export type Community = {
   name: string;
   description: string | null;
   is_open: boolean;
+  // NULL means "show every section, default order" — see
+  // lib/communityTypes.ts's resolveSections(), the one place this gets
+  // interpreted. Selected on every read below so this field is never
+  // silently undefined on a Community the type claims to have it on.
+  sections: SectionConfig[] | null;
 };
 
 /** All communities, ordered by name. Degrades to an empty list so the
@@ -77,7 +83,7 @@ export async function listCommunities(): Promise<Community[]> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open")
+    .select("id, slug, name, description, is_open, sections")
     .order("name", { ascending: true });
 
   if (error || !data) return [];
@@ -148,7 +154,7 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open")
+    .select("id, slug, name, description, is_open, sections")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -166,7 +172,7 @@ export async function getCommunityById(id: string): Promise<Community | null> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open")
+    .select("id, slug, name, description, is_open, sections")
     .eq("id", id)
     .maybeSingle();
 
@@ -616,6 +622,52 @@ export async function deleteCommunity(communityId: string): Promise<DeleteCommun
     // exists. Same non-distinction deleteProject makes for the same
     // reason: telling the two apart isn't this function's call to make.
     return { status: "error", error: "Couldn't delete the community." };
+  }
+
+  return { status: "ok" };
+}
+
+export type UpdateSectionsResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Save the community's section list — admin-only. "Communities: admin
+ *  update" (2026-08-31_community_sections.sql) is the real gate,
+ *  is_community_admin re-checked below for a clear message instead of a
+ *  raw 42501.
+ *
+ *  Writes the WHOLE array every time (SectionsEditor sends its full local
+ *  state on Save, not a diff) — matches the migration's own framing of
+ *  `sections` as one opaque ordered blob, not per-key rows to reconcile.
+ *  No shape validation here beyond what TypeScript already gives the
+ *  caller; resolveSections() (lib/communityTypes.ts) is where a malformed
+ *  or partial array gets made sense of on READ, not here on write. */
+export async function updateCommunitySections(
+  communityId: string,
+  sections: SectionConfig[]
+): Promise<UpdateSectionsResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can change sections." };
+  }
+
+  const { error } = await db.from("communities").update({ sections }).eq("id", communityId);
+
+  if (error) {
+    console.error("updateCommunitySections: update failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't save sections — ${error.message}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't save sections — this is a server-side problem, not something wrong with what you chose. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
   }
 
   return { status: "ok" };
