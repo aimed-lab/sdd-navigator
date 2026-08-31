@@ -45,6 +45,7 @@ export async function createProjectAction(input: {
   indication?: string;
   modality?: string;
   stage?: string;
+  communityId?: string;
 }): Promise<ActionResult> {
   const name = (input.name ?? "").trim();
   if (!name) return { ok: false, error: "A project name is required." };
@@ -77,6 +78,7 @@ export async function createProjectAction(input: {
       indication: input.indication || null,
       modality: asModality(input.modality),
       stage: asStage(input.stage),
+      community_id: input.communityId || null,
     });
 
     if (result.status !== "ok") {

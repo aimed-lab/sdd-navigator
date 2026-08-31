@@ -57,8 +57,21 @@ export type Community = {
 };
 
 /** All communities, ordered by name. Degrades to an empty list so the
- *  Collaborate page still renders (without chips) if this read fails. */
+ *  Collaborate page still renders (without chips) if this read fails.
+ *
+ *  Also runs the by-email-add backstop claim (see addCommunityMemberByEmail's
+ *  own comment) for whoever's currently signed in — same call site pattern
+ *  as listMyProjects()'s claim_pending_project_memberships(), best-effort,
+ *  never blocks this read on failure. Communities themselves are public
+ *  reads (getAnonServerClient), but the claim needs the caller's own
+ *  session, so it only runs when one exists. */
 export async function listCommunities(): Promise<Community[]> {
+  const session = await getSession();
+  if (session) {
+    const { error } = await session.db.rpc("claim_pending_community_memberships");
+    if (error) console.error("listCommunities: claim_pending_community_memberships failed", error);
+  }
+
   const supabase = getAnonServerClient();
   if (!supabase) return [];
 
@@ -69,6 +82,62 @@ export async function listCommunities(): Promise<Community[]> {
 
   if (error || !data) return [];
   return data as Community[];
+}
+
+export type CreateCommunityResult =
+  | { status: "ok"; id: string; slug: string }
+  | { status: "error"; error: string };
+
+/** Create a community. Any signed-in user — create_community_with_admin
+ *  (database/migrations/2026-08-30_community_admin_membership.sql) inserts
+ *  the community row AND the caller's own admin membership row in one
+ *  transaction, same move as create_project_with_lead. ALL COMMUNITIES ARE
+ *  PRIVATE — there is no is_open parameter to pass; the RPC hardcodes it
+ *  false. */
+export async function createCommunity(input: {
+  name: string;
+  purpose: string;
+}): Promise<CreateCommunityResult> {
+  const { db } = await requireCurrentUser();
+
+  const name = input.name.trim();
+  if (!name) return { status: "error", error: "A community name is required." };
+
+  const purpose = input.purpose.trim();
+  if (!purpose) return { status: "error", error: "Say what this community is for." };
+
+  const { data, error } = await db
+    .rpc("create_community_with_admin", { p_name: name, p_description: purpose })
+    .single();
+
+  if (error || !data) {
+    console.error("createCommunity: create_community_with_admin RPC failed", error);
+
+    // Distinguish "the RPC's own RAISE EXCEPTION checks caught something"
+    // (P0001 — no authenticated user, empty name; both should already be
+    // impossible by the time this runs, given the checks above, but a
+    // session can still expire mid-request) from an actual server-side
+    // problem — a bad migration, a real bug, anything else. The first is
+    // shown near-verbatim (still readable without a terminal); the second
+    // says plainly that it's not something retyping the form will fix, so
+    // "Couldn't create the community" alone never has to be diagnosed by
+    // going and reading the server log.
+    if (error?.code === "P0001" && error.message) {
+      const reason = error.message.replace(/^create_community_with_admin:\s*/, "");
+      return { status: "error", error: `Couldn't create the community — ${reason}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't create the community — this is a server-side problem, not something wrong with what you entered. Check the server log (code: " +
+        (error?.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  const row = data as { id: string; slug: string };
+  return { status: "ok", id: row.id, slug: row.slug };
 }
 
 /** One community by slug — used to resolve the ?community= URL param into an
@@ -87,21 +156,69 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
   return data as Community;
 }
 
+/** One community by id — the counterpart to getCommunityBySlug, needed
+ *  wherever only the id is in hand (e.g. /projects/new?community=<id>,
+ *  which needs the SLUG back to redirect into /communities/<slug> after
+ *  create). Same public read as getCommunityBySlug. */
+export async function getCommunityById(id: string): Promise<Community | null> {
+  const supabase = getAnonServerClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("communities")
+    .select("id, slug, name, description, is_open")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data as Community;
+}
+
+/** Every community the signed-in viewer belongs to (active) or has a
+ *  pending request into, keyed by community_id — one query for the whole
+ *  /communities list page instead of one getMembership() per community.
+ *  Empty when signed out (the page shows every community as "other" then,
+ *  same as an anonymous /collaborate visitor sees no Join state either). */
+export async function listMyMemberships(): Promise<
+  Record<string, { status: "active" | "pending"; role: CommunityRole }>
+> {
+  const session = await getSession();
+  if (!session) return {};
+
+  const { data, error } = await session.db
+    .from("community_members")
+    .select("community_id, status, role")
+    .eq("user_id", session.user.id);
+
+  if (error || !data) return {};
+  const out: Record<string, { status: "active" | "pending"; role: CommunityRole }> = {};
+  for (const row of data as { community_id: string; status: "active" | "pending"; role: CommunityRole }[]) {
+    out[row.community_id] = { status: row.status, role: row.role };
+  }
+  return out;
+}
+
 // ── Membership state ────────────────────────────────────────────────────────
 
 export type MembershipState = "signed_out" | "none" | "pending" | "active";
-export type Membership = { state: MembershipState; isLead: boolean };
+export type CommunityRole = "admin" | "lead" | "member";
+export type Membership = { state: MembershipState; role: CommunityRole | null; isAdmin: boolean };
 
 /** The signed-in viewer's relationship to one community. "signed_out" for no
  *  session (join/request UI should prompt sign-in, not block); "none" for
  *  signed in but no row; "pending" for an outstanding request into a closed
- *  community; "active" for an approved member. `isLead` is only ever true
+ *  community; "active" for an approved member. `isAdmin` is only ever true
  *  alongside "active" — it's what the UI checks before showing the
- *  pending-requests / approve affordance. */
+ *  membership-management affordances (pending requests, add by email,
+ *  promote/demote/remove). Was `isLead` before
+ *  2026-08-30_community_admin_membership.sql — membership management moved
+ *  from lead to admin (a lead can post, same as any member, but no longer
+ *  manages membership; see that migration's header), so this now reflects
+ *  role = 'admin', not role = 'lead'. */
 export async function getMembership(communityId: string): Promise<Membership> {
   noStore(); // this specific read must never be served from a cached RSC payload
   const session = await getSession();
-  if (!session) return { state: "signed_out", isLead: false };
+  if (!session) return { state: "signed_out", role: null, isAdmin: false };
 
   const { data, error } = await session.db
     .from("community_members")
@@ -110,9 +227,10 @@ export async function getMembership(communityId: string): Promise<Membership> {
     .eq("user_id", session.user.id)
     .maybeSingle();
 
-  if (error || !data) return { state: "none", isLead: false };
+  if (error || !data) return { state: "none", role: null, isAdmin: false };
   const active = data.status === "active";
-  return { state: active ? "active" : "pending", isLead: active && data.role === "lead" };
+  const role = active ? (data.role as CommunityRole) : null;
+  return { state: active ? "active" : "pending", role, isAdmin: role === "admin" };
 }
 
 /** Join (open community) or request to join (closed community). Which one
@@ -152,9 +270,10 @@ export async function leaveCommunity(communityId: string): Promise<void> {
 
 export type PendingRequest = { id: string; email: string | null; requested_at: string };
 
-/** Pending join requests for a community — visible only to a lead of that
- *  community (community_members' self-or-lead SELECT policy is the actual
- *  gate; a non-lead caller just gets an empty list back, not an error). */
+/** Pending join requests for a community — visible only to an admin of that
+ *  community (community_members' self-or-admin SELECT policy, 2026-08-30,
+ *  is the actual gate; a non-admin caller just gets an empty list back, not
+ *  an error). */
 export async function listPendingRequests(communityId: string): Promise<PendingRequest[]> {
   noStore(); // same reasoning as getMembership() — must reflect the latest approve/leave
   const session = await getSession();
@@ -171,8 +290,9 @@ export async function listPendingRequests(communityId: string): Promise<PendingR
   return data as PendingRequest[];
 }
 
-/** Approve a pending request. Lead-only — community_members_lead_approves
- *  (RLS) is the real gate; a non-lead's UPDATE matches zero rows. */
+/** Approve a pending request. Admin-only (2026-08-30, was lead-only) —
+ *  "Community members: admin manages" (RLS) is the real gate; a non-admin's
+ *  UPDATE matches zero rows. */
 export async function approveMembership(memberRowId: string): Promise<void> {
   const { db } = await requireCurrentUser();
 
@@ -183,10 +303,249 @@ export async function approveMembership(memberRowId: string): Promise<void> {
   // approved_by is intentionally NOT set from the client body — see note
   // below; Postgres has no auth.uid() access from here, so this column is
   // left for a future trigger/RPC if "who approved" needs to be exact. RLS
-  // still restricts WHO can perform this update to a lead of the row's own
-  // community regardless.
+  // still restricts WHO can perform this update to an admin of the row's
+  // own community regardless.
 
   if (error) throw error;
+}
+
+/** Reject a pending request — a plain delete of the row, same as
+ *  leaveCommunity but admin-acting-on-someone-else instead of self.
+ *  "Community members: self or admin delete" (RLS) is the real gate; there
+ *  is no separate "rejected" state to record — a rejected request simply
+ *  stops existing, exactly like a withdrawn one, so a rejected person can
+ *  request again later without a stale row in the way. */
+export async function rejectMembership(memberRowId: string): Promise<void> {
+  const { db } = await requireCurrentUser();
+
+  const { error } = await db.from("community_members").delete().eq("id", memberRowId);
+
+  if (error) throw error;
+}
+
+export type AddCommunityMemberResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  | { status: "error"; error: string };
+
+/** Add a member by email. ADMIN-ONLY — enforced twice, same shape as
+ *  addProjectMember (lib/server/projects.ts): "Community members: admin
+ *  insert by email" (RLS) is the real gate, the isAdmin check below exists
+ *  purely to return a clear { status: "forbidden" } instead of a raw 42501.
+ *
+ *  Member IMMEDIATELY, not pending — no approval step for an admin-added
+ *  row (that's the whole point of this being the second way in, distinct
+ *  from request-to-join). Email is lowercased before insert; the unique
+ *  index is on (community_id, lower(email)).
+ *
+ *  approved_by/approved_at are NOT set on this insert, even though this
+ *  row IS effectively pre-approved — "Community members: admin insert by
+ *  email" (RLS) requires approved_by IS NULL on the inserted row (that
+ *  column is reserved for the approve-a-pending-request UPDATE path, see
+ *  approveMembership above); setting it here trips a 42501, not a
+ *  friendlier rejection. status = 'active' alone is what makes this row
+ *  a member immediately — approved_by staying NULL just means "never went
+ *  through the request/approve flow," which is true.
+ *
+ *  LINKS AN EXISTING ACCOUNT NOW, not just at signup —
+ *  find_account_id_by_email_for_community
+ *  (2026-08-30_community_admin_membership.sql) looks the email up in
+ *  auth.users (never read directly by the app) and, if found, the row is
+ *  inserted already linked. If not found, it's inserted with user_id NULL
+ *  and handle_new_user() (2026-08-21, unchanged) claims it the moment that
+ *  email signs up — claim_pending_community_memberships() is the backstop,
+ *  called from listCommunities() below, exactly the way
+ *  claim_pending_project_memberships() backstops listMyProjects(). */
+export async function addCommunityMemberByEmail(
+  communityId: string,
+  email: string
+): Promise<AddCommunityMemberResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "forbidden", error: "Only a community admin can add members." };
+  }
+
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return { status: "error", error: "An email address is required." };
+
+  let existingUserId: string | null = null;
+  const { data: lookupData, error: lookupError } = await db.rpc(
+    "find_account_id_by_email_for_community",
+    { p_community_id: communityId, p_email: normalized }
+  );
+  if (lookupError) {
+    console.error("addCommunityMemberByEmail: existing-account lookup failed", lookupError);
+  } else {
+    existingUserId = (lookupData as string | null) ?? null;
+  }
+
+  const { error } = await db.from("community_members").insert({
+    community_id: communityId,
+    user_id: existingUserId,
+    email: normalized,
+    role: "member",
+    status: "active",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return { status: "error", error: "That person is already a member of this community." };
+    }
+    console.error("addCommunityMemberByEmail: insert failed", error);
+
+    // Same split as createCommunity's own RPC-error handling: a P0001 is
+    // one of our own RAISE EXCEPTION checks (readable near-verbatim);
+    // anything else — including a 42501 RLS rejection like the one that
+    // exposed the approved_by/approved_at bug above — is a server-side
+    // problem, said plainly, with the code, instead of a blanket
+    // "Couldn't add that member."
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't add that member — ${error.message}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't add that member — this is a server-side problem, not something wrong with what you entered. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+export type CommunityMember = {
+  id: string;
+  email: string | null;
+  user_id: string | null;
+  role: CommunityRole;
+  status: "active" | "pending";
+};
+
+/** The full member roster, WITH email — admin-only. "Community members:
+ *  self or admin select" (RLS) is the real gate: a non-admin caller gets
+ *  back only their own row (never other members' emails), which reads here
+ *  as "not admin, don't render the roster" rather than an error. This is
+ *  the one read in this file that ever ships another member's email to the
+ *  client — every other read is either the viewer's own row or an
+ *  aggregate. */
+export async function listCommunityMembers(communityId: string): Promise<CommunityMember[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) return [];
+
+  const { data, error } = await session.db
+    .from("community_members")
+    .select("id, email, user_id, role, status")
+    .eq("community_id", communityId)
+    .eq("status", "active")
+    .order("role", { ascending: true }); // 'admin' < 'lead' < 'member' alphabetically — admins first
+
+  if (error || !data) return [];
+  return data as CommunityMember[];
+}
+
+export type ChangeRoleResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  | { status: "error"; error: string };
+
+/** Promote or demote a member. Admin-only — "Community members: admin
+ *  manages" (RLS) is the real gate. The admin-guard trigger
+ *  (enforce_community_admin_guard) is what actually stops this call from
+ *  demoting a DIFFERENT admin or leaving a community with zero admins; the
+ *  raw Postgres exception it raises is surfaced here as a plain message
+ *  rather than a stack trace. */
+export async function changeCommunityMemberRole(
+  communityId: string,
+  memberRowId: string,
+  role: CommunityRole
+): Promise<ChangeRoleResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "forbidden", error: "Only a community admin can change roles." };
+  }
+
+  const { error } = await db
+    .from("community_members")
+    .update({ role })
+    .eq("id", memberRowId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    // The trigger's RAISE EXCEPTION messages are written to be shown
+    // as-is (see the migration) — "An admin cannot remove or demote
+    // another admin." / "A community must always keep at least one
+    // admin." — rather than translated into something generic here.
+    return { status: "error", error: error.message || "Couldn't change that member's role." };
+  }
+
+  return { status: "ok" };
+}
+
+export type RemoveCommunityMemberResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  | { status: "error"; error: string };
+
+/** Remove a member. Admin-only — same RLS gate and same trigger backstop as
+ *  changeCommunityMemberRole (removing another admin, or the last admin, is
+ *  rejected by enforce_community_admin_guard, not by this function). */
+export async function removeCommunityMember(
+  communityId: string,
+  memberRowId: string
+): Promise<RemoveCommunityMemberResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "forbidden", error: "Only a community admin can remove members." };
+  }
+
+  const { error } = await db
+    .from("community_members")
+    .delete()
+    .eq("id", memberRowId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    return { status: "error", error: error.message || "Couldn't remove that member." };
+  }
+
+  return { status: "ok" };
+}
+
+export type CommunityProject = {
+  id: string;
+  name: string;
+  description: string | null;
+  stage: string | null;
+};
+
+/** A community's projects — any active member can see the list (RLS:
+ *  "Projects: member or community select", 2026-08-30). Full project detail
+ *  (checklist, resources, shared folder) stays gated to actual project
+ *  members, unchanged — this is only the summary row. */
+export async function listCommunityProjects(communityId: string): Promise<CommunityProject[]> {
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("projects")
+    .select("id, name, description, stage")
+    .eq("community_id", communityId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+  return data as CommunityProject[];
 }
 
 // ── Activity ─────────────────────────────────────────────────────────────

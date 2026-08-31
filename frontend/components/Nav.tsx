@@ -21,6 +21,7 @@ import { useAuth } from "@/context/AuthContext";
 const PILLARS = [
   { label: "Explore", href: "/explore" },
   { label: "Collaborate", href: "/collaborate" },
+  { label: "Communities", href: "/communities" },
   { label: "Promote", href: "/promote" },
 ] as const;
 

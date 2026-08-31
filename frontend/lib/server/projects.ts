@@ -710,6 +710,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     p_stage: input.stage || null,
     p_description_capabilities: descriptionCapabilities,
     p_description_capabilities_gate_version: descriptionCapabilitiesGateVersion,
+    p_community_id: input.community_id || null,
   });
 
   if (error || !data) {

@@ -246,7 +246,7 @@ export default function CommunityPanel({
         <JoinAction communityId={communityId} isOpen={isOpen} membership={membership} />
         <ShareButton path={sharePath} />
       </div>
-      {membership.isLead && <PendingRequests requests={pendingRequests} />}
+      {membership.isAdmin && <PendingRequests requests={pendingRequests} />}
     </div>
   );
 }

@@ -20,7 +20,25 @@ import { MODALITIES, MODALITY_LABEL, PROJECT_STAGES, PROJECT_STAGE_LABEL } from 
 
 const UNSET = "" as const;
 
-export default function CreateProjectForm({ colabofest }: { colabofest: boolean }) {
+export default function CreateProjectForm({
+  colabofest,
+  communityId,
+  communitySlug,
+}: {
+  colabofest: boolean;
+  /** From /projects/new?community=<id> (see CommunityProjectsList's own
+   *  "New project" link) — a personal project (the common case) simply
+   *  omits this. Passed straight through to createProjectAction; RLS
+   *  (via create_project_with_lead re-checking community membership) is
+   *  the real gate on whether this id is honored, not this form. */
+  communityId?: string;
+  /** Resolved server-side (app/projects/new/page.tsx, from communityId) —
+   *  only used to build the post-create redirect back to
+   *  /communities/<slug>. undefined whenever communityId is, or if that id
+   *  didn't resolve to a real community; either way this form still works,
+   *  it just falls back to the plain /projects redirect below. */
+  communitySlug?: string;
+}) {
   const router = useRouter();
 
   const [name, setName] = useState("");
@@ -62,13 +80,20 @@ export default function CreateProjectForm({ colabofest }: { colabofest: boolean 
       indication: indication || undefined,
       modality: modality || undefined,
       stage: stage || undefined,
+      communityId,
     });
 
     if (res.ok) {
-      // /projects/[id] is step 2 (not built yet, per STRUCTURE.md) — land
-      // back on the list, which will show the new project immediately since
-      // its project_members row (role 'lead') was just created alongside it.
-      router.push("/projects");
+      // Created FOR a community (communitySlug resolved) — land back on
+      // that community's page, where the new project now shows in its list,
+      // rather than /projects, which a community member arriving here via
+      // the community's own "New project" link wouldn't otherwise think to
+      // check. No community param at all (the common case): unchanged —
+      // /projects/[id] is step 2 (not built yet, per STRUCTURE.md), so this
+      // still lands back on the list, which shows the new project
+      // immediately since its project_members row (role 'lead') was just
+      // created alongside it.
+      router.push(communitySlug ? `/communities/${communitySlug}` : "/projects");
       router.refresh();
     } else {
       setError(res.error);

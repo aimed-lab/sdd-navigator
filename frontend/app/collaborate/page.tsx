@@ -160,7 +160,7 @@ export default async function CollaboratePage({
   // Membership/activity reads only fire when a community is actually
   // selected — they're meaningless (and, for stats, an extra RPC) on the
   // unscoped board.
-  let membership: Membership = { state: "none", isLead: false };
+  let membership: Membership = { state: "none", role: null, isAdmin: false };
   let pendingRequests: PendingRequest[] = [];
   let stats = { memberCount: 0, joinedLast7d: 0 };
   if (communityId) {
@@ -168,7 +168,10 @@ export default async function CollaboratePage({
       getMembership(communityId),
       getCommunityStats(communityId),
     ]);
-    if (membership.isLead) pendingRequests = await listPendingRequests(communityId);
+    // Admin-gated, not lead — membership management moved off lead in
+    // 2026-08-30_community_admin_membership.sql (see Membership's own
+    // comment in lib/server/communities.ts).
+    if (membership.isAdmin) pendingRequests = await listPendingRequests(communityId);
   }
 
   // Area chips are derived from the posts actually on the board, so they can

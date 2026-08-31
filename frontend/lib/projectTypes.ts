@@ -76,6 +76,13 @@ export type CreateProjectInput = {
   indication?: string | null;
   modality?: Modality | null;
   stage?: ProjectStage | null;
+  // Optional community link — a personal project (the default, from
+  // /projects/new with no ?community=) leaves this null/undefined and is
+  // completely unaffected. See create_project_with_lead
+  // (2026-08-30_community_admin_membership.sql), which re-checks the
+  // creator is actually a member of this community server-side — this
+  // field is never trusted on its own.
+  community_id?: string | null;
 };
 
 /** The "Explore for this project" query text. The backend's explore()

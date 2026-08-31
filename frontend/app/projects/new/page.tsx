@@ -13,6 +13,7 @@
 
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { getCommunityById } from "@/lib/server/communities";
 import CreateProjectForm from "@/components/projects/CreateProjectForm";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -42,11 +43,25 @@ export default async function NewProjectPage({
     redirect(`/login?callbackUrl=${encodeURIComponent(target)}`);
   }
 
-  const { colabofest } = await searchParams;
+  const { colabofest, community } = await searchParams;
+  const communityId = typeof community === "string" ? community : undefined;
+
+  // The form only ever has the id (from the URL) but needs the SLUG to
+  // redirect back into /communities/<slug> after a successful create —
+  // resolved here, server-side, rather than making the form do its own
+  // fetch. A bad/stale id (community deleted, typo'd URL) just degrades to
+  // no redirect-back — communitySlug stays undefined, create still works,
+  // createProjectAction/create_project_with_lead re-check membership on
+  // the id regardless of whether this lookup succeeds.
+  const communitySlug = communityId ? (await getCommunityById(communityId))?.slug : undefined;
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20">
-      <CreateProjectForm colabofest={colabofest === "1"} />
+      <CreateProjectForm
+        colabofest={colabofest === "1"}
+        communityId={communityId}
+        communitySlug={communitySlug}
+      />
     </div>
   );
 }
