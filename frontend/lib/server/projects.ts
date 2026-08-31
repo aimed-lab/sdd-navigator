@@ -202,6 +202,12 @@ export type ProjectDetail = {
   // run_project_agent_async's own docstring), or the save itself failed
   // (best-effort — see saveProjectDigest below).
   digest: ProjectDigest | null;
+  // null for a personal project (the default) — set only when created
+  // through a community's own "New project" link
+  // (2026-08-30_community_admin_membership.sql). Just the id: the page
+  // resolves name/slug via getCommunityById when it needs to show the way
+  // back (see app/projects/[id]/page.tsx's own back-link).
+  community_id: string | null;
 };
 
 export type GetProjectResult =
@@ -424,7 +430,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
     .select(
       "id, name, description, description_capabilities, description_capabilities_gate_version, " +
         "lead_id, deadline, challenge_key, target, indication, modality, stage, " +
-        "shared_folder_url, shared_folder_set_by, shared_folder_set_at"
+        "shared_folder_url, shared_folder_set_by, shared_folder_set_at, community_id"
     )
     .eq("id", id)
     .maybeSingle();
@@ -564,6 +570,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       indication: (row.indication as string | null) ?? null,
       modality: (row.modality as string | null) ?? null,
       stage: (row.stage as string | null) ?? null,
+      community_id: (row.community_id as string | null) ?? null,
       // "Any lead" — computed from the members list we already fetched,
       // no extra query needed. NOT the same as is_creator below; see
       // 2026-08-08_project_co_leads.sql for why the two diverge.

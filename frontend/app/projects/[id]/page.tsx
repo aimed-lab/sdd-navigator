@@ -16,6 +16,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { getProject, getProposalFileUrl } from "@/lib/server/projects";
+import { getCommunityById } from "@/lib/server/communities";
 import { listProjectResources } from "@/lib/server/projectResources";
 import {
   MODALITY_LABEL,
@@ -96,8 +97,32 @@ export default async function ProjectDetailPage({
       : { total: 0, tiles: [], recent: [], items: [] };
   const exploreHref = buildProjectExploreHref(project);
 
+  // Way back to the project's community — null for a personal project
+  // (community_id itself is null), and also, deliberately, for a
+  // community_id that no longer resolves (deleted community): no fallback
+  // to /projects, this link just doesn't render. getCommunityById is a
+  // public read (same as the community page's own lookups), so this never
+  // needs its own membership check — the link only ever appears when
+  // there's a real community to point at.
+  const community = project.community_id ? await getCommunityById(project.community_id) : null;
+
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16">
+    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-6 pb-16">
+      {/* Way back to the project's community — same breadcrumb pattern as
+          Explore's own back-to-project link
+          (app/explore/[topic]/page.tsx). */}
+      {community && (
+        <div className="mb-4">
+          <Link
+            href={`/communities/${community.slug}`}
+            className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            {community.name}
+          </Link>
+        </div>
+      )}
+
       {/* Header & status */}
       <section className="mb-16">
         <div className="flex items-start justify-between gap-8 mb-6">

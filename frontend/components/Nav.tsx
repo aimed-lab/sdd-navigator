@@ -21,8 +21,8 @@ import { useAuth } from "@/context/AuthContext";
 const PILLARS = [
   { label: "Explore", href: "/explore" },
   { label: "Collaborate", href: "/collaborate" },
-  { label: "Communities", href: "/communities" },
   { label: "Promote", href: "/promote" },
+  { label: "Communities", href: "/communities" },
 ] as const;
 
 // "Projects" goes FIRST, before Explore, but only once we know the viewer is

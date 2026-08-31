@@ -523,6 +523,68 @@ export async function removeCommunityMember(
   return { status: "ok" };
 }
 
+export type DeleteCommunityResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Delete a community. Admin-only — "Communities: admin delete"
+ *  (2026-08-31_community_delete.sql) is the real gate, is_community_admin
+ *  re-checked below purely for a clear message instead of a raw 42501/zero
+ *  rows deleted.
+ *
+ *  NOTHING ELSE IS DELETED. Every side effect is an existing FK constraint,
+ *  not app code: community_members rows are removed by ON DELETE CASCADE
+ *  (2026-08-20_communities.sql); collab_posts.community_id,
+ *  lab_resources.community_id, and projects.community_id are all set back
+ *  to NULL by ON DELETE SET NULL. A project that belonged to this
+ *  community survives as a personal project — its members, checklist,
+ *  resources, and shared folder are completely untouched, exactly as if it
+ *  had never been linked to a community. */
+export async function deleteCommunity(communityId: string): Promise<DeleteCommunityResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can delete it." };
+  }
+
+  const { data: deleted, error } = await db
+    .from("communities")
+    .delete()
+    .eq("id", communityId)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    console.error("deleteCommunity: delete failed", error);
+
+    // Same split as createCommunity/addCommunityMemberByEmail: a P0001 is
+    // one of this database's own RAISE EXCEPTION checks (here, most
+    // likely enforce_community_admin_guard — see
+    // 2026-08-31_community_delete_admin_guard_fix.sql for the bug that
+    // exposed "Couldn't delete the community." telling nobody anything),
+    // shown near-verbatim. Anything else is a genuine server-side problem,
+    // said plainly, with the code.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't delete the community — ${error.message}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't delete the community — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+  if (!deleted) {
+    // RLS matched zero rows — not an admin, or the community no longer
+    // exists. Same non-distinction deleteProject makes for the same
+    // reason: telling the two apart isn't this function's call to make.
+    return { status: "error", error: "Couldn't delete the community." };
+  }
+
+  return { status: "ok" };
+}
+
 export type CommunityProject = {
   id: string;
   name: string;

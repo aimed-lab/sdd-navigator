@@ -14,6 +14,7 @@ import {
   approveMembership,
   changeCommunityMemberRole,
   createCommunity,
+  deleteCommunity,
   joinCommunity,
   leaveCommunity,
   rejectMembership,
@@ -199,5 +200,29 @@ export async function removeCommunityMemberAction(
     }
     console.error("removeCommunityMemberAction failed", e);
     return { ok: false, error: "Couldn't remove that member. Please try again." };
+  }
+}
+
+/** Delete a community. Admin-only — see deleteCommunity's own comment on
+ *  what survives (its projects, set back to personal) vs. what's gone for
+ *  good (the community row and every membership row, cascaded). No
+ *  revalidatePath for the deleted page itself — the caller (
+ *  DeleteCommunityButton) navigates away from /communities/[slug]
+ *  immediately on success, same as deleteProjectAction. */
+export async function deleteCommunityAction(communityId: string): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await deleteCommunity(communityId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath("/communities");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("deleteCommunityAction failed", e);
+    return { ok: false, error: "Couldn't delete the community. Please try again." };
   }
 }
