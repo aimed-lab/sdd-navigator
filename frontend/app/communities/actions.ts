@@ -13,12 +13,15 @@ import {
   addCommunityMemberByEmail,
   approveMembership,
   changeCommunityMemberRole,
+  createAnnouncement,
   createCommunity,
+  deleteAnnouncement,
   deleteCommunity,
   joinCommunity,
   leaveCommunity,
   rejectMembership,
   removeCommunityMember,
+  updateAnnouncement,
   updateCommunitySections,
   type CommunityRole,
 } from "@/lib/server/communities";
@@ -228,6 +231,81 @@ export async function deleteCommunityAction(communityId: string): Promise<Simple
     }
     console.error("deleteCommunityAction failed", e);
     return { ok: false, error: "Couldn't delete the community. Please try again." };
+  }
+}
+
+// ── announcements ────────────────────────────────────────────────────────
+
+/** Post an announcement. Admin-only — see createAnnouncement's own comment
+ *  on the RLS gate and where author_id comes from. */
+export async function createAnnouncementAction(
+  communityId: string,
+  slug: string,
+  input: { title: string; body: string }
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await createAnnouncement(communityId, input);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("createAnnouncementAction failed", e);
+    return { ok: false, error: "Couldn't post the announcement. Please try again." };
+  }
+}
+
+/** Edit an announcement. Admin-only — "Community announcements: admin
+ *  update" (RLS) is the real gate. */
+export async function updateAnnouncementAction(
+  communityId: string,
+  announcementId: string,
+  slug: string,
+  input: { title: string; body: string }
+): Promise<SimpleActionResult> {
+  if (!communityId || !announcementId) return { ok: false, error: "Missing announcement." };
+
+  try {
+    const result = await updateAnnouncement(communityId, announcementId, input);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateAnnouncementAction failed", e);
+    return { ok: false, error: "Couldn't save the announcement. Please try again." };
+  }
+}
+
+/** Delete an announcement. Admin-only — "Community announcements: admin
+ *  delete" (RLS) is the real gate. */
+export async function deleteAnnouncementAction(
+  communityId: string,
+  announcementId: string,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !announcementId) return { ok: false, error: "Missing announcement." };
+
+  try {
+    const result = await deleteAnnouncement(communityId, announcementId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("deleteAnnouncementAction failed", e);
+    return { ok: false, error: "Couldn't delete the announcement. Please try again." };
   }
 }
 

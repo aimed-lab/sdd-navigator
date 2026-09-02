@@ -9,6 +9,7 @@ import {
   getCommunityBySlug,
   getCommunityStats,
   getMembership,
+  listAnnouncements,
   listCommunityMembers,
   listCommunityProjects,
   listMemberRoster,
@@ -22,6 +23,7 @@ import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel"
 import MemberRoster from "@/components/communities/MemberRoster";
 import CommunityProjectsList from "@/components/communities/CommunityProjectsList";
 import MembersSection from "@/components/communities/MembersSection";
+import AnnouncementsSection from "@/components/communities/AnnouncementsSection";
 import EmptySection from "@/components/communities/EmptySection";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
 import CopyLinkButton from "@/components/communities/CopyLinkButton";
@@ -74,6 +76,19 @@ export default async function CommunityDetailPage({
   // member, same "avoid firing it for a viewer who can't see anything back"
   // reasoning as the admin-only reads above.
   const memberRoster = isMember ? await listMemberRoster(community.id) : [];
+
+  // Announcements — same "only fetch when isMember" reasoning as
+  // memberRoster above; a non-member's fetch would return [] anyway
+  // (community_announcements' own is_community_member() SELECT policy),
+  // this just avoids firing it for a viewer who can't see anything back.
+  // Author names are resolved through the SAME roster fetched above
+  // (community_member_roster), never a raw email — see AnnouncementsSection's
+  // own comment on why.
+  const announcements = isMember ? await listAnnouncements(community.id) : [];
+  const authorNames: Record<string, string> = Object.fromEntries(
+    memberRoster.map((m) => [m.user_id, m.display_name])
+  );
+
   // True only when the viewer IS an admin and the roster (fetched above,
   // admin-only) shows no OTHER active admin. Meaningless for any other
   // role — JoinLeaveControl only ever reads this when membership.role is
@@ -129,9 +144,10 @@ export default async function CommunityDetailPage({
 
         {/* Enabled sections, in the configured order (default: every
             section, projects first — the same position it's always
-            rendered in). Only "projects" and "members" have real content
-            today, per spec; the rest render a titled "nothing here yet"
-            placeholder deliberately, not as something to hide. */}
+            rendered in). Only "projects", "members", and "announcements"
+            have real content today, per spec; the rest render a titled
+            "nothing here yet" placeholder deliberately, not as something to
+            hide. */}
         {orderedSections
           .filter((s) => s.enabled)
           .map((s) => {
@@ -152,6 +168,17 @@ export default async function CommunityDetailPage({
                     joinedLast7d={stats.joinedLast7d}
                     isMember={isMember}
                     roster={memberRoster}
+                  />
+                );
+              case "announcements":
+                return (
+                  <AnnouncementsSection
+                    key={s.key}
+                    communityId={community.id}
+                    slug={community.slug}
+                    isAdmin={membership.isAdmin}
+                    announcements={announcements}
+                    authorNames={authorNames}
                   />
                 );
               default:

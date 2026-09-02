@@ -719,6 +719,178 @@ export async function updateCommunitySections(
   return { status: "ok" };
 }
 
+// ── Announcements ────────────────────────────────────────────────────────
+
+export type Announcement = {
+  id: string;
+  community_id: string;
+  author_id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Newest first, for any ACTIVE member — "Community announcements: member
+ *  select" (2026-09-02_community_announcements.sql) is the real gate, not
+ *  this function: a non-member's query matches zero rows in Postgres, which
+ *  reads here as the same empty list a signed-out visitor or a genuinely
+ *  quiet community gets. Author display name is NOT resolved here — the
+ *  caller (the page) does that through listMemberRoster()/
+ *  community_member_roster(), same as it already does for the Members
+ *  section, so an announcement never ships an email to render a name. */
+export async function listAnnouncements(communityId: string): Promise<Announcement[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("community_announcements")
+    .select("id, community_id, author_id, title, body, created_at, updated_at")
+    .eq("community_id", communityId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+  return data as Announcement[];
+}
+
+export type CreateAnnouncementResult =
+  | { status: "ok"; id: string }
+  | { status: "error"; error: string };
+
+/** Post an announcement. Admin-only — "Community announcements: admin
+ *  insert" (RLS) is the real gate, is_community_admin re-checked below
+ *  purely for a clear message instead of a raw 42501. author_id comes from
+ *  the session, never the caller's input, same as owner_id in
+ *  lib/server/collab.ts. */
+export async function createAnnouncement(
+  communityId: string,
+  input: { title: string; body: string }
+): Promise<CreateAnnouncementResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can post an announcement." };
+  }
+
+  const title = input.title.trim();
+  if (!title) return { status: "error", error: "A title is required." };
+
+  const { data, error } = await db
+    .from("community_announcements")
+    .insert({
+      community_id: communityId,
+      author_id: user.id,
+      title,
+      body: input.body.trim(),
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("createAnnouncement: insert failed", error);
+
+    // Same split as every other write in this file.
+    if (error?.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't post the announcement — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't post the announcement — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error?.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok", id: data.id };
+}
+
+export type UpdateAnnouncementResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Edit an announcement. Admin-only — "Community announcements: admin
+ *  update" (RLS) is the real gate. */
+export async function updateAnnouncement(
+  communityId: string,
+  announcementId: string,
+  input: { title: string; body: string }
+): Promise<UpdateAnnouncementResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can edit an announcement." };
+  }
+
+  const title = input.title.trim();
+  if (!title) return { status: "error", error: "A title is required." };
+
+  const { error } = await db
+    .from("community_announcements")
+    .update({ title, body: input.body.trim() })
+    .eq("id", announcementId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    console.error("updateAnnouncement: update failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't save the announcement — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't save the announcement — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+export type DeleteAnnouncementResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Delete an announcement. Admin-only — "Community announcements: admin
+ *  delete" (RLS) is the real gate. */
+export async function deleteAnnouncement(
+  communityId: string,
+  announcementId: string
+): Promise<DeleteAnnouncementResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can delete an announcement." };
+  }
+
+  const { error } = await db
+    .from("community_announcements")
+    .delete()
+    .eq("id", announcementId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    console.error("deleteAnnouncement: delete failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't delete the announcement — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't delete the announcement — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
 export type CommunityProject = {
   id: string;
   name: string;
