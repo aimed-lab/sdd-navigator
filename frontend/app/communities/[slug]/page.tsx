@@ -11,6 +11,7 @@ import {
   getMembership,
   listCommunityMembers,
   listCommunityProjects,
+  listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
 import { resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
@@ -65,6 +66,14 @@ export default async function CommunityDetailPage({
     : [[], []];
 
   const isMember = membership.state === "active";
+
+  // Member-facing roster (name + role, admins first) for the Members
+  // section below. listMemberRoster degrades to [] for anyone who isn't an
+  // active member (community_member_roster's own is_community_member() gate
+  // in the database, not just this check) — fetched only for an active
+  // member, same "avoid firing it for a viewer who can't see anything back"
+  // reasoning as the admin-only reads above.
+  const memberRoster = isMember ? await listMemberRoster(community.id) : [];
   // True only when the viewer IS an admin and the roster (fetched above,
   // admin-only) shows no OTHER active admin. Meaningless for any other
   // role — JoinLeaveControl only ever reads this when membership.role is
@@ -141,6 +150,8 @@ export default async function CommunityDetailPage({
                     key={s.key}
                     memberCount={stats.memberCount}
                     joinedLast7d={stats.joinedLast7d}
+                    isMember={isMember}
+                    roster={memberRoster}
                   />
                 );
               default:

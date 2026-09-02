@@ -493,6 +493,52 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
   return data as CommunityMember[];
 }
 
+export type MemberRosterEntry = {
+  user_id: string;
+  role: CommunityRole;
+  display_name: string;
+};
+
+/** The member-facing roster — display name (or role) for any ACTIVE member
+ *  to see, unlike listCommunityMembers above (admin-only, raw emails). Goes
+ *  through community_member_roster() — a SECURITY DEFINER RPC gated by
+ *  is_community_member(), the exact same shape as project_member_names()
+ *  (lib/server/projects.ts) — because a plain join on public.users would
+ *  run into that table's own SELECT policy (`is_public = true`) and blank
+ *  out a private-profile member instead of falling back to their email.
+ *  Sorted admins first, then alphabetically by the resolved display name —
+ *  never by raw role string, which would put "admin" ahead of "lead" ahead
+ *  of "member" alphabetically only by coincidence. */
+export async function listMemberRoster(communityId: string): Promise<MemberRosterEntry[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db.rpc("community_member_roster", {
+    community_ids: [communityId],
+  });
+  if (error || !Array.isArray(data)) return [];
+
+  const rows = data as {
+    user_id: string;
+    role: CommunityRole;
+    name: string | null;
+    email: string | null;
+  }[];
+
+  return rows
+    .map((r) => ({
+      user_id: r.user_id,
+      role: r.role,
+      display_name: r.name || r.email || "Unnamed member",
+    }))
+    .sort((a, b) => {
+      if (a.role === "admin" && b.role !== "admin") return -1;
+      if (b.role === "admin" && a.role !== "admin") return 1;
+      return a.display_name.localeCompare(b.display_name);
+    });
+}
+
 export type ChangeRoleResult =
   | { status: "ok" }
   | { status: "forbidden"; error: string }
