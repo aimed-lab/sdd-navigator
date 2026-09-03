@@ -12,6 +12,7 @@ import {
   listAnnouncements,
   listCommunityMembers,
   listCommunityProjects,
+  listCommunityResources,
   listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
@@ -24,6 +25,7 @@ import MemberRoster from "@/components/communities/MemberRoster";
 import CommunityProjectsList from "@/components/communities/CommunityProjectsList";
 import MembersSection from "@/components/communities/MembersSection";
 import AnnouncementsSection from "@/components/communities/AnnouncementsSection";
+import ResourcesSection from "@/components/communities/ResourcesSection";
 import EmptySection from "@/components/communities/EmptySection";
 import CollapsibleSection from "@/components/communities/CollapsibleSection";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
@@ -86,6 +88,13 @@ export default async function CommunityDetailPage({
   // (community_member_roster), never a raw email — see AnnouncementsSection's
   // own comment on why.
   const announcements = isMember ? await listAnnouncements(community.id) : [];
+
+  // Resources — same "only fetch when isMember" reasoning, same author-name
+  // source as announcements (the SAME roster fetched above), just under a
+  // name that matches how ResourcesSection reads it ("who added it" rather
+  // than "who wrote it").
+  const resources = isMember ? await listCommunityResources(community.id) : [];
+
   const authorNames: Record<string, string> = Object.fromEntries(
     memberRoster.map((m) => [m.user_id, m.display_name])
   );
@@ -149,17 +158,18 @@ export default async function CommunityDetailPage({
             same disclosure idiom as ManageCommunityCard below, which is
             deliberately on a quieter surface than these). Projects starts
             open; everything else starts closed. Only "projects", "members",
-            and "announcements" have real content today, per spec; the rest
-            render a "nothing here yet" placeholder deliberately, not as
-            something to hide — and have no count or action to show while
-            collapsed, unlike members/announcements/projects.
+            "announcements", and "resources" have real content today, per
+            spec; the rest render a "nothing here yet" placeholder
+            deliberately, not as something to hide — and have no count or
+            action to show while collapsed, unlike the other four.
 
-            Announcements renders itself rather than being wrapped here —
-            its header action ("New announcement") and its create form share
-            one piece of client state, which has to live in that one
-            component (see its own comment). Projects doesn't need that: its
-            action is a plain link, so the page (server) builds it and hands
-            it straight to CollapsibleSection's `action` prop. */}
+            Announcements and Resources each render themselves rather than
+            being wrapped here — their header action ("New announcement" /
+            "Add resource") and their create/add form share one piece of
+            client state, which has to live in that one component (see
+            their own comments). Projects doesn't need that: its action is
+            a plain link, so the page (server) builds it and hands it
+            straight to CollapsibleSection's `action` prop. */}
         {orderedSections
           .filter((s) => s.enabled)
           .map((s) => {
@@ -205,6 +215,18 @@ export default async function CommunityDetailPage({
                     isAdmin={membership.isAdmin}
                     announcements={announcements}
                     authorNames={authorNames}
+                  />
+                );
+              case "resources":
+                return (
+                  <ResourcesSection
+                    key={s.key}
+                    title={SECTION_LABEL[s.key]}
+                    communityId={community.id}
+                    slug={community.slug}
+                    isAdmin={membership.isAdmin}
+                    resources={resources}
+                    addedByNames={authorNames}
                   />
                 );
               default:

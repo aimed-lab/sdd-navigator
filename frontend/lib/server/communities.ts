@@ -47,7 +47,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { getSession, requireCurrentUser } from "@/lib/auth";
 import { getAnonServerClient } from "./supabaseServer";
-import type { SectionConfig } from "@/lib/communityTypes";
+import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType, type SectionConfig } from "@/lib/communityTypes";
 
 export type Community = {
   id: string;
@@ -893,6 +893,234 @@ export async function deleteAnnouncement(
       status: "error",
       error:
         "Couldn't delete the announcement — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+// ── Resources ────────────────────────────────────────────────────────────
+
+// CommunityResourceType/COMMUNITY_RESOURCE_TYPES live in lib/communityTypes.ts
+// (client-safe), not here — ResourcesSection ("use client") needs
+// COMMUNITY_RESOURCE_TYPES as a value for its type dropdown, and a
+// non-type-only import from this file drags in supabaseServer.ts ->
+// supabaseRoute.ts -> next/headers into the client bundle. Imported here,
+// not redeclared, so there is exactly one list to keep in sync with the
+// DB's CHECK constraint.
+
+export type CommunityResource = {
+  id: string;
+  community_id: string;
+  added_by: string;
+  title: string;
+  resource_type: CommunityResourceType;
+  url: string | null;
+  description: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** http(s) only, same rule and same reasoning as lib/server/projects.ts's
+ *  safeFolderUrl()/lib/server/showcase.ts's safeLink(): a raw user-supplied
+ *  string rendered as an href is an XSS vector (a `javascript:` URL is
+ *  exactly what this rejects), checked HERE server-side because a
+ *  browser-side check is a courtesy, not the rule. Unlike those two, a
+ *  resource's url is OPTIONAL — a resource might just describe something
+ *  offline — so an empty/blank input is valid and resolves to null, not an
+ *  error; only a NON-EMPTY value that isn't a valid http(s) URL is
+ *  rejected. */
+function safeResourceUrl(v: string | null | undefined): { ok: true; url: string | null } | { ok: false } {
+  const trimmed = (v ?? "").trim();
+  if (!trimmed) return { ok: true, url: null };
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === "http:" || u.protocol === "https:"
+      ? { ok: true, url: u.toString() }
+      : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** Grouped by type on the page, for any ACTIVE member — "Community
+ *  resources: member select" (2026-09-03_community_resources.sql) is the
+ *  real gate, not this function, same posture as listAnnouncements. Sorted
+ *  alphabetically by title; the page groups by resource_type client-side
+ *  (filtering preserves this order within each group), same pattern as
+ *  listMemberRoster's "admins first" sort + MembersSection's role-group
+ *  filter. `added_by` display name is resolved by the caller through
+ *  listMemberRoster()/community_member_roster(), never here. */
+export async function listCommunityResources(communityId: string): Promise<CommunityResource[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("community_resources")
+    .select("id, community_id, added_by, title, resource_type, url, description, created_at, updated_at")
+    .eq("community_id", communityId)
+    .order("title", { ascending: true });
+
+  if (error || !data) return [];
+  return data as CommunityResource[];
+}
+
+export type CreateCommunityResourceResult =
+  | { status: "ok"; id: string }
+  | { status: "error"; error: string };
+
+/** Add a resource. Admin-only — "Community resources: admin insert" (RLS)
+ *  is the real gate, is_community_admin re-checked below purely for a
+ *  clear message instead of a raw 42501. added_by comes from the session,
+ *  never the caller's input, same as author_id in createAnnouncement. */
+export async function createCommunityResource(
+  communityId: string,
+  input: { title: string; resource_type: string; url: string; description: string }
+): Promise<CreateCommunityResourceResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can add a resource." };
+  }
+
+  const title = input.title.trim();
+  if (!title) return { status: "error", error: "A title is required." };
+
+  if (!COMMUNITY_RESOURCE_TYPES.includes(input.resource_type as CommunityResourceType)) {
+    return { status: "error", error: "Choose a valid resource type." };
+  }
+
+  const safeUrl = safeResourceUrl(input.url);
+  if (!safeUrl.ok) {
+    return { status: "error", error: "Please paste a valid http:// or https:// link, or leave it blank." };
+  }
+
+  const { data, error } = await db
+    .from("community_resources")
+    .insert({
+      community_id: communityId,
+      added_by: user.id,
+      title,
+      resource_type: input.resource_type,
+      url: safeUrl.url,
+      description: input.description.trim(),
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("createCommunityResource: insert failed", error);
+
+    // Same split as every other write in this file.
+    if (error?.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't add the resource — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't add the resource — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error?.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok", id: data.id };
+}
+
+export type UpdateCommunityResourceResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Edit a resource. Admin-only — "Community resources: admin update" (RLS)
+ *  is the real gate. */
+export async function updateCommunityResource(
+  communityId: string,
+  resourceId: string,
+  input: { title: string; resource_type: string; url: string; description: string }
+): Promise<UpdateCommunityResourceResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can edit a resource." };
+  }
+
+  const title = input.title.trim();
+  if (!title) return { status: "error", error: "A title is required." };
+
+  if (!COMMUNITY_RESOURCE_TYPES.includes(input.resource_type as CommunityResourceType)) {
+    return { status: "error", error: "Choose a valid resource type." };
+  }
+
+  const safeUrl = safeResourceUrl(input.url);
+  if (!safeUrl.ok) {
+    return { status: "error", error: "Please paste a valid http:// or https:// link, or leave it blank." };
+  }
+
+  const { error } = await db
+    .from("community_resources")
+    .update({
+      title,
+      resource_type: input.resource_type,
+      url: safeUrl.url,
+      description: input.description.trim(),
+    })
+    .eq("id", resourceId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    console.error("updateCommunityResource: update failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't save the resource — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't save the resource — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+export type DeleteCommunityResourceResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Delete a resource. Admin-only — "Community resources: admin delete"
+ *  (RLS) is the real gate. */
+export async function deleteCommunityResource(
+  communityId: string,
+  resourceId: string
+): Promise<DeleteCommunityResourceResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can delete a resource." };
+  }
+
+  const { error } = await db
+    .from("community_resources")
+    .delete()
+    .eq("id", resourceId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    console.error("deleteCommunityResource: delete failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't delete the resource — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't delete the resource — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
         (error.code ?? "unknown") +
         ").",
     };

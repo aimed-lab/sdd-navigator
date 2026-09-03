@@ -15,13 +15,16 @@ import {
   changeCommunityMemberRole,
   createAnnouncement,
   createCommunity,
+  createCommunityResource,
   deleteAnnouncement,
   deleteCommunity,
+  deleteCommunityResource,
   joinCommunity,
   leaveCommunity,
   rejectMembership,
   removeCommunityMember,
   updateAnnouncement,
+  updateCommunityResource,
   updateCommunitySections,
   type CommunityRole,
 } from "@/lib/server/communities";
@@ -306,6 +309,81 @@ export async function deleteAnnouncementAction(
     }
     console.error("deleteAnnouncementAction failed", e);
     return { ok: false, error: "Couldn't delete the announcement. Please try again." };
+  }
+}
+
+// ── resources ────────────────────────────────────────────────────────────
+
+/** Add a resource. Admin-only — see createCommunityResource's own comment
+ *  on the RLS gate and where added_by comes from. */
+export async function createCommunityResourceAction(
+  communityId: string,
+  slug: string,
+  input: { title: string; resource_type: string; url: string; description: string }
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await createCommunityResource(communityId, input);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("createCommunityResourceAction failed", e);
+    return { ok: false, error: "Couldn't add the resource. Please try again." };
+  }
+}
+
+/** Edit a resource. Admin-only — "Community resources: admin update" (RLS)
+ *  is the real gate. */
+export async function updateCommunityResourceAction(
+  communityId: string,
+  resourceId: string,
+  slug: string,
+  input: { title: string; resource_type: string; url: string; description: string }
+): Promise<SimpleActionResult> {
+  if (!communityId || !resourceId) return { ok: false, error: "Missing resource." };
+
+  try {
+    const result = await updateCommunityResource(communityId, resourceId, input);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityResourceAction failed", e);
+    return { ok: false, error: "Couldn't save the resource. Please try again." };
+  }
+}
+
+/** Delete a resource. Admin-only — "Community resources: admin delete"
+ *  (RLS) is the real gate. */
+export async function deleteCommunityResourceAction(
+  communityId: string,
+  resourceId: string,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !resourceId) return { ok: false, error: "Missing resource." };
+
+  try {
+    const result = await deleteCommunityResource(communityId, resourceId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("deleteCommunityResourceAction failed", e);
+    return { ok: false, error: "Couldn't delete the resource. Please try again." };
   }
 }
 

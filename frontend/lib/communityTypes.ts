@@ -33,6 +33,27 @@ export const SECTION_LABEL: Record<SectionKey, string> = {
  *  renders in today, so a community that has never touched the Sections
  *  editor (sections IS NULL) shows it in exactly the same place it always
  *  has. */
+// Resource types for the Resources section
+// (database/migrations/2026-09-03_community_resources.sql). Split out here
+// rather than living only in lib/server/communities.ts for the same reason
+// as everything else in this file: a client component (ResourcesSection's
+// type dropdown) needs COMMUNITY_RESOURCE_TYPES as a VALUE, and any
+// non-type-only import from lib/server/communities.ts drags in
+// supabaseServer.ts -> supabaseRoute.ts -> next/headers, which breaks the
+// client bundle. lib/server/communities.ts imports these from here rather
+// than redeclaring them, so there is exactly one list to keep in sync with
+// the DB's CHECK constraint.
+export type CommunityResourceType = "tool" | "paper" | "dataset" | "link" | "podcast" | "other";
+
+export const COMMUNITY_RESOURCE_TYPES: CommunityResourceType[] = [
+  "tool",
+  "paper",
+  "dataset",
+  "link",
+  "podcast",
+  "other",
+];
+
 export const DEFAULT_SECTIONS: SectionConfig[] = SECTION_KEYS.map((key) => ({
   key,
   enabled: true,
