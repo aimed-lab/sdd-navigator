@@ -497,6 +497,14 @@ export type MemberRosterEntry = {
   user_id: string;
   role: CommunityRole;
   display_name: string;
+  /** Same field collab_post_owners() exposes for the Collaborate board's
+   *  "Name · Institution" line (PostCard.tsx) — null when the person hasn't
+   *  set one, same as there. Never affiliation (a role label like
+   *  "Researcher"), which PostCard only falls back to when institution is
+   *  unset — the roster card doesn't do that fallback (see
+   *  2026-09-02_community_member_roster_institution.sql's own comment on
+   *  why only institution was added). */
+  institution: string | null;
 };
 
 /** The member-facing roster — display name (or role) for any ACTIVE member
@@ -524,6 +532,7 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
     role: CommunityRole;
     name: string | null;
     email: string | null;
+    institution: string | null;
   }[];
 
   return rows
@@ -531,6 +540,7 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
       user_id: r.user_id,
       role: r.role,
       display_name: r.name || r.email || "Unnamed member",
+      institution: r.institution,
     }))
     .sort((a, b) => {
       if (a.role === "admin" && b.role !== "admin") return -1;

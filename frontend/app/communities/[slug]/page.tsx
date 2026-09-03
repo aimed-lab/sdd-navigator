@@ -25,6 +25,7 @@ import CommunityProjectsList from "@/components/communities/CommunityProjectsLis
 import MembersSection from "@/components/communities/MembersSection";
 import AnnouncementsSection from "@/components/communities/AnnouncementsSection";
 import EmptySection from "@/components/communities/EmptySection";
+import CollapsibleSection from "@/components/communities/CollapsibleSection";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
 import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
@@ -144,36 +145,61 @@ export default async function CommunityDetailPage({
 
         {/* Enabled sections, in the configured order (default: every
             section, projects first — the same position it's always
-            rendered in). Only "projects", "members", and "announcements"
-            have real content today, per spec; the rest render a titled
-            "nothing here yet" placeholder deliberately, not as something to
-            hide. */}
+            rendered in), each a card (CollapsibleSection — glass-panel,
+            same disclosure idiom as ManageCommunityCard below, which is
+            deliberately on a quieter surface than these). Projects starts
+            open; everything else starts closed. Only "projects", "members",
+            and "announcements" have real content today, per spec; the rest
+            render a "nothing here yet" placeholder deliberately, not as
+            something to hide — and have no count or action to show while
+            collapsed, unlike members/announcements/projects.
+
+            Announcements renders itself rather than being wrapped here —
+            its header action ("New announcement") and its create form share
+            one piece of client state, which has to live in that one
+            component (see its own comment). Projects doesn't need that: its
+            action is a plain link, so the page (server) builds it and hands
+            it straight to CollapsibleSection's `action` prop. */}
         {orderedSections
           .filter((s) => s.enabled)
           .map((s) => {
             switch (s.key) {
               case "projects":
                 return (
-                  <CommunityProjectsList
+                  <CollapsibleSection
                     key={s.key}
-                    projects={projects}
-                    communityId={isMember ? community.id : null}
-                  />
+                    title={SECTION_LABEL[s.key]}
+                    defaultOpen
+                    action={
+                      isMember ? (
+                        <Link
+                          href={`/projects/new?community=${community.id}`}
+                          className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm flex items-center gap-1.5 shrink-0"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">add</span>
+                          New project
+                        </Link>
+                      ) : null
+                    }
+                  >
+                    <CommunityProjectsList projects={projects} />
+                  </CollapsibleSection>
                 );
               case "members":
                 return (
-                  <MembersSection
+                  <CollapsibleSection
                     key={s.key}
-                    memberCount={stats.memberCount}
-                    joinedLast7d={stats.joinedLast7d}
-                    isMember={isMember}
-                    roster={memberRoster}
-                  />
+                    title={SECTION_LABEL[s.key]}
+                    count={stats.memberCount}
+                  >
+                    <MembersSection isMember={isMember} roster={memberRoster} />
+                  </CollapsibleSection>
                 );
               case "announcements":
                 return (
                   <AnnouncementsSection
                     key={s.key}
+                    title={SECTION_LABEL[s.key]}
                     communityId={community.id}
                     slug={community.slug}
                     isAdmin={membership.isAdmin}
@@ -182,7 +208,11 @@ export default async function CommunityDetailPage({
                   />
                 );
               default:
-                return <EmptySection key={s.key} title={SECTION_LABEL[s.key]} />;
+                return (
+                  <CollapsibleSection key={s.key} title={SECTION_LABEL[s.key]}>
+                    <EmptySection />
+                  </CollapsibleSection>
+                );
             }
           })}
 

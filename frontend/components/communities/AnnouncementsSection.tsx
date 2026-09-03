@@ -23,6 +23,7 @@ import {
   updateAnnouncementAction,
 } from "@/app/communities/actions";
 import type { Announcement } from "@/lib/server/communities";
+import CollapsibleSection from "./CollapsibleSection";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -301,14 +302,18 @@ function AnnouncementItem({
 }
 
 export default function AnnouncementsSection({
+  title,
   communityId,
   slug,
+  defaultOpen,
   isAdmin,
   announcements,
   authorNames,
 }: {
+  title: string;
   communityId: string;
   slug: string;
+  defaultOpen?: boolean;
   /** Every create/edit/delete control below is gated on this — the RLS
    *  policies (see the migration) are the real gate; this just decides
    *  whether to render the affordance at all. */
@@ -320,11 +325,18 @@ export default function AnnouncementsSection({
 }) {
   const [creating, setCreating] = useState(false);
 
+  // This component owns its own CollapsibleSection (rather than the page
+  // wrapping it externally, like Members/the placeholder sections do)
+  // because the header's "New announcement" button and the create form
+  // below both need the SAME `creating` state — that state has to live in
+  // one client component, and the header action has to reach it.
   return (
-    <section>
-      <div className="flex items-center justify-between gap-4 mb-2">
-        <h2 className="font-headline-md text-headline-md text-on-background">Announcements</h2>
-        {isAdmin && !creating && (
+    <CollapsibleSection
+      title={title}
+      count={announcements.length}
+      defaultOpen={defaultOpen}
+      action={
+        isAdmin && !creating ? (
           <button
             type="button"
             onClick={() => setCreating(true)}
@@ -332,37 +344,37 @@ export default function AnnouncementsSection({
           >
             New announcement
           </button>
-        )}
-      </div>
-
-      {isAdmin && creating && (
-        <div className="mb-4">
+        ) : null
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {isAdmin && creating && (
           <AnnouncementForm
             busyLabel="Posting…"
             submitLabel="Post"
             onCancel={() => setCreating(false)}
             onSubmit={(input) => createAnnouncementAction(communityId, slug, input)}
           />
-        </div>
-      )}
+        )}
 
-      {announcements.length === 0 ? (
-        <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
-      ) : (
-        <ul className="flex flex-col gap-3">
-          {announcements.map((a) => (
-            <li key={a.id}>
-              <AnnouncementItem
-                announcement={a}
-                authorName={authorNames[a.author_id] ?? "Unknown"}
-                communityId={communityId}
-                slug={slug}
-                isAdmin={isAdmin}
-              />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
+        {announcements.length === 0 ? (
+          <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {announcements.map((a) => (
+              <li key={a.id}>
+                <AnnouncementItem
+                  announcement={a}
+                  authorName={authorNames[a.author_id] ?? "Unknown"}
+                  communityId={communityId}
+                  slug={slug}
+                  isAdmin={isAdmin}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </CollapsibleSection>
   );
 }
