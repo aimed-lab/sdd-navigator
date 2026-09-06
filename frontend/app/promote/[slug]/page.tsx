@@ -15,6 +15,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublishedArticleBySlug, isOwnerOfShowcase } from "@/lib/server/showcase";
+import { estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
 import ShareButtons from "@/components/promote/ShareButtons";
 
 export const dynamic = "force-dynamic";
@@ -73,22 +74,6 @@ type PageProps = { params: Promise<{ slug: string }> };
  *  a link-preview fetch always gets a fresh URL, never a stale/expired one. */
 function heroImage(article: NonNullable<Awaited<ReturnType<typeof getPublishedArticleBySlug>>>) {
   return article.media.find((m) => m.kind === "image")?.url ?? article.image_url ?? null;
-}
-
-/** ~200 wpm, rounded, floored at 1 minute — standard estimated-read-time
- *  math, same rough rate every "N min read" badge on a news site uses.
- *  Counts the standfirst too since it's read before the body is. */
-function estimateReadMinutes(standfirst: string, body: string): number {
-  const words = `${standfirst} ${body}`.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.round(words / 200));
-}
-
-function formatPublishedDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
 }
 
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {

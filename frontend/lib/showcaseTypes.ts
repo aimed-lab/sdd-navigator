@@ -39,6 +39,49 @@ export const LEGACY_SHOWCASE_TYPE_LABEL: Record<string, string> = {
   achievement: "Achievement",
 };
 
+/** Material Symbols icon name per type — used ONLY for the gallery card's
+ *  no-image placeholder (ShowcaseCard.tsx). Not a decision the picker made
+ *  before (there was one, in the now-removed category cards); kept here as
+ *  the single source since the card is the only place it matters now. */
+export const SHOWCASE_TYPE_ICON: Record<ShowcaseType, string> = {
+  paper: "science",
+  talk: "podium",
+  poster: "image",
+  award: "emoji_events",
+  tool: "build",
+  other: "auto_awesome",
+};
+
+/** Fallback icon for a legacy `type` value with no entry above. */
+export const DEFAULT_SHOWCASE_TYPE_ICON = "auto_awesome";
+
+/** Background/text pairing per type for the gallery card's GENERATED COVER
+ *  (ShowcaseCard.tsx) — the solid tinted panel an entry gets when it has no
+ *  image of its own. Built entirely from tokens already in
+ *  tailwind.config.ts (no new colours): the three hue families the palette
+ *  actually has (primary/green, secondary/blue-grey, tertiary/blue), kept
+ *  muted via low opacity rather than the saturated base colour, since
+ *  several of these sit side by side in one grid. Six categories only
+ *  really give three distinguishable hues here — the background icon
+ *  (SHOWCASE_TYPE_ICON) carries the rest of the distinction, same as a real
+ *  photo would. Every category uses the EXACT SAME cover structure — only
+ *  bg/text change — so the six don't read as six different components. */
+export const SHOWCASE_TYPE_COVER: Record<ShowcaseType, { bg: string; text: string }> = {
+  paper: { bg: "bg-primary/10", text: "text-primary" },
+  talk: { bg: "bg-secondary/10", text: "text-secondary" },
+  poster: { bg: "bg-tertiary/10", text: "text-tertiary" },
+  award: { bg: "bg-primary/20", text: "text-primary" },
+  tool: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
+  other: { bg: "bg-surface-container-high", text: "text-on-surface-variant" },
+};
+
+/** Cover tint for a legacy `type` value with no entry above — neutral, same
+ *  as `other`. */
+export const DEFAULT_SHOWCASE_TYPE_COVER = {
+  bg: "bg-surface-container-high",
+  text: "text-on-surface-variant",
+};
+
 export type ShowcaseOwner = {
   id: string;
   name: string | null;
@@ -56,6 +99,9 @@ export type ShowcaseEntry = {
   tags: string[];
   created_at: string;
   owner: ShowcaseOwner | null;
+  /** Only ever populated for type="paper" — shown in small caps above the
+   *  headline on a generated cover (ShowcaseCard.tsx) when known. */
+  journal: string | null;
   /** Computed server-side (session user vs. the row's owner_id) — owner_id
    *  itself is never sent to the browser, just this yes/no. The client uses
    *  it only to decide whether to SHOW the delete affordance; the actual
@@ -68,6 +114,19 @@ export type ShowcaseEntry = {
    *  falls back to `title`/`link` for those. */
   slug: string | null;
   headline: string;
+  standfirst: string;
+  /** Needed only for estimateReadMinutes on the card — never rendered
+   *  directly there (the full body is the article page's job). */
+  articleBody: string;
+  publishedAt: string | null;
+  /** The card's actual image, already resolved server-side, per request, to
+   *  a real URL: the first `image`-kind attached media (signed, short-lived
+   *  — see lib/server/showcase.ts:getShowcaseHeroImages) if there is one,
+   *  else the legacy `image_url` column, else null. Never re-derive this
+   *  client-side from `image_url` alone — that would skip attached media
+   *  entirely and silently show nothing for every post-media-table entry
+   *  that has a hero image. */
+  heroImageUrl: string | null;
 };
 
 // ── generator (public, no auth) ───────────────────────────────────────────────

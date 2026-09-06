@@ -77,13 +77,19 @@ export default async function PromotePage({
               milestone directly.
             </p>
           </div>
-          <Link
-            href="/promote/submit"
-            className="btn-primary shrink-0 inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
-          >
-            <span className="material-symbols-outlined">add</span>
-            Submit to Showcase
-          </Link>
+          <div className="shrink-0 flex flex-col items-start md:items-end gap-2">
+            <Link
+              href="/promote/submit"
+              className="btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
+            >
+              <span className="material-symbols-outlined">add</span>
+              Submit to Showcase
+            </Link>
+            <p className="font-body-sm text-body-sm text-secondary md:text-right max-w-[16rem]">
+              Have something to share? A paper, talk, poster, award or tool —
+              takes a few minutes.
+            </p>
+          </div>
         </header>
 
         {/* Type filters */}
@@ -120,14 +126,39 @@ export default async function PromotePage({
             />
           </div>
         ) : (
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {entries.map((e) => (
-              <ShowcaseCard key={e.id} entry={e} />
-            ))}
-            <InvitationCard
-              heading="Have something to share?"
-              body="Add your own case study, paper, white paper or milestone."
-            />
+          // The trailing dashed "Have something to share?" card used to live
+          // here, appended after the last entry — with any entry count not
+          // a clean multiple of the column count, it broke a row instead of
+          // filling it. That prompt now lives in the header, next to Submit
+          // to Showcase, always visible regardless of how many entries
+          // there are.
+          //
+          // The featured entry gets its OWN full-width row — no card shares
+          // it. Two earlier versions put a second entry beside it (grid
+          // col-span, then flex-basis widths) and stretched that entry to
+          // match the featured card's height; for a card whose content is
+          // just a headline and a meta line, that stretch is mostly empty
+          // space with the date stranded at the bottom. There's no width
+          // split that avoids that once a short card is forced to match a
+          // tall one, so the fix is to never make it: featured is full
+          // width, cover-left/text-right internally (ShowcaseCard.tsx) so
+          // it isn't excessively tall itself, and everything else renders
+          // below in ONE uniform grid, every item the same shape, so their
+          // heights match because they're built the same, not because
+          // something was forced. If that grid's last row isn't full,
+          // that's just an ordinary short last row — the completely normal,
+          // unremarkable way every card grid on the web ends when the count
+          // isn't a clean multiple of the column count.
+          <div className="mt-8 space-y-6">
+            <ShowcaseCard entry={entries[0]} featured />
+
+            {entries.length > 1 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {entries.slice(1).map((e) => (
+                  <ShowcaseCard key={e.id} entry={e} />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </section>

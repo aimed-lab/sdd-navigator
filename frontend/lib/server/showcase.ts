@@ -45,12 +45,13 @@ export {
 } from "@/lib/showcaseTypes";
 
 const ENTRY_SELECT =
-  "id, type, title, headline, slug, description, authors, link, image_url, tags, created_at, owner_id";
+  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, tags, created_at, published_at, owner_id";
 
 function toEntry(
   row: Record<string, unknown>,
   owners: Map<string, ShowcaseOwner>,
-  viewerId: string | null
+  viewerId: string | null,
+  heroImages: Map<string, string>
 ): ShowcaseEntry {
   return {
     id: row.id as string,
@@ -60,6 +61,7 @@ function toEntry(
     authors: (row.authors as string) ?? "",
     link: (row.link as string) ?? null,
     image_url: (row.image_url as string) ?? null,
+    journal: (row.journal as string | null) ?? null,
     tags: (row.tags as string[]) ?? [],
     created_at: row.created_at as string,
     owner: owners.get(row.owner_id as string) ?? null,
@@ -68,6 +70,12 @@ function toEntry(
     is_owner: viewerId !== null && row.owner_id === viewerId,
     slug: (row.slug as string) || null,
     headline: (row.headline as string) || "",
+    standfirst: (row.standfirst as string) ?? "",
+    articleBody: (row.article_body as string) ?? "",
+    publishedAt: (row.published_at as string | null) ?? null,
+    // Attached media wins over the legacy column — see the field's own
+    // comment in showcaseTypes.ts for why this can't be re-derived client-side.
+    heroImageUrl: heroImages.get(row.id as string) ?? (row.image_url as string | null) ?? null,
   };
 }
 
@@ -78,6 +86,52 @@ async function ownerMap(db: Db): Promise<Map<string, ShowcaseOwner>> {
   const { data, error } = await db.rpc("showcase_owners");
   if (error || !Array.isArray(data)) return new Map();
   return new Map((data as ShowcaseOwner[]).map((o) => [o.id, o]));
+}
+
+/** showcase_id -> a freshly SIGNED URL for that entry's first attached
+ *  `image`-kind media (earliest by created_at), for the gallery card. Signed
+ *  URLs expire (10 minutes — SIGNED_URL_TTL_SECONDS below), so this must be
+ *  called on every request that renders the gallery, same as the article
+ *  page's own heroImage() — never cached/stored, and listShowcase's caller
+ *  (app/promote/page.tsx) is already `force-dynamic` for exactly this reason.
+ *
+ *  One query for every entry's candidate images, not one query per entry:
+ *  a gallery page rendering N cards would otherwise be N+1 round trips to
+ *  find just the first image each. Grouping/picking "first per showcase_id"
+ *  happens here in JS rather than in SQL (no DISTINCT ON via supabase-js)
+ *  since a gallery page is at most a few dozen rows — cheap either way. */
+async function getShowcaseHeroImages(
+  db: Db,
+  showcaseIds: string[]
+): Promise<Map<string, string>> {
+  if (showcaseIds.length === 0) return new Map();
+
+  const { data, error } = await db
+    .from("promote_showcase_media")
+    .select("showcase_id, url, created_at")
+    .in("showcase_id", showcaseIds)
+    .eq("kind", "image")
+    .order("created_at", { ascending: true });
+  if (error || !data) return new Map();
+
+  const firstPathByEntry = new Map<string, string>();
+  for (const row of data as Record<string, unknown>[]) {
+    const id = row.showcase_id as string;
+    if (!firstPathByEntry.has(id)) firstPathByEntry.set(id, row.url as string);
+  }
+
+  const signed = new Map<string, string>();
+  await Promise.all(
+    Array.from(firstPathByEntry.entries()).map(async ([id, path]) => {
+      try {
+        signed.set(id, await signMediaPath(db, path));
+      } catch {
+        // Unsignable/orphaned path — the card falls back to image_url (or
+        // the placeholder), same degrade listShowcaseMedia uses per-row.
+      }
+    })
+  );
+  return signed;
 }
 
 // ── reads (public) ───────────────────────────────────────────────────────────
@@ -108,11 +162,13 @@ export async function listShowcase(
   const { data, error } = await query;
   if (error || !data) return [];
 
+  const rows = data as Record<string, unknown>[];
   const viewer = await getCurrentUser();
-  const owners = await ownerMap(db);
-  return (data as Record<string, unknown>[]).map((r) =>
-    toEntry(r, owners, viewer?.id ?? null)
-  );
+  const [owners, heroImages] = await Promise.all([
+    ownerMap(db),
+    getShowcaseHeroImages(db, rows.map((r) => r.id as string)),
+  ]);
+  return rows.map((r) => toEntry(r, owners, viewer?.id ?? null, heroImages));
 }
 
 /** One PUBLISHED showcase entry. Null when it doesn't exist or isn't
@@ -132,8 +188,11 @@ export async function getShowcaseEntry(id: string): Promise<ShowcaseEntry | null
 
   if (error || !data) return null;
   const viewer = await getCurrentUser();
-  const owners = await ownerMap(db);
-  return toEntry(data as Record<string, unknown>, owners, viewer?.id ?? null);
+  const [owners, heroImages] = await Promise.all([
+    ownerMap(db),
+    getShowcaseHeroImages(db, [data.id as string]),
+  ]);
+  return toEntry(data as Record<string, unknown>, owners, viewer?.id ?? null, heroImages);
 }
 
 // ── article draft (create/edit/publish) ─────────────────────────────────────
