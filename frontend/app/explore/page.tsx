@@ -15,6 +15,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import CommunitiesSection from "@/components/explore/CommunitiesSection";
 import ScopeChips from "@/components/ScopeChips";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 
@@ -209,6 +210,11 @@ function ExploreFeed() {
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
+      {/* Communities — moved here from its own nav pillar; see
+          components/explore/CommunitiesSection.tsx. Sits above the search
+          box and the source tabs below, which are otherwise untouched. */}
+      <CommunitiesSection />
+
       {/* Search */}
       <section className="max-w-3xl mx-auto mb-10">
         <form onSubmit={submit} className="relative">

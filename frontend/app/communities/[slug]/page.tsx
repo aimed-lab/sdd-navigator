@@ -117,8 +117,12 @@ export default async function CommunityDetailPage({
           (mb-4, matching the project page's own back-link wrapper) instead
           of inherited from that stack's gap. */}
       <div className="mb-4">
+        {/* Communities is a section of Explore now, not its own nav
+            destination (see components/explore/CommunitiesSection.tsx) —
+            this returns there rather than to /communities, which still
+            works as a URL but is no longer where anyone arrives from. */}
         <Link
-          href="/communities"
+          href="/explore#communities"
           className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
         >
           <span className="material-symbols-outlined text-[16px]">arrow_back</span>

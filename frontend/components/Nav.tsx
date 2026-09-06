@@ -23,7 +23,6 @@ const PILLARS = [
   { label: "Explore", href: "/explore" },
   { label: "Collaborate", href: "/collaborate" },
   { label: "Promote", href: "/promote" },
-  { label: "Communities", href: "/communities" },
 ] as const;
 
 // Projects used to be a pillar here (added only when signed in, since a
@@ -34,6 +33,11 @@ const PILLARS = [
 // other link into them (the landing page's "Start a Project" button, a
 // community's Projects section, a project card, etc.) still points at the
 // same routes and needs no update.
+//
+// Communities used to be a pillar here too. It's now a section at the top
+// of Explore (components/explore/CommunitiesSection.tsx) instead of its
+// own destination — /communities and /communities/[slug] still work as
+// URLs, same as /projects does; they're just reached differently now.
 
 // Unseen count for the inbox badge. Refetched on every navigation so that
 // opening /inbox (which marks things seen) is reflected when you leave it.
