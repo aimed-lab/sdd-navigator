@@ -1,9 +1,10 @@
 "use client";
 
 // Shared shell nav — STRUCTURE follows design/SHELL.md (wordmark left; Explore /
-// Collaborate / Promote center with active highlight; right =
-// Log in/Sign up OR account menu + Settings; hamburger on mobile). VISUAL style
-// is taken from design/stitch/smartdrugdiscovery_landing_page/code.html.
+// Collaborate / Promote / Communities center with active highlight; right =
+// Log in/Sign up OR account menu with My projects + Settings; hamburger on
+// mobile). VISUAL style is taken from
+// design/stitch/smartdrugdiscovery_landing_page/code.html.
 // Per SHELL.md, the nav inside individual page HTML is ignored — this is the one.
 //
 // NO THEME TOGGLE: there used to be one here (a button flipping a `dark`
@@ -25,12 +26,14 @@ const PILLARS = [
   { label: "Communities", href: "/communities" },
 ] as const;
 
-// "Projects" goes FIRST, before Explore, but only once we know the viewer is
-// signed in — a signed-out visitor has nothing to see at /projects (it
-// redirects straight to /login), so the logged-out nav must not change at
-// all. See callers below: both the desktop and mobile pillar lists build
-// off this, never off PILLARS directly, so the two can't drift apart.
-const PROJECTS_PILLAR = { label: "Projects", href: "/projects" } as const;
+// Projects used to be a pillar here (added only when signed in, since a
+// signed-out visitor has nothing to see at /projects — it redirects
+// straight to /login). Moved into the account menu instead, as "My
+// projects" — see the desktop dropdown and the mobile signed-in block
+// below. /projects and /projects/[id] themselves are unchanged; every
+// other link into them (the landing page's "Start a Project" button, a
+// community's Projects section, a project card, etc.) still points at the
+// same routes and needs no update.
 
 // Unseen count for the inbox badge. Refetched on every navigation so that
 // opening /inbox (which marks things seen) is reflected when you leave it.
@@ -72,10 +75,6 @@ export default function Nav() {
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
-  // Signed-out visitors see exactly the pillars they always have; Projects
-  // only appears once `user` is known to be signed in.
-  const pillars = user ? [PROJECTS_PILLAR, ...PILLARS] : PILLARS;
-
   return (
     <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-white/70 backdrop-blur-xl border-b border-surface-variant/50 shadow-sm">
       <div className="max-w-container-max mx-auto h-full flex justify-between items-center px-margin-mobile md:px-margin-desktop">
@@ -85,7 +84,7 @@ export default function Nav() {
             SmartDrugDiscovery
           </Link>
           <div className="hidden md:flex items-center gap-6">
-            {pillars.map((p) => (
+            {PILLARS.map((p) => (
               <Link
                 key={p.href}
                 href={p.href}
@@ -149,6 +148,14 @@ export default function Nav() {
                     onMouseLeave={() => setMenuOpen(false)}
                   >
                     <Link
+                      href="/projects"
+                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <span className="material-symbols-outlined text-secondary text-base">folder</span>
+                      My projects
+                    </Link>
+                    <Link
                       href="/settings"
                       className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
                       onClick={() => setMenuOpen(false)}
@@ -183,7 +190,7 @@ export default function Nav() {
       {/* Mobile menu */}
       {mobileOpen && (
         <div className="md:hidden bg-white/95 backdrop-blur-xl border-b border-surface-variant/50 px-margin-mobile py-4 flex flex-col gap-3">
-          {pillars.map((p) => (
+          {PILLARS.map((p) => (
             <Link
               key={p.href}
               href={p.href}
@@ -220,6 +227,9 @@ export default function Nav() {
                     {unseen > 99 ? "99+" : unseen}
                   </span>
                 )}
+              </Link>
+              <Link href="/projects" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
+                My projects
               </Link>
               <Link href="/settings" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 Settings
