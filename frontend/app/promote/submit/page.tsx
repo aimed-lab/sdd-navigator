@@ -6,11 +6,12 @@
 // design/SHELL.md.
 //
 // SERVER component so the auth check runs before any form HTML is sent: a
-// signed-out visitor gets the gate, not a form that fails on submit.
-// submitShowcaseAction re-checks server-side and RLS enforces ownership.
+// signed-out visitor gets the gate, not a flow that fails on its first save.
+// Every server action in app/promote/actions.ts re-checks server-side and
+// RLS enforces ownership regardless.
 
 import Link from "next/link";
-import SubmitShowcaseForm from "@/components/promote/SubmitShowcaseForm";
+import SubmitFlow from "@/components/promote/SubmitFlow";
 import { getCurrentUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -32,13 +33,15 @@ export default async function SubmitShowcasePage() {
         Submit to the showcase
       </h1>
       <p className="mt-3 font-body-lg text-body-lg text-secondary">
-        Share a case study, paper, white paper or lab milestone with the
-        drug-discovery community.
+        Paste a DOI or PubMed ID to draft the article automatically, or write
+        it yourself below — a talk, a poster, an award, a tool, or anything
+        else worth sharing. Either way you edit it, attach media, and publish
+        when you&apos;re ready.
       </p>
 
       <div className="mt-10">
         {user ? (
-          <SubmitShowcaseForm />
+          <SubmitFlow />
         ) : (
           <div className="glass-panel rounded-2xl p-10 text-center">
             <span className="material-symbols-outlined text-4xl text-primary">lock</span>
@@ -47,8 +50,7 @@ export default async function SubmitShowcasePage() {
             </h2>
             <p className="mt-2 font-body-md text-body-md text-secondary max-w-md mx-auto">
               Entries are credited to you so the community knows whose work it
-              is. Browsing the showcase — and the post generator — stay open to
-              everyone.
+              is. Browsing the showcase stays open to everyone.
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link

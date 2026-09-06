@@ -2,11 +2,13 @@
 // retry on rate limiting.
 //
 // WHY THIS EXISTS
-// A /api/promote/generate request makes TWO Groq calls (4 LinkedIn variants at
-// max_tokens 4096 + the funding/lay pair at 2048 = ~6,144 of a 12,000
-// tokens-per-MINUTE budget). Two users generating in the same minute can empty
-// the bucket, and the loser got a bare 500. Measured: 2 of 3 consecutive
-// requests succeeded before this existed.
+// A /api/promote/generate request makes ONE Groq call (the article, up to
+// max_tokens 3072 of a 12,000 tokens-per-MINUTE budget — this used to be two
+// calls/~6,144 tokens when a funding-pitch/lay-summary generator ran
+// alongside it; that generator is gone, this budget note isn't). Two users
+// generating in the same minute can still empty the bucket, and the loser
+// got a bare 500. Measured: 2 of 3 consecutive requests succeeded before
+// this existed.
 //
 // Two things fix that, and they are different fixes:
 //   * the CACHE (lib/serverCache.ts, applied in the route) stops the same paper
@@ -92,7 +94,7 @@ export async function groqComplete(opts: {
   // JSON mode: both existing Promote callers parse structured JSON, and
   // without response_format: json_object the model emits literal newlines
   // inside string values, which JSON.parse rejects. Defaults to true so
-  // generatePosts.ts/generateExtras.ts need no change to keep that
+  // generateArticle.ts/generateExtras.ts need no change to keep that
   // behaviour. Groq REJECTS json_object mode with a 400 unless the word
   // "json" appears somewhere in the messages (a chatbot answering in plain
   // prose won't say that) — set json: false for a prose caller instead of

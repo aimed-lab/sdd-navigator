@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { ServerConfigError } from "@/lib/server/supabaseServer";
 import { fetchPaperById } from "@/lib/server/promote/fetchPaper";
-import { generatePromoPosts } from "@/lib/server/promote/generatePosts";
-import { generateExtraOutputs } from "@/lib/server/promote/generateExtras";
+import { generatePromoArticle } from "@/lib/server/promote/generateArticle";
 import { RateLimitedError } from "@/lib/server/promote/groqCall";
 import {
   STALE_TTL_GENERATOR,
@@ -13,19 +12,25 @@ import {
 import type { GeneratorResult } from "@/lib/showcaseTypes";
 
 // POST /api/promote/generate  { input: "<DOI | PMID | paper URL>" }
-//   -> { paper, variants[4], fundingPitch, laySummary }
+//   -> { paper, headline, standfirst, articleBody }
 //
 // PUBLIC on purpose — no auth. Reads open paper metadata (bioRxiv / Crossref /
-// PubMed) and returns generated drafts. It WRITES NOTHING and never posts
-// anywhere; publishing is always the researcher copying a draft themselves.
+// PubMed) and returns a generated article DRAFT. It WRITES NOTHING to the
+// database and publishes nothing — turning a draft into a shareable page at
+// /promote/[slug] is a separate, signed-in step through
+// app/promote/actions.ts (createArticleDraftAction / publishArticleAction).
+// Only the "paper" category in the /promote/submit picker calls this route at
+// all; every other category is written by hand (components/promote/SubmitFlow.tsx).
 //
-// RATE-LIMIT DISCIPLINE. Each miss makes two Groq calls (~6,144 of a
-// 12,000-tokens-per-minute budget), which measurably 500'd under light
-// concurrency before this. Three defences, in order of how much they do:
+// RATE-LIMIT DISCIPLINE. Each miss makes one Groq call (up to 3,072 of a
+// 12,000-tokens-per-minute budget — this used to be two calls/~6,144 tokens
+// before the funding-pitch/lay-summary generator was removed), which
+// measurably 500'd under light concurrency before the defences below existed.
+// Three defences, in order of how much they do:
 //   1. CACHE — the same paper never costs tokens twice. Keyed on the NORMALIZED
 //      identifier, so "10.1126/SCIENCE.1225829" and " 10.1126/science.1225829 "
 //      are one entry. Single-flight means two simultaneous requests for the same
-//      paper make ONE set of Groq calls, not two.
+//      paper make ONE Groq call, not two.
 //   2. RETRY — groqCall.ts retries once on a 429, absorbing two DIFFERENT papers
 //      colliding in one minute.
 //   3. FRIENDLY FAILURE — a genuine rate-limit returns 503 with a message the UI
@@ -41,12 +46,7 @@ async function generate(input: string): Promise<GeneratorResult | null> {
   const paper = await fetchPaperById(input);
   if (!paper) return null;
 
-  // Both generators are grounded in the SAME fetched metadata. Run in parallel:
-  // they're independent, and sequential would roughly double the user's wait.
-  const [variants, extras] = await Promise.all([
-    generatePromoPosts(paper),
-    generateExtraOutputs(paper),
-  ]);
+  const article = await generatePromoArticle(paper);
 
   return {
     paper: {
@@ -56,10 +56,11 @@ async function generate(input: string): Promise<GeneratorResult | null> {
       doi: paper.doi,
       pmid: paper.pmid,
       publishedDate: paper.publishedDate,
+      journal: paper.journal,
     },
-    variants,
-    fundingPitch: extras.fundingPitch,
-    laySummary: extras.laySummary,
+    headline: article.headline,
+    standfirst: article.standfirst,
+    articleBody: article.articleBody,
   };
 }
 

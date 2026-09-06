@@ -6,15 +6,33 @@
 // Client component (not a server component anymore) because the owner-only
 // delete affordance needs local state for the confirm dialog — same reason
 // collaborate/PostCard.tsx is a client component.
+//
+// An entry created through the unified /promote/submit flow has a `slug` and
+// links to its hosted article at /promote/[slug] — the headline (not the
+// paper's own title) is what's shown, since the headline is what the author
+// actually wrote/edited for this card. The link to the ORIGINAL paper lives
+// on the article page itself, not here. A legacy entry with no slug (created
+// before this flow existed) falls back to its title and external `link`,
+// same as before this card was reworked.
 
 import { useState } from "react";
+import Link from "next/link";
 import type { ShowcaseEntry } from "@/lib/showcaseTypes";
-import { SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
+import { LEGACY_SHOWCASE_TYPE_LABEL, SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
 import DeleteShowcaseConfirm from "./DeleteShowcaseConfirm";
 
 export default function ShowcaseCard({ entry }: { entry: ShowcaseEntry }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const credit = [entry.authors, entry.owner?.affiliation].filter(Boolean).join(" · ");
+  const heading = entry.headline || entry.title;
+  const href = entry.slug ? `/promote/${entry.slug}` : null;
+  // A row from before the current 6-category picker may carry a value
+  // (case_study/white_paper/achievement) SHOWCASE_TYPE_LABEL no longer has a
+  // key for — fall back to the legacy label map, then the raw value.
+  const typeLabel =
+    (SHOWCASE_TYPE_LABEL as Record<string, string>)[entry.type] ??
+    LEGACY_SHOWCASE_TYPE_LABEL[entry.type] ??
+    entry.type;
 
   return (
     <>
@@ -34,11 +52,17 @@ export default function ShowcaseCard({ entry }: { entry: ShowcaseEntry }) {
 
       <div className="flex flex-col flex-1 p-6">
         <span className="self-start px-3 py-1 mb-3 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm">
-          {SHOWCASE_TYPE_LABEL[entry.type]}
+          {typeLabel}
         </span>
 
         <h3 className="font-headline-md text-lg leading-tight text-on-background">
-          {entry.title}
+          {href ? (
+            <Link href={href} className="hover:underline underline-offset-4">
+              {heading}
+            </Link>
+          ) : (
+            heading
+          )}
         </h3>
 
         {entry.description && (
@@ -66,16 +90,36 @@ export default function ShowcaseCard({ entry }: { entry: ShowcaseEntry }) {
               {credit || "SmartDrugDiscovery"}
             </span>
             <span className="shrink-0 flex items-center gap-3">
-              {entry.link && (
-                <a
-                  href={entry.link}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {href ? (
+                // Reads the hosted article — the link to the ORIGINAL paper
+                // lives on that page itself, not here.
+                <Link
+                  href={href}
                   className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
                 >
-                  View
-                  <span className="material-symbols-outlined text-base">open_in_new</span>
-                </a>
+                  Read
+                  <span className="material-symbols-outlined text-base">arrow_forward</span>
+                </Link>
+              ) : (
+                entry.link && (
+                  <a
+                    href={entry.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                  >
+                    View
+                    <span className="material-symbols-outlined text-base">open_in_new</span>
+                  </a>
+                )
+              )}
+              {entry.is_owner && href && (
+                <Link
+                  href={`${href}/edit`}
+                  className="font-label-sm text-label-sm text-secondary/60 hover:text-primary transition-colors"
+                >
+                  Edit
+                </Link>
               )}
               {entry.is_owner && (
                 <button

@@ -1,4 +1,4 @@
-// Promote — /promote. Showcase gallery + the paper→posts generator.
+// Promote — /promote. The showcase gallery.
 //
 // Layout follows design/stitch/smartdrugdiscovery_promote_with_showcase_images,
 // restyled in the shared design system. Nav/Footer come from the root layout,
@@ -6,12 +6,14 @@
 // along with its "1,200+ laboratories" CTA band, which is an invented statistic
 // (see the no-fake-metrics rule established on the landing page).
 //
-// SERVER component for the gallery: it reads lib/server/showcase.ts directly, so
-// entries are in the HTML with no client fetch. The type filter is URL state
-// (?type=), keeping every view linkable. The generator below is a client island.
+// SERVER component: reads lib/server/showcase.ts directly, so entries are in
+// the HTML with no client fetch. The type filter is URL state (?type=),
+// keeping every view linkable. Submitting — DOI-sourced article generation,
+// editing, media, publish — is the single flow at /promote/submit
+// (components/promote/SubmitFlow.tsx); this page only lists PUBLISHED
+// entries (listShowcase filters on published=true).
 
 import Link from "next/link";
-import GeneratorPanel from "@/components/promote/GeneratorPanel";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
 import { listShowcase } from "@/lib/server/showcase";
 import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/showcaseTypes";
@@ -70,8 +72,9 @@ export default async function PromotePage({
               Promote
             </h1>
             <p className="mt-3 font-body-lg text-body-lg text-secondary max-w-2xl">
-              Show the community what your lab has done — and turn a paper into
-              posts you can actually publish.
+              Show the community what your lab has done — paste a DOI and get
+              a shareable article, or submit a case study, white paper or
+              milestone directly.
             </p>
           </div>
           <Link
@@ -128,11 +131,6 @@ export default async function PromotePage({
           </div>
         )}
       </section>
-
-      {/* ── Generator ────────────────────────────────────────────────────── */}
-      <div className="border-t border-outline-variant/30 pt-16">
-        <GeneratorPanel />
-      </div>
 
     </div>
   );

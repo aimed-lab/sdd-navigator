@@ -27,6 +27,7 @@ export type PaperMetadata = {
   doi: string | null;
   pmid: string | null;
   publishedDate: string | null;
+  journal: string | null; // null for a bioRxiv preprint — it has no journal yet
   sourceUrl: string; // link to the paper itself (doi.org/{doi} or the PubMed page)
 };
 
@@ -74,6 +75,7 @@ type PartialMeta = {
   abstract: string | null;
   publishedDate: string | null;
   doi: string | null;
+  journal: string | null;
 };
 
 // bioRxiv details endpoint — returns the full preprint record (incl. abstract)
@@ -95,14 +97,16 @@ async function fetchFromBiorxiv(doi: string): Promise<PartialMeta | null> {
       abstract: (rec.abstract ?? "").trim() ? cleanText(rec.abstract) : null,
       publishedDate: rec.date ?? null,
       doi: rec.doi ?? doi,
+      journal: null, // a preprint has no journal yet
     };
   } catch {
     return null;
   }
 }
 
-// Crossref works/{doi} — reliable title/authors/date. `abstract` is frequently
-// absent (hasAbstract:false); a missing abstract is NOT a failure here.
+// Crossref works/{doi} — reliable title/authors/date/journal. `abstract` is
+// frequently absent (hasAbstract:false); a missing abstract is NOT a failure
+// here.
 async function fetchFromCrossref(doi: string): Promise<PartialMeta | null> {
   try {
     const res = await fetch(`https://api.crossref.org/works/${doi}`, {
@@ -115,6 +119,7 @@ async function fetchFromCrossref(doi: string): Promise<PartialMeta | null> {
         author?: { given?: string; family?: string }[];
         abstract?: string;
         DOI?: string;
+        "container-title"?: string[];
         published?: { "date-parts"?: number[][] };
         "published-online"?: { "date-parts"?: number[][] };
         issued?: { "date-parts"?: number[][] };
@@ -127,12 +132,14 @@ async function fetchFromCrossref(doi: string): Promise<PartialMeta | null> {
       .map((a) => [a.given, a.family].filter(Boolean).join(" ").trim())
       .filter(Boolean);
     const dateParts = (m.published ?? m["published-online"] ?? m.issued)?.["date-parts"]?.[0];
+    const journal = (m["container-title"] ?? [])[0];
     return {
       title: cleanText(title),
       authors,
       abstract: (m.abstract ?? "").trim() ? cleanText(m.abstract) : null,
       publishedDate: partsToDate(dateParts),
       doi: m.DOI ?? doi,
+      journal: (journal ?? "").trim() ? cleanText(journal) : null,
     };
   } catch {
     return null;
@@ -155,7 +162,8 @@ async function pubmedFindPmidByDoi(doi: string): Promise<string | null> {
   }
 }
 
-// PubMed esummary → title/authors/date/doi for a PMID (mirrors sources/pubmed.ts).
+// PubMed esummary → title/authors/date/doi/journal for a PMID (mirrors
+// sources/pubmed.ts).
 async function pubmedEsummary(pmid: string): Promise<PartialMeta | null> {
   try {
     const url =
@@ -169,6 +177,7 @@ async function pubmedEsummary(pmid: string): Promise<PartialMeta | null> {
         {
           title?: string;
           pubdate?: string;
+          fulljournalname?: string;
           authors?: { name: string }[];
           articleids?: { idtype?: string; value?: string }[];
         }
@@ -183,6 +192,7 @@ async function pubmedEsummary(pmid: string): Promise<PartialMeta | null> {
       abstract: null, // esummary has no abstract; efetch supplies it
       publishedDate: doc.pubdate ?? null,
       doi,
+      journal: (doc.fulljournalname ?? "").trim() ? cleanText(doc.fulljournalname) : null,
     };
   } catch {
     return null;
@@ -225,6 +235,7 @@ export async function fetchPaperById(input: string): Promise<PaperMetadata | nul
       doi: base.doi,
       pmid: id,
       publishedDate: base.publishedDate,
+      journal: base.journal,
       sourceUrl: base.doi
         ? `https://doi.org/${base.doi}`
         : `https://pubmed.ncbi.nlm.nih.gov/${id}/`,
@@ -282,6 +293,7 @@ export async function fetchPaperById(input: string): Promise<PaperMetadata | nul
     doi: base.doi ?? doi,
     pmid,
     publishedDate: base.publishedDate,
+    journal: base.journal,
     sourceUrl: `https://doi.org/${base.doi ?? doi}`,
   };
 }

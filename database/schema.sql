@@ -784,32 +784,69 @@ REVOKE ALL ON FUNCTION public.collab_post_owners() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.collab_post_owners() TO anon, authenticated;
 
 -- =============================================================================
--- Promote showcase (see database/migrations/2026-07-26_promote_showcase.sql)
+-- Promote showcase (see database/migrations/2026-07-26_promote_showcase.sql
+-- and 2026-09-05_promote_article.sql, which added the article fields/policies
+-- folded directly into the table below since this file is meant to be run
+-- fresh, not replayed as a sequence of ALTERs).
 -- =============================================================================
 -- ── 1. promote_showcase ──────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.promote_showcase (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id    UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
-    type        TEXT        NOT NULL
-                    CHECK (type IN ('case_study', 'paper', 'white_paper', 'achievement')),
-    title       TEXT        NOT NULL,
-    description TEXT        NOT NULL DEFAULT '',
-    authors     TEXT        NOT NULL DEFAULT '',
-    link        TEXT,                                   -- external link (nullable)
-    image_url   TEXT,                                   -- uploaded figure (nullable)
-    tags        TEXT[]      NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id     UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    -- 'paper'/'talk'/'poster'/'award'/'tool'/'other' are the current
+    -- "what are you showcasing?" picker (lib/showcaseTypes.ts
+    -- SHOWCASE_TYPES); 'case_study'/'white_paper'/'achievement' are legacy
+    -- values from before that picker existed, kept valid but never offered
+    -- as a new choice.
+    type         TEXT        NOT NULL
+                     CHECK (type IN (
+                         'paper', 'talk', 'poster', 'award', 'tool', 'other',
+                         'case_study', 'white_paper', 'achievement'
+                     )),
+    title        TEXT        NOT NULL,
+    description  TEXT        NOT NULL DEFAULT '',
+    authors      TEXT        NOT NULL DEFAULT '',
+    link         TEXT,                                   -- external link (nullable)
+    image_url    TEXT,                                   -- uploaded figure (nullable)
+    tags         TEXT[]      NOT NULL DEFAULT '{}',
+    -- Article fields (the /promote/submit flow's output — DOI-generated for
+    -- type='paper', hand-written otherwise; see
+    -- lib/server/promote/generateArticle.ts and components/promote/SubmitFlow.tsx).
+    slug         TEXT,                                   -- unique; the /promote/[slug] page
+    headline     TEXT        NOT NULL DEFAULT '',
+    standfirst   TEXT        NOT NULL DEFAULT '',
+    article_body TEXT        NOT NULL DEFAULT '',
+    journal      TEXT,
+    doi          TEXT,
+    -- Draft-then-publish: a row is NOT publicly readable until this is true.
+    -- Defaults false so a freshly created article starts as a private draft.
+    published    BOOLEAN     NOT NULL DEFAULT false,
+    -- Stamped by setArticlePublished(true) — the article page's own "Published
+    -- <date>" line reads this, not created_at (when the DRAFT was started).
+    published_at TIMESTAMPTZ,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE public.promote_showcase ENABLE ROW LEVEL SECURITY;
 
--- Anyone (signed in or not) can browse the gallery — that is the point of a
--- showcase.
-DROP POLICY IF EXISTS "promote_showcase_public_select" ON public.promote_showcase;
-CREATE POLICY "promote_showcase_public_select"
+CREATE UNIQUE INDEX IF NOT EXISTS idx_promote_showcase_slug
+    ON public.promote_showcase (slug)
+    WHERE slug IS NOT NULL;
+
+-- Published rows are public (anon included); an unpublished draft is visible
+-- only to its owner. Postgres OR's multiple permissive policies together, so
+-- a row is readable if EITHER policy matches.
+DROP POLICY IF EXISTS "promote_showcase_select_published" ON public.promote_showcase;
+CREATE POLICY "promote_showcase_select_published"
     ON public.promote_showcase FOR SELECT
-    USING (true);
+    USING (published = true);
+
+DROP POLICY IF EXISTS "promote_showcase_select_own" ON public.promote_showcase;
+CREATE POLICY "promote_showcase_select_own"
+    ON public.promote_showcase FOR SELECT
+    TO authenticated
+    USING (auth.uid() = owner_id);
 
 -- Writes are owner-only. owner_id is derived from the session in
 -- lib/server/showcase.ts; these policies make a forged owner_id fail in
@@ -875,6 +912,81 @@ REVOKE ALL ON FUNCTION public.showcase_owners() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.showcase_owners() TO anon, authenticated;
 
 
+-- ── 3. promote_showcase_media (see database/migrations/2026-09-06_promote_media.sql) ──
+-- Multiple media attachments (images, slide decks) per article, replacing
+-- `image_url` for anything submitted through the unified /promote/submit
+-- flow. `image_url` above is left as-is for older rows.
+
+CREATE TABLE IF NOT EXISTS public.promote_showcase_media (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    showcase_id UUID        NOT NULL REFERENCES public.promote_showcase (id) ON DELETE CASCADE,
+    owner_id    UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    -- Plain TEXT + CHECK, not an enum — same reasoning as resource_type on
+    -- community_resources. Adding "video" or "poster" later is an ADD
+    -- CONSTRAINT, not an ALTER TYPE.
+    kind        TEXT        NOT NULL CHECK (kind IN ('image', 'slides')),
+    -- Storage OBJECT PATH in the private showcase-media bucket
+    -- (`<showcase_id>/<uuid>.<ext>`), NOT a public URL — every render mints a
+    -- short-lived signed URL from this path (lib/server/showcase.ts).
+    url         TEXT        NOT NULL,
+    filename    TEXT        NOT NULL,
+    size_bytes  BIGINT      NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.promote_showcase_media ENABLE ROW LEVEL SECURITY;
+
+-- Same published/owner split as promote_showcase itself. The storage.objects
+-- policies below (showcase-media bucket) enforce the identical rule again
+-- for the actual file bytes — a row being readable here says nothing about
+-- who can fetch the object it points to.
+DROP POLICY IF EXISTS "promote_showcase_media_select_published" ON public.promote_showcase_media;
+CREATE POLICY "promote_showcase_media_select_published"
+    ON public.promote_showcase_media FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id = showcase_id AND s.published = true
+        )
+    );
+
+DROP POLICY IF EXISTS "promote_showcase_media_select_own" ON public.promote_showcase_media;
+CREATE POLICY "promote_showcase_media_select_own"
+    ON public.promote_showcase_media FOR SELECT
+    TO authenticated
+    USING (auth.uid() = owner_id);
+
+-- Insert/delete: owner_id must be the caller AND the caller must own the
+-- PARENT showcase row — owner_id alone would let anyone attach media to
+-- someone else's article by supplying their own owner_id with a foreign
+-- showcase_id.
+DROP POLICY IF EXISTS "promote_showcase_media_insert_own" ON public.promote_showcase_media;
+CREATE POLICY "promote_showcase_media_insert_own"
+    ON public.promote_showcase_media FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        auth.uid() = owner_id
+        AND EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id = showcase_id AND s.owner_id = auth.uid()
+        )
+    );
+
+DROP POLICY IF EXISTS "promote_showcase_media_delete_own" ON public.promote_showcase_media;
+CREATE POLICY "promote_showcase_media_delete_own"
+    ON public.promote_showcase_media FOR DELETE
+    TO authenticated
+    USING (auth.uid() = owner_id);
+
+CREATE INDEX IF NOT EXISTS idx_promote_showcase_media_showcase ON public.promote_showcase_media (showcase_id);
+
+-- No SECURITY DEFINER function here (unlike showcase_owners() above) — every
+-- policy is a plain subquery evaluated as the calling role. The equivalent
+-- discipline is that every policy is scoped `TO authenticated` except the
+-- published-select one, so `anon` only ever matches the "parent is
+-- published" branch, never the owner branch.
+
+
 -- =============================================================================
 -- OPTIONAL: Storage buckets  (run LAST, and separately)
 -- =============================================================================
@@ -924,6 +1036,85 @@ CREATE POLICY "showcase_images_own_delete"
     USING (
         bucket_id = 'showcase-images'
         AND (storage.foldername(name))[1] = auth.uid()::text
+    );
+
+-- ── showcase-media ────────────────────────────────────────
+-- PRIVATE bucket (see database/migrations/2026-09-06_promote_media_storage.sql)
+-- for images AND slide decks attached through the unified /promote/submit
+-- flow. Unlike showcase-images, there is NO public-read grant — a file
+-- attached to an unpublished draft must not be fetchable by guessing its
+-- URL. Every read goes through a signed URL; the policies below decide
+-- whether that signing call is allowed to succeed. Object paths are
+-- `<showcase_id>/<uuid>.<ext>` (the ARTICLE's id, not the uploader's uid),
+-- which is what lets the SELECT policy key off promote_showcase.published.
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+    'showcase-media',
+    'showcase-media',
+    false,
+    52428800, -- 50 MB — a routine slide deck is 20-50 MB
+    ARRAY[
+        'image/png', 'image/jpeg', 'image/webp', 'image/gif',
+        'application/pdf',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' -- .pptx
+    ]
+)
+ON CONFLICT (id) DO UPDATE
+    SET public = false,
+        file_size_limit = 52428800,
+        allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- Readable if EITHER the parent article is published (any role, anon
+-- included — this is what lets the public /promote/[slug] page mint a
+-- signed URL using the anon client) OR the caller owns the parent article.
+DROP POLICY IF EXISTS "showcase_media_select_published" ON storage.objects;
+CREATE POLICY "showcase_media_select_published"
+    ON storage.objects FOR SELECT
+    USING (
+        bucket_id = 'showcase-media'
+        AND EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id::text = (storage.foldername(name))[1] AND s.published = true
+        )
+    );
+
+DROP POLICY IF EXISTS "showcase_media_select_own" ON storage.objects;
+CREATE POLICY "showcase_media_select_own"
+    ON storage.objects FOR SELECT
+    TO authenticated
+    USING (
+        bucket_id = 'showcase-media'
+        AND EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id::text = (storage.foldername(name))[1] AND s.owner_id = auth.uid()
+        )
+    );
+
+-- Only the owner of the showcase the folder names may write into it —
+-- scoped `TO authenticated`, so `anon` never matches either policy below.
+DROP POLICY IF EXISTS "showcase_media_owner_insert" ON storage.objects;
+CREATE POLICY "showcase_media_owner_insert"
+    ON storage.objects FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        bucket_id = 'showcase-media'
+        AND EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id::text = (storage.foldername(name))[1] AND s.owner_id = auth.uid()
+        )
+    );
+
+DROP POLICY IF EXISTS "showcase_media_owner_delete" ON storage.objects;
+CREATE POLICY "showcase_media_owner_delete"
+    ON storage.objects FOR DELETE
+    TO authenticated
+    USING (
+        bucket_id = 'showcase-media'
+        AND EXISTS (
+            SELECT 1 FROM public.promote_showcase s
+            WHERE s.id::text = (storage.foldername(name))[1] AND s.owner_id = auth.uid()
+        )
     );
 
 
