@@ -207,6 +207,10 @@ export type ShowcaseMedia = {
  *  render, nothing more (no owner_id, no draft-only fields). */
 export type PublicArticle = {
   slug: string;
+  /** Drives the category pill in the page's eyebrow row. Typed loosely
+   *  (not ShowcaseType) because a pre-picker legacy row can carry a value
+   *  SHOWCASE_TYPE_LABEL has no key for — see LEGACY_SHOWCASE_TYPE_LABEL. */
+  type: string;
   headline: string;
   standfirst: string;
   articleBody: string;
@@ -223,4 +227,10 @@ export type PublicArticle = {
    *  getPublishedArticleBySlug only ever returns a row with published=true,
    *  and setArticlePublished(true) always stamps this. */
   publishedAt: string | null;
+  /** Who posted this — name + affiliation only, via showcase_owners()
+   *  (never a plain join; see that function's own comment on why). Null if
+   *  the owner lookup itself failed, same degrade-to-uncredited behavior as
+   *  the gallery card; the page skips the attribution line rather than
+   *  showing a blank one. */
+  owner: ShowcaseOwner | null;
 };

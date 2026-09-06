@@ -5,6 +5,11 @@
 // home to LinkedIn/Facebook/X before the user clicks. Copy link falls back
 // to a hidden textarea the same way CopyButton in GeneratorPanel.tsx does,
 // for browsers/contexts that block navigator.clipboard.
+//
+// LinkedIn is filled (btn-primary); Facebook, X and Copy link stay outline.
+// Sharing to LinkedIn is the reason this feature exists — the four used to
+// be visually identical grey outline buttons, which buried the one action
+// this row is actually for.
 
 import { useState } from "react";
 
@@ -40,16 +45,19 @@ export default function ShareButtons({ url, title }: { url: string; title: strin
       label: "LinkedIn",
       icon: "share",
       href: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
+      primary: true,
     },
     {
       label: "Facebook",
       icon: "share",
       href: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+      primary: false,
     },
     {
       label: "X",
       icon: "share",
       href: `https://twitter.com/intent/tweet?url=${encodedUrl}&text=${encodedTitle}`,
+      primary: false,
     },
   ];
 
@@ -62,7 +70,9 @@ export default function ShareButtons({ url, title }: { url: string; title: strin
           href={l.href}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg btn-outline font-label-md text-label-md"
+          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-label-md text-label-md ${
+            l.primary ? "btn-primary" : "btn-outline"
+          }`}
         >
           <span className="material-symbols-outlined text-base">{l.icon}</span>
           {l.label}

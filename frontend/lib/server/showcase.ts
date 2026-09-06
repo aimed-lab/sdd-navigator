@@ -549,7 +549,7 @@ export async function removeShowcaseMedia(showcaseId: string, mediaId: string): 
 // ── public article page ──────────────────────────────────────────────────────
 
 const PUBLIC_ARTICLE_SELECT =
-  "id, slug, headline, standfirst, article_body, title, authors, doi, link, journal, image_url, created_at, published_at";
+  "id, slug, type, headline, standfirst, article_body, title, authors, doi, link, journal, image_url, created_at, published_at, owner_id";
 
 /** Look up a PUBLISHED article by slug, for the public /promote/[slug] page.
  *
@@ -577,10 +577,21 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
 
   if (error || !data) return null;
 
-  const media = await listShowcaseMedia(anon, data.id as string);
+  // Owner name/affiliation via the SAME showcase_owners() function
+  // ownerMap() wraps for the gallery — never a plain join on public.users
+  // (see the file header). Reusing ownerMap() here costs one RPC call that
+  // returns every showcase owner rather than just this one, but it's the
+  // one function the anon client is actually granted EXECUTE on, and this
+  // page's own RLS-scoped Postgres round trip is already the more expensive
+  // part of the request.
+  const [media, owners] = await Promise.all([
+    listShowcaseMedia(anon, data.id as string),
+    ownerMap(anon),
+  ]);
 
   return {
     slug: data.slug as string,
+    type: (data.type as string) ?? "other",
     headline: (data.headline as string) || (data.title as string),
     standfirst: (data.standfirst as string) ?? "",
     articleBody: (data.article_body as string) ?? "",
@@ -593,6 +604,7 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     media,
     created_at: data.created_at as string,
     publishedAt: (data.published_at as string | null) ?? null,
+    owner: owners.get(data.owner_id as string) ?? null,
   };
 }
 
