@@ -21,6 +21,11 @@ episodes):
   • explore              — orchestration: reason over free text, route to tools, group results
 
 Also exposes plain-HTTP-only actions (no MCP tool, no Supabase writes):
+  • POST /api/explore-source — ONE named source's existing search_* function
+    by `kind` (paper/news/trial/grant/tool/dataset/geneset/compound/target/
+    episode), for a caller that already knows which single source it wants
+    (a community's scoped feed refresh) instead of explore()'s LLM routing
+    across all of them. No new search logic — pure dispatch.
   • POST /api/classify-checklist-item — checklist item text -> capability
     terms (the ONE LLM call in this feature, restricted to a fixed
     vocabulary). Called once at item create/edit time, not at page-load or
@@ -773,6 +778,75 @@ async def papers_http(request):
     except Exception as exc:
         logger.exception("GET /api/papers failed: query=%r limit=%r", query, limit)
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
+
+
+# kind -> the SAME per-source async function each search_* tool above already
+# calls. Dispatch-only: no new ranking/query logic, just routing a `kind`
+# straight to the one function that already exists for it — for a caller
+# (community feed refresh) that already knows which single source it wants,
+# rather than handing everything to explore()'s LLM router. Keys match
+# ExploreItem.kind (frontend/types/explore.ts) exactly, "episode" (podcast)
+# included, so the caller never has to translate.
+_SOURCE_DISPATCH = {
+    "paper": lambda query, limit: search_papers_async(query, limit),
+    "news": lambda query, limit: search_news_async(query, limit),
+    "trial": lambda query, limit: search_trials_async(query, limit),
+    "grant": lambda query, limit: search_grants_async(query, limit),
+    "tool": lambda query, limit: search_tools_async(query, limit),
+    "dataset": lambda query, limit: search_datasets_async(query, limit),
+    "geneset": lambda query, limit: search_pager_async(query, limit),
+    "compound": lambda query, limit: search_chembl_async(query, limit),
+    "target": lambda query, limit: search_opentargets_async(query, limit),
+    "episode": lambda query, limit: asyncio.to_thread(_search_wiki, query, limit),
+}
+
+
+@mcp.custom_route("/api/explore-source", methods=["POST"])
+async def explore_source_http(request):
+    """Plain-HTTP bridge to ONE named source's existing search function —
+    for a caller (the community feed refresh, lib/server/communities.ts)
+    that already knows which single source it wants, rather than the
+    explore() tool's LLM-based routing across all of them. Reuses the exact
+    same per-source async function each search_* tool above calls; adds no
+    new search/ranking logic of its own, same spirit as /api/papers, just
+    generalized to any one of the ten sources by `kind`.
+
+      POST { "kind": "paper"|"news"|"trial"|"grant"|"tool"|"dataset"|
+                     "geneset"|"compound"|"target"|"episode",
+             "query": "<text>", "limit": <n> }
+      -> { kind, query, items: [Item, ...] }
+
+    Never 500s the caller: an unknown kind, empty query, or upstream failure
+    all return the empty-items shape with HTTP 200, same resilience posture
+    as /api/explore and /api/papers.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/explore-source: request body is not valid JSON")
+        body = {}
+    kind = str(body.get("kind") or "") if isinstance(body, dict) else ""
+    query = str(body.get("query") or "") if isinstance(body, dict) else ""
+    raw_limit = body.get("limit") if isinstance(body, dict) else None
+    try:
+        limit = max(1, min(int(raw_limit), MAX_LIMIT if kind != "episode" else MAX_WIKI_LIMIT))
+    except (TypeError, ValueError):
+        limit = 20
+
+    fn = _SOURCE_DISPATCH.get(kind)
+    if fn is None:
+        return JSONResponse({"kind": kind, "query": query, "items": [], "error": "unknown kind"})
+    if not query.strip():
+        return JSONResponse({"kind": kind, "query": query, "items": []})
+
+    try:
+        items = await fn(query, limit)
+        return JSONResponse(
+            {"kind": kind, "query": query, "items": trim_items([i.model_dump() for i in items])}
+        )
+    except Exception as exc:
+        logger.exception("POST /api/explore-source failed: kind=%r query=%r", kind, query)
+        return JSONResponse({"kind": kind, "query": query, "items": [], "error": str(exc)}, status_code=200)
 
 
 @mcp.custom_route("/api/classify-checklist-item", methods=["POST"])

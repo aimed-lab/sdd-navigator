@@ -25,8 +25,13 @@ import {
   deleteCommunityResourceAction,
   updateCommunityResourceAction,
 } from "@/app/communities/actions";
-import type { CommunityResource } from "@/lib/server/communities";
-import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType } from "@/lib/communityTypes";
+import type { CommunityFeedItem, CommunityResource } from "@/lib/server/communities";
+import {
+  COMMUNITY_RESOURCE_TYPES,
+  EXPLORE_SOURCE_KEYS,
+  EXPLORE_SOURCE_LABEL,
+  type CommunityResourceType,
+} from "@/lib/communityTypes";
 import CollapsibleSection from "./CollapsibleSection";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -341,6 +346,44 @@ function ResourceItem({
   );
 }
 
+/** One machine-found item, read-only — nothing to Edit/Delete here (a
+ *  Refresh regenerates the whole set; see refreshCommunityFeed's own
+ *  comment on why it wipes-then-inserts rather than merging). Same card
+ *  shell as ResourceItem, but the "Added by X" slot reads "Found via
+ *  Explore" instead of a person's name — that's the "distinguish the two"
+ *  requirement: same visual position an admin already reads for
+ *  provenance, just a different value for what came from the agent vs. a
+ *  person. */
+function FeedItemCard({ item }: { item: CommunityFeedItem }) {
+  return (
+    <article className="rounded-xl bg-surface-container-low p-4">
+      {item.url ? (
+        <a
+          href={item.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
+        >
+          {item.title}
+        </a>
+      ) : (
+        <h3 className="font-headline-sm text-headline-sm text-on-background">{item.title}</h3>
+      )}
+      {item.summary && (
+        <p className="mt-2 font-body-md text-body-md text-secondary whitespace-pre-wrap">
+          {item.summary}
+        </p>
+      )}
+      <div className="mt-3 flex items-center gap-2 font-body-sm text-body-sm text-secondary/70">
+        <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+        <span className="truncate">
+          Found via Explore{item.source ? ` · ${item.source}` : ""}
+        </span>
+      </div>
+    </article>
+  );
+}
+
 export default function ResourcesSection({
   title,
   communityId,
@@ -349,6 +392,7 @@ export default function ResourcesSection({
   isAdmin,
   resources,
   addedByNames,
+  feedItems,
 }: {
   title: string;
   communityId: string;
@@ -362,8 +406,14 @@ export default function ResourcesSection({
   /** user_id -> display name, from listMemberRoster()/
    *  community_member_roster() (built in the page) — never an email. */
   addedByNames: Record<string, string>;
+  /** The community's STORED Explore feed (listCommunityFeedItems) — as of
+   *  the last Refresh, never a live search. Defaults to [] so a community
+   *  that predates this feature (or has it disabled) renders exactly as it
+   *  did before. */
+  feedItems?: CommunityFeedItem[];
 }) {
   const [adding, setAdding] = useState(false);
+  const items = feedItems ?? [];
 
   // Owns its own CollapsibleSection, same reason as AnnouncementsSection:
   // the header's "Add resource" button and the add form below share the
@@ -371,7 +421,7 @@ export default function ResourcesSection({
   return (
     <CollapsibleSection
       title={title}
-      count={resources.length}
+      count={resources.length + items.length}
       defaultOpen={defaultOpen}
       action={
         isAdmin && !adding ? (
@@ -395,7 +445,7 @@ export default function ResourcesSection({
           />
         )}
 
-        {resources.length === 0 ? (
+        {resources.length === 0 && items.length === 0 ? (
           <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
         ) : (
           <div className="flex flex-col gap-6">
@@ -417,6 +467,32 @@ export default function ResourcesSection({
                           slug={slug}
                           isAdmin={isAdmin}
                         />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+
+            {/* Generated feed, grouped by Explore kind — same "small
+                uppercase label per non-empty group" idiom as the manual
+                groups above, kept as its own set of groups (rather than
+                merged into TYPE_ORDER's) since the two vocabularies don't
+                line up: a resource_type is a 6-value hand-picked category,
+                an Explore kind is the item's actual source (paper, trial,
+                dataset, ...). */}
+            {EXPLORE_SOURCE_KEYS.map((kind) => {
+              const group = items.filter((i) => i.kind === kind);
+              if (group.length === 0) return null;
+              return (
+                <div key={kind}>
+                  <span className="block font-label-sm text-label-sm text-secondary/70 uppercase mb-2">
+                    {EXPLORE_SOURCE_LABEL[kind]}
+                  </span>
+                  <ul className="flex flex-col gap-3">
+                    {group.map((item) => (
+                      <li key={item.id}>
+                        <FeedItemCard item={item} />
                       </li>
                     ))}
                   </ul>

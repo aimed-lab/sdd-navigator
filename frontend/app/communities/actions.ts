@@ -21,12 +21,15 @@ import {
   deleteCommunityResource,
   joinCommunity,
   leaveCommunity,
+  refreshCommunityFeed,
   rejectMembership,
   removeCommunityMember,
   updateAnnouncement,
+  updateCommunityExploreConfig,
   updateCommunityResource,
   updateCommunitySections,
   type CommunityRole,
+  type SourceOutcome,
 } from "@/lib/server/communities";
 import type { SectionConfig } from "@/lib/communityTypes";
 
@@ -409,5 +412,69 @@ export async function updateCommunitySectionsAction(
     }
     console.error("updateCommunitySectionsAction failed", e);
     return { ok: false, error: "Couldn't save sections. Please try again." };
+  }
+}
+
+// ── Explore feed ─────────────────────────────────────────────────────────
+
+/** Save which sources/topics drive this community's feed — admin-only, same
+ *  pattern as updateCommunitySectionsAction. Does not itself run a refresh;
+ *  see refreshCommunityFeedAction below for that. */
+export async function updateCommunityExploreConfigAction(
+  communityId: string,
+  sources: string[],
+  topics: string[],
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateCommunityExploreConfig(communityId, sources, topics);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityExploreConfigAction failed", e);
+    return { ok: false, error: "Couldn't save the feed settings. Please try again." };
+  }
+}
+
+/** Result carries enough for the editor to say what actually happened, not
+ *  just pass/fail: how many items landed, and which configured sources came
+ *  back with nothing — on BOTH outcomes, since a failed run's `emptySources`
+ *  is "everything" and that's exactly what the admin needs to see next to
+ *  "refresh failed, feed unchanged". */
+export type RefreshFeedActionResult =
+  | { ok: true; count: number; emptySources: SourceOutcome[] }
+  | { ok: false; error: string; emptySources: SourceOutcome[] };
+
+/** Run the community's configured sources/topics and replace the stored
+ *  feed — admin-only. See refreshCommunityFeed's own comment for why this
+ *  wipes and re-inserts rather than merging, and for why an all-sources-
+ *  empty run leaves the existing feed untouched instead of wiping it. */
+export async function refreshCommunityFeedAction(
+  communityId: string,
+  slug: string
+): Promise<RefreshFeedActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community.", emptySources: [] };
+
+  try {
+    const result = await refreshCommunityFeed(communityId);
+    if (result.status !== "ok") {
+      return { ok: false, error: result.error, emptySources: result.emptySources };
+    }
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true, count: result.count, emptySources: result.emptySources };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first.", emptySources: [] };
+    }
+    console.error("refreshCommunityFeedAction failed", e);
+    return { ok: false, error: "Couldn't refresh the feed. Please try again.", emptySources: [] };
   }
 }

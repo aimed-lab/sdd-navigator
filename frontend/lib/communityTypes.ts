@@ -81,3 +81,51 @@ export function resolveSections(sections: SectionConfig[] | null | undefined): S
   const missing = SECTION_KEYS.filter((k) => !seen.has(k)).map((key) => ({ key, enabled: true }));
   return [...known, ...missing];
 }
+
+// ── Community-scoped Explore feed ───────────────────────────────────────────
+//
+// database/migrations/2026-09-06_community_feed.sql. Split out here for the
+// same reason as everything else in this file: ExploreFeedEditor
+// ("use client") needs these as VALUES for its checkboxes, and
+// community_feed_items.kind must match ExploreItem.kind
+// (frontend/types/explore.ts) exactly — "episode", not "podcast" — so a
+// result from /api/explore-source can be stored with zero translation.
+// EXPLORE_SOURCE_LABEL is where "episode" gets a human label ("Podcast")
+// instead, matching the ten sources as the admin thinks of them.
+export const EXPLORE_SOURCE_KEYS = [
+  "paper",
+  "dataset",
+  "geneset",
+  "compound",
+  "target",
+  "trial",
+  "grant",
+  "tool",
+  "news",
+  "episode",
+] as const;
+
+export type ExploreSourceKind = (typeof EXPLORE_SOURCE_KEYS)[number];
+
+export const EXPLORE_SOURCE_LABEL: Record<ExploreSourceKind, string> = {
+  paper: "Papers",
+  dataset: "Datasets",
+  geneset: "Gene sets",
+  compound: "Compounds",
+  target: "Targets",
+  trial: "Trials",
+  grant: "Grants",
+  tool: "Tools",
+  news: "News",
+  episode: "Podcast",
+};
+
+/** Drop anything that isn't one of the ten known kinds — same "trust order
+ *  and contents, drop what's unrecognized" posture as resolveSections,
+ *  applied to a flat set rather than an ordered array (source selection has
+ *  no order to preserve). */
+export function resolveExploreSources(sources: string[] | null | undefined): ExploreSourceKind[] {
+  if (!sources) return [];
+  const known = new Set(EXPLORE_SOURCE_KEYS as readonly string[]);
+  return sources.filter((s): s is ExploreSourceKind => known.has(s));
+}

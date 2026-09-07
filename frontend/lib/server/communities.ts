@@ -47,7 +47,14 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { getSession, requireCurrentUser } from "@/lib/auth";
 import { getAnonServerClient } from "./supabaseServer";
-import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType, type SectionConfig } from "@/lib/communityTypes";
+import {
+  COMMUNITY_RESOURCE_TYPES,
+  resolveExploreSources,
+  type CommunityResourceType,
+  type SectionConfig,
+} from "@/lib/communityTypes";
+import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
+import type { ExploreItem } from "@/types/explore";
 
 export type Community = {
   id: string;
@@ -60,6 +67,13 @@ export type Community = {
   // interpreted. Selected on every read below so this field is never
   // silently undefined on a Community the type claims to have it on.
   sections: SectionConfig[] | null;
+  // Explore feed config (2026-09-06_community_feed.sql). explore_sources
+  // empty means no generated feed, not "every source" — see
+  // resolveExploreSources' own comment. explore_refreshed_at is null until
+  // the first Refresh.
+  explore_sources: string[];
+  explore_topics: string[];
+  explore_refreshed_at: string | null;
 };
 
 /** All communities, ordered by name. Degrades to an empty list so the
@@ -83,7 +97,7 @@ export async function listCommunities(): Promise<Community[]> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
     .order("name", { ascending: true });
 
   if (error || !data) return [];
@@ -154,7 +168,7 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -172,7 +186,7 @@ export async function getCommunityById(id: string): Promise<Community | null> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
     .eq("id", id)
     .maybeSingle();
 
@@ -1127,6 +1141,328 @@ export async function deleteCommunityResource(
   }
 
   return { status: "ok" };
+}
+
+// ── Explore feed ─────────────────────────────────────────────────────────
+
+export type UpdateExploreConfigResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Save which sources this community searches and what topics drive that
+ *  search — admin-only, same is_community_admin re-check pattern as
+ *  updateCommunitySections. Does NOT run a refresh itself; a saved config
+ *  only takes effect the next time an admin clicks Refresh (see
+ *  refreshCommunityFeed below) — "stored, not live" applies to the config
+ *  too, not just the results it produces. */
+export async function updateCommunityExploreConfig(
+  communityId: string,
+  sources: string[],
+  topics: string[]
+): Promise<UpdateExploreConfigResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can change the feed." };
+  }
+
+  const cleanSources = resolveExploreSources(sources);
+  const cleanTopics = Array.from(new Set(topics.map((t) => t.trim()).filter(Boolean)));
+
+  const { error } = await db
+    .from("communities")
+    .update({ explore_sources: cleanSources, explore_topics: cleanTopics })
+    .eq("id", communityId);
+
+  if (error) {
+    console.error("updateCommunityExploreConfig: update failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't save the feed settings — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't save the feed settings — this is a server-side problem, not something wrong with what you chose. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+export type CommunityFeedItem = {
+  id: string;
+  community_id: string;
+  kind: string;
+  external_id: string;
+  title: string;
+  url: string | null;
+  summary: string | null;
+  source: string | null;
+  fetched_at: string;
+};
+
+/** The community's stored feed, most-recently-fetched first — for any
+ *  ACTIVE member, "Community feed items: member select" (RLS) is the real
+ *  gate, same posture as listCommunityResources/listAnnouncements. This is
+ *  what's IN the database right now, i.e. as of the last Refresh — never a
+ *  live search, per spec. */
+export async function listCommunityFeedItems(communityId: string): Promise<CommunityFeedItem[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("community_feed_items")
+    .select("id, community_id, kind, external_id, title, url, summary, source, fetched_at")
+    .eq("community_id", communityId)
+    .order("fetched_at", { ascending: false });
+
+  if (error || !data) return [];
+  return data as CommunityFeedItem[];
+}
+
+/** Why a configured source ended up with zero stored items: "empty" means
+ *  the backend answered normally and just had nothing for that topic;
+ *  "rejected" means at least one call for that source got a non-2xx (or
+ *  network-level failure) — a 401 from a missing/wrong EXPLORE_API_TOKEN
+ *  looks EXACTLY like a real zero-result search unless this is tracked
+ *  separately, which is the whole reason this type exists. */
+export type SourceOutcome = { kind: string; reason: "empty" | "rejected" };
+
+export type RefreshFeedResult =
+  | { status: "ok"; count: number; emptySources: SourceOutcome[] }
+  | { status: "error"; error: string; emptySources: SourceOutcome[] };
+
+/** Max items PER TOPIC, per source, pulled from /api/explore-source before
+ *  merge+dedupe — kept modest since one Refresh fires sources × topics
+ *  fetches, not one search. */
+const FEED_PER_TOPIC_LIMIT = 10;
+
+/** Max items stored per kind, after merging every topic's results for that
+ *  source and de-duplicating by external id — keeps one broad topic from
+ *  crowding out the community's other topics in what actually gets stored. */
+const FEED_PER_KIND_LIMIT = 20;
+
+/** Run the community's selected sources against its selected topics and
+ *  REPLACE the stored feed — admin-only. Reuses the exact same per-source
+ *  search functions as the rest of Explore, through the new
+ *  /api/explore-source dispatch bridge (backend/explore-mcp/server.py); no
+ *  new search/ranking logic lives here, only orchestration and storage.
+ *
+ *  WIPES then re-inserts the community's ENTIRE feed every run, rather than
+ *  only touching the currently-selected kinds — so deselecting a source and
+ *  refreshing actually clears its old items instead of stranding them with
+ *  nothing left to ever delete them. That wipe-then-insert, inside the
+ *  UNIQUE (community_id, kind, external_id) constraint, is also what makes
+ *  "a refresh must update rather than duplicate" true: the stored feed
+ *  after a Refresh always exactly matches sources × topics as configured AT
+ *  THAT MOMENT, never a superset of every Refresh that ever ran.
+ *
+ *  A community with no sources or no topics configured still "succeeds"
+ *  (feed is simply empty, explore_refreshed_at still stamped) rather than
+ *  erroring — an admin who clicks Refresh before finishing setup should see
+ *  "Last refreshed just now", not a confusing failure.
+ *
+ *  BUT a community that HAS sources/topics configured and gets ZERO items
+ *  back from every one of them (every upstream call failed, or a genuinely
+ *  bad run) does NOT wipe the existing feed — the delete only happens once
+ *  there's something to replace it with. An admin refreshing right before
+ *  showing the community's feed to someone needs the OLD, working feed to
+ *  survive a bad Refresh, not silently end up with nothing. That run is
+ *  reported as a failure (status: "error"), and explore_refreshed_at is
+ *  left untouched, so "Last refreshed" keeps pointing at the last run that
+ *  actually produced something.
+ *
+ *  `emptySources` (on both outcomes) lists which of the CONFIGURED sources
+ *  came back with zero items on this run — on success that's a partial
+ *  result worth surfacing ("Papers: 6 found; Trials: nothing"), on failure
+ *  it's every configured source (nothing came back from any of them). */
+export async function refreshCommunityFeed(communityId: string): Promise<RefreshFeedResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can refresh the feed.", emptySources: [] };
+  }
+
+  const { data: config, error: readError } = await db
+    .from("communities")
+    .select("explore_sources, explore_topics")
+    .eq("id", communityId)
+    .maybeSingle();
+
+  if (readError || !config) {
+    console.error("refreshCommunityFeed: couldn't read community config", readError);
+    return { status: "error", error: "Couldn't read this community's feed settings.", emptySources: [] };
+  }
+
+  const sources = resolveExploreSources(config.explore_sources as string[] | null);
+  const topics = ((config.explore_topics as string[] | null) ?? []).map((t) => t.trim()).filter(Boolean);
+
+  type FeedRow = {
+    community_id: string;
+    kind: string;
+    external_id: string;
+    title: string;
+    url: string | null;
+    summary: string | null;
+    source: string | null;
+  };
+  const rows: FeedRow[] = [];
+  let emptySources: SourceOutcome[] = [];
+
+  if (sources.length > 0 && topics.length > 0) {
+    const fetches = sources.flatMap((kind) =>
+      topics.map(async (topic) => {
+        try {
+          const res = await fetch(`${EXPLORE_API_URL}/api/explore-source`, {
+            method: "POST",
+            headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({ kind, query: topic, limit: FEED_PER_TOPIC_LIMIT }),
+          });
+
+          // A non-2xx here (401 from a missing/wrong EXPLORE_API_TOKEN,
+          // 5xx, ...) must NOT be treated as "the search ran and found
+          // nothing" — /api/explore-source's own body on a rejection looks
+          // nothing like {items: [...]}, so silently reading `.items` off
+          // it and defaulting to [] is exactly how a rejected request and a
+          // genuine zero-result search became indistinguishable. Logged
+          // with the status and a body snippet so this is visible in the
+          // server log instead of only showing up as "found nothing".
+          if (!res.ok) {
+            let bodySnippet = "";
+            try {
+              bodySnippet = (await res.text()).slice(0, 500);
+            } catch {
+              // body unreadable — status code alone is still useful
+            }
+            console.error(
+              "refreshCommunityFeed: /api/explore-source rejected the request",
+              { kind, topic, status: res.status, statusText: res.statusText, body: bodySnippet }
+            );
+            return { kind, items: [] as ExploreItem[], failed: true };
+          }
+
+          const json = (await res.json()) as { items?: ExploreItem[] };
+          return { kind, items: json.items ?? [], failed: false };
+        } catch (e) {
+          // One topic/source failing must never fail the whole refresh —
+          // same "never let one bad call break the batch" posture as
+          // /api/explore-source's own never-500s design, extended one level
+          // up: a bad upstream just means fewer stored results, not a
+          // failed Refresh. Still a genuine failure (network error, bad
+          // JSON, ...), so it's tracked as `failed` the same as a non-2xx
+          // response above, not conflated with a real empty result.
+          console.error("refreshCommunityFeed: fetch failed", kind, topic, e);
+          return { kind, items: [] as ExploreItem[], failed: true };
+        }
+      })
+    );
+
+    const results = await Promise.all(fetches);
+
+    // Merge every topic's results per kind, de-duping by external id
+    // (item.id, falling back to dedupe_key for a source that doesn't set
+    // id) — the SAME item turning up for two different topics must only be
+    // stored once. `failedKinds` tracks which sources had AT LEAST ONE
+    // rejected/errored call, so a source that's empty ONLY because the
+    // backend rejected it can be reported as such rather than as a quiet
+    // zero-result search.
+    const byKind = new Map<string, Map<string, ExploreItem>>();
+    const failedKinds = new Set<string>();
+    for (const { kind, items, failed } of results) {
+      if (failed) failedKinds.add(kind);
+      const bucket = byKind.get(kind) ?? new Map<string, ExploreItem>();
+      for (const item of items) {
+        const externalId = item.id || item.dedupe_key;
+        if (!externalId || bucket.has(externalId)) continue;
+        bucket.set(externalId, item);
+      }
+      byKind.set(kind, bucket);
+    }
+
+    // A source with an empty (or missing) bucket found nothing across
+    // every topic — reported back regardless of outcome below, so an admin
+    // can tell "8 papers, but Grants came back empty" apart from a clean
+    // run of everything, AND tell that apart from "Grants was rejected by
+    // the backend", which looks identical from the item count alone.
+    emptySources = sources
+      .filter((kind) => (byKind.get(kind)?.size ?? 0) === 0)
+      .map((kind) => ({ kind, reason: failedKinds.has(kind) ? "rejected" : "empty" }) as const);
+
+    for (const [kind, bucket] of byKind) {
+      for (const item of Array.from(bucket.values()).slice(0, FEED_PER_KIND_LIMIT)) {
+        rows.push({
+          community_id: communityId,
+          kind,
+          external_id: (item.id || item.dedupe_key) as string,
+          title: item.title,
+          url: item.url,
+          summary: item.summary,
+          source: item.source,
+        });
+      }
+    }
+
+    // Every configured source came back empty (upstream failures, or a
+    // genuinely bad run) — do NOT touch the existing feed. Wiping it here
+    // would silently replace a working feed with nothing; leave it alone
+    // and report this run as a failure instead. The message distinguishes
+    // "the backend rejected every request" (a real, actionable problem —
+    // check EXPLORE_API_TOKEN/logs) from "every search genuinely found
+    // nothing" (a topics/sources problem, not a backend one).
+    if (rows.length === 0) {
+      const allRejected = emptySources.every((s) => s.reason === "rejected");
+      const anyRejected = emptySources.some((s) => s.reason === "rejected");
+      const error = allRejected
+        ? "The backend rejected every request (see the server log for the status code) — the feed hasn't changed."
+        : anyRejected
+          ? "The backend rejected some requests and the rest found nothing — the feed hasn't changed."
+          : "No results came back from any selected source — the feed hasn't changed.";
+      return { status: "error", error, emptySources };
+    }
+  }
+
+  // Delete-then-insert, both gated by the SAME admin RLS tier — see this
+  // function's own comment above for why a full wipe rather than a
+  // per-kind delete. Only reached once we know there's something to
+  // replace the old feed with (rows.length > 0) or nothing was configured
+  // at all (rows stays [] on purpose, same "none selected -> no feed" rule
+  // as at read time) — never reached after an all-sources-failed run, see
+  // the early return above.
+  const { error: deleteError } = await db
+    .from("community_feed_items")
+    .delete()
+    .eq("community_id", communityId);
+
+  if (deleteError) {
+    console.error("refreshCommunityFeed: delete failed", deleteError);
+    return { status: "error", error: "Couldn't refresh the feed — clearing the old items failed.", emptySources };
+  }
+
+  if (rows.length > 0) {
+    const { error: insertError } = await db.from("community_feed_items").insert(rows);
+    if (insertError) {
+      console.error("refreshCommunityFeed: insert failed", insertError);
+      return { status: "error", error: "Couldn't refresh the feed — storing the new items failed.", emptySources };
+    }
+  }
+
+  const { error: stampError } = await db
+    .from("communities")
+    .update({ explore_refreshed_at: new Date().toISOString() })
+    .eq("id", communityId);
+
+  if (stampError) {
+    // The refresh itself succeeded — rows are already stored — so a failed
+    // timestamp stamp is logged, not reported to the admin as a failure.
+    console.error("refreshCommunityFeed: stamping explore_refreshed_at failed", stampError);
+  }
+
+  return { status: "ok", count: rows.length, emptySources };
 }
 
 export type CommunityProject = {

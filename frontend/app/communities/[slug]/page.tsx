@@ -10,13 +10,14 @@ import {
   getCommunityStats,
   getMembership,
   listAnnouncements,
+  listCommunityFeedItems,
   listCommunityMembers,
   listCommunityProjects,
   listCommunityResources,
   listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
-import { resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
+import { resolveExploreSources, resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
 import { getCurrentUser } from "@/lib/auth";
 import JoinLeaveControl from "@/components/communities/JoinLeaveControl";
 import AddMemberByEmailForm from "@/components/communities/AddMemberByEmailForm";
@@ -33,6 +34,7 @@ import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
 import ManageCommunityCard from "@/components/communities/ManageCommunityCard";
 import SectionsEditor from "@/components/communities/SectionsEditor";
+import ExploreFeedEditor from "@/components/communities/ExploreFeedEditor";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -94,6 +96,11 @@ export default async function CommunityDetailPage({
   // name that matches how ResourcesSection reads it ("who added it" rather
   // than "who wrote it").
   const resources = isMember ? await listCommunityResources(community.id) : [];
+
+  // The stored Explore feed — same "only fetch when isMember" reasoning as
+  // resources above; ResourcesSection renders it grouped by kind alongside
+  // the hand-added resources (see that component's own comment).
+  const feedItems = isMember ? await listCommunityFeedItems(community.id) : [];
 
   const authorNames: Record<string, string> = Object.fromEntries(
     memberRoster.map((m) => [m.user_id, m.display_name])
@@ -231,6 +238,7 @@ export default async function CommunityDetailPage({
                     isAdmin={membership.isAdmin}
                     resources={resources}
                     addedByNames={authorNames}
+                    feedItems={feedItems}
                   />
                 );
               default:
@@ -248,6 +256,14 @@ export default async function CommunityDetailPage({
               communityId={community.id}
               slug={community.slug}
               sections={orderedSections}
+            />
+
+            <ExploreFeedEditor
+              communityId={community.id}
+              slug={community.slug}
+              sources={resolveExploreSources(community.explore_sources)}
+              topics={community.explore_topics}
+              refreshedAt={community.explore_refreshed_at}
             />
 
             <div className="flex flex-col gap-3 border-t border-outline-variant/20 pt-8">
