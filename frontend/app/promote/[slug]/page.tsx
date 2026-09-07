@@ -19,7 +19,7 @@
 //   2. Headline, standfirst, byline (authors · date · read time) — in that
 //      order, ABOVE the image. A reader should know what the piece is
 //      before decoding a picture.
-//   3. Hero image — full width of the page's own 900px column, wider than
+//   3. Hero image — full width of the page's own 1040px column, wider than
 //      the prose, since a narrow-text/wide-image split is the standard
 //      editorial pattern and an image capped to the 680px prose column
 //      reads as small and incidental, not the visual anchor of the page.
@@ -28,15 +28,51 @@
 //      them into one fixed ratio (16:9 was tried) produces heavy empty
 //      bars. max-h-[70vh] is the only constraint, so a very tall poster
 //      can't dominate the whole screen — width is otherwise free to be
-//      anything up to the 900px column.
+//      anything up to the 1040px column.
 //
-// TWO WIDTHS, ONE PAGE. The outer column is 900px; the eyebrow/headline/
-// standfirst/byline block and everything after the hero (body, extra media,
-// DOI link, share buttons) each sit in their own nested max-w-[680px]
-// wrapper. Only the hero itself uses the full 900px. 680px is what keeps
-// body text at a comfortable reading measure — the previous max-w-3xl
-// (768px) pushed it past 80-90 characters per line. 680px at the 18px body
-// size here lands around 68 characters per line.
+// TWO WIDTHS, ONE PAGE. The outer column is 1040px; the eyebrow/headline/
+// standfirst/byline block and the prose (body, extra media) each sit in
+// their own nested max-w-[680px] wrapper. Only the hero itself uses the
+// full 1040px. 680px is the ORIGINAL prose width, restored — it was
+// briefly widened to 760px to fix "reads like a narrow strip on a wide
+// screen", but that fix was wrong: MEASURED in the browser
+// (Range.getClientRects() per character on real rendered body paragraphs),
+// 760px landed at 80-87 characters/line, averaging ~84 — inside the 80-90
+// range this file already knew was too wide (that's what the OLD 768px
+// max-w-3xl column measured), not the ~76 a generic "18px/760px" formula
+// assumed. Inter (this page's actual body font) is narrower than that
+// formula assumes. 680px measures 66-82 characters/line on real rendered
+// paragraphs (averaging ~75, back to where it was before the 760px
+// experiment) — comfortably narrower than 760px's 80-87, and back inside
+// the range this file's own reasoning always meant by "comfortable" —
+// confirmed the real complaint was never the character count, it was a
+// 680px column with nothing filling the space around it on a 1500px+
+// screen. See the SHARE RAIL note below for the actual fix.
+//
+// SHARE RAIL. The 680px prose column on a wide screen has real empty
+// margin on both sides — instead of widening the column into that space
+// (which just makes lines too long, per the note above), the RIGHT margin
+// now holds a sticky rail: the DOI link (when there is one) and the share
+// buttons, in ShareButtons' own `layout="column"` mode. This also fixes a
+// separate, real problem: sharing is the entire point of this page, and
+// the share row used to sit at the very bottom of a long article, below
+// the fold on any normal viewport.
+//   - POSITIONED RELATIVE TO THE ARTICLE ITSELF, not the viewport: `<article>`
+//     is `relative`, the rail is `absolute left-full ml-6` — `left-full` is
+//     100% of the article's OWN box, so the rail's left edge sits exactly at
+//     the article's right edge by construction, wherever that actually
+//     renders. No calc(), no independent guess at where the 1040px column's
+//     edge is — it literally cannot overlap the article, at any viewport
+//     width, because its position is defined FROM the article's own edge.
+//   - Shown only at 2xl (1536px) and up: below that, a 192px rail plus its
+//     24px gap wouldn't fit in the remaining margin next to the 1040px
+//     article (1536px viewport -> 248px of margin per side, comfortably more
+//     than the 216px the rail+gap needs; narrower viewports don't have that
+//     much room to spare).
+//   - NOT a duplicate control: the DOI card and the bottom ShareButtons row
+//     (both further down this file) are `2xl:hidden` — hidden at exactly the
+//     width the rail becomes visible, so the buttons render in exactly one
+//     place at any given viewport width, never both, never neither.
 //
 // PRESENCE WITHOUT DECORATION. A research showcase page with no visual
 // identity of its own — strip the nav bar and it's indistinguishable from
@@ -44,7 +80,7 @@
 // tokens:
 //   - The header (eyebrow through byline) sits on a full-page-width
 //     bg-primary/5 band — the ONE full-bleed element on the page, a
-//     sibling BEFORE the max-w-[900px] <article>, not nested inside it,
+//     sibling BEFORE the max-w-[1040px] <article>, not nested inside it,
 //     specifically so it can span edge to edge while the header text
 //     inside it still holds to 680px. The hero sits below the band, in
 //     the article, not inside it.
@@ -204,7 +240,7 @@ export default async function ArticlePage({ params }: PageProps) {
   return (
     <>
       {/* The one full-bleed element on the page — a sibling before the
-          max-w-[900px] <article>, not nested inside it, so the tint can
+          max-w-[1040px] <article>, not nested inside it, so the tint can
           span edge to edge while the header text inside it still holds to
           the 680px column. bg-primary/5: low enough opacity that body-text
           contrast (rendered on white further down the page) is untouched —
@@ -250,9 +286,9 @@ export default async function ArticlePage({ params }: PageProps) {
         </div>
       </div>
 
-      <article className="max-w-[900px] mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-12 md:pb-16">
+      <article className="relative max-w-[1040px] mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-12 md:pb-16">
         {/* Hero — BELOW the header band, not above it, and WIDER than the
-            prose column (up to the full 900px), the standard editorial
+            prose column (up to the full 1040px), the standard editorial
             split of narrow text / wide image. Natural aspect ratio: no
             fixed box, no object-fit, no background panel — just the image
             at its own intrinsic ratio, shrunk to fit the column width and
@@ -264,6 +300,27 @@ export default async function ArticlePage({ params }: PageProps) {
             <img src={hero} alt="" className="max-w-full max-h-[70vh] w-auto h-auto rounded-2xl" />
           </div>
         )}
+
+        {/* Share rail — sticky, right margin, 2xl and up only. See the file
+            header's SHARE RAIL note for why this exists, how it's
+            positioned, and how it avoids duplicating the DOI card / bottom
+            ShareButtons row (both further down, both `2xl:hidden`). */}
+        <div className="hidden 2xl:block absolute top-0 left-full ml-6 w-48">
+          <div className="sticky top-24 flex flex-col gap-6">
+            {article.doi && (
+              <a
+                href={`https://doi.org/${article.doi}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-start gap-1.5 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+              >
+                <span className="material-symbols-outlined text-base shrink-0">description</span>
+                Read the original paper
+              </a>
+            )}
+            <ShareButtons url={articleUrl(article.slug)} title={article.headline} layout="column" />
+          </div>
+        </div>
 
         <div className="max-w-[680px] mx-auto">
           <div className={hero ? "mt-8" : ""}>{renderBody(article.articleBody)}</div>
@@ -317,33 +374,42 @@ export default async function ArticlePage({ params }: PageProps) {
             </div>
           )}
 
-          {/* Footer card — the DOI link and who posted this, together, above
-              the share row. Previously the DOI was a bare line loose in the
-              body flow and there was no attribution to the person/lab that
-              shared it at all. */}
-          {(article.doi || article.owner?.name) && (
-            <div className="mt-10 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 space-y-3">
-              {article.doi && (
-                <a
-                  href={`https://doi.org/${article.doi}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
-                >
-                  Read the original paper
-                  <span className="material-symbols-outlined text-base">open_in_new</span>
-                </a>
-              )}
-              {article.owner?.name && (
-                <p className="font-body-sm text-body-sm text-secondary">
-                  Posted by {article.owner.name}
-                  {article.owner.affiliation && ` · ${article.owner.affiliation}`}
-                </p>
-              )}
+          {/* Footer card — the DOI link, above the share row. "Posted by
+              <name> · <affiliation>" used to render here too, but every
+              article today has exactly one owner, so it was the same name
+              on every card — identical attribution repeated, not
+              information, the same reasoning ResourcesSection.tsx's
+              "Added by" line was dropped for. The owner LOOKUP
+              (isOwnerOfShowcase above, article.owner from
+              getPublishedArticleBySlug) stays in place — it's not dead
+              code, just unrendered here — because attribution becomes the
+              point once an article can have more than one contributor,
+              and at that point it should show unconditionally, not behind
+              a distinct-contributor check. The card itself now depends
+              only on the DOI: nothing else lives in it once the byline is
+              gone, so with no DOI there's nothing left to show a card for.
+              `2xl:hidden` — below 2xl this is the ONLY DOI link on the
+              page; at 2xl and up, the rail's own copy takes over and this
+              one hides, so there is never more than one at any width. */}
+          {article.doi && (
+            <div className="mt-10 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 2xl:hidden">
+              <a
+                href={`https://doi.org/${article.doi}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+              >
+                Read the original paper
+                <span className="material-symbols-outlined text-base">open_in_new</span>
+              </a>
             </div>
           )}
 
-          <div className="mt-10 border-t border-outline-variant/30 pt-8">
+          {/* `2xl:hidden` — same reasoning as the DOI card above: this is
+              the only share row below 2xl; the rail's own ShareButtons
+              takes over at 2xl and up, so exactly one instance is ever
+              visible, never both, never neither. */}
+          <div className="mt-10 border-t border-outline-variant/30 pt-8 2xl:hidden">
             <ShareButtons url={articleUrl(article.slug)} title={article.headline} />
           </div>
         </div>

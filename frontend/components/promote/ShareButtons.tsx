@@ -10,6 +10,13 @@
 // Sharing to LinkedIn is the reason this feature exists — the four used to
 // be visually identical grey outline buttons, which buried the one action
 // this row is actually for.
+//
+// `layout="column"` — added for app/promote/[slug]/page.tsx's sticky rail
+// (narrow, ~190px), which can't fit the default flex-wrap row of full-width
+// pill buttons. Same links, same click handlers, same LinkedIn-is-primary
+// rule; only the container direction and each button's own width change.
+// `layout="row"` (default) is byte-for-byte the original markup — every
+// other/future caller is unaffected.
 
 import { useState } from "react";
 
@@ -34,8 +41,19 @@ async function copyToClipboard(text: string) {
   document.body.removeChild(ta);
 }
 
-export default function ShareButtons({ url, title }: { url: string; title: string }) {
+export default function ShareButtons({
+  url,
+  title,
+  layout = "row",
+}: {
+  url: string;
+  title: string;
+  /** "row" (default) — the original flex-wrap pill row. "column" — stacked,
+   *  full-width buttons for the sticky rail. */
+  layout?: "row" | "column";
+}) {
   const [copied, setCopied] = useState(false);
+  const column = layout === "column";
 
   const encodedUrl = encodeURIComponent(url);
   const encodedTitle = encodeURIComponent(title);
@@ -62,8 +80,16 @@ export default function ShareButtons({ url, title }: { url: string; title: strin
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <span className="font-label-md text-label-md text-secondary">Share</span>
+    <div className={column ? "flex flex-col items-stretch gap-2" : "flex flex-wrap items-center gap-3"}>
+      <span
+        className={
+          column
+            ? "font-label-sm text-label-sm text-secondary uppercase tracking-wide mb-1"
+            : "font-label-md text-label-md text-secondary"
+        }
+      >
+        Share
+      </span>
       {links.map((l) => (
         <a
           key={l.label}
@@ -72,7 +98,7 @@ export default function ShareButtons({ url, title }: { url: string; title: strin
           rel="noopener noreferrer"
           className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg font-label-md text-label-md ${
             l.primary ? "btn-primary" : "btn-outline"
-          }`}
+          } ${column ? "justify-center w-full" : ""}`}
         >
           <span className="material-symbols-outlined text-base">{l.icon}</span>
           {l.label}
@@ -85,7 +111,9 @@ export default function ShareButtons({ url, title }: { url: string; title: strin
           setCopied(true);
           setTimeout(() => setCopied(false), 1800);
         }}
-        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg btn-outline font-label-md text-label-md"
+        className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg btn-outline font-label-md text-label-md ${
+          column ? "justify-center w-full" : ""
+        }`}
       >
         <span className="material-symbols-outlined text-base">
           {copied ? "check" : "link"}
