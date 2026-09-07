@@ -54,6 +54,7 @@ import {
   type SectionConfig,
 } from "@/lib/communityTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
+import { GENERIC_SCIENCE_STOPWORDS } from "./genericScienceStopwords";
 import type { ExploreItem } from "@/types/explore";
 
 export type Community = {
@@ -133,41 +134,83 @@ export async function listCommunities(): Promise<Community[]> {
   return (data as Community[]).map((c) => ({ ...c, member_count: counts.get(c.id) ?? 0 }));
 }
 
-/** Communities whose name, purpose (`description`), or explore_topics match
- *  `query` — case-insensitive substring, checked against ALL THREE fields
- *  since a topic is often the most accurate description of what a
- *  community is actually about (a community's `description` is prose for
- *  a human reader, same "not specific enough" gap explore_topics exists to
- *  fill — see 2026-09-06_community_feed.sql's own reasoning for why topics
- *  are a separate field from description in the first place).
+// Below _MIN_TOKEN_LENGTH characters, a query word is dropped outright, same
+// spirit as GENERIC_SCIENCE_STOPWORDS but for words too short to be
+// distinctive regardless of what they are ("of", "in", "the" survive most
+// stopword lists' exact-word matching by accident if nothing also floors
+// length).
+const MIN_TOKEN_LENGTH = 3;
+
+/** Lowercase, split on non-alphanumeric runs, drop anything under
+ *  MIN_TOKEN_LENGTH chars or in GENERIC_SCIENCE_STOPWORDS. Empty input (or
+ *  input that's ALL stopwords/short words) returns an empty array — the
+ *  caller treats that as "nothing to search on", not "match everything". */
+function searchTokens(text: string): string[] {
+  const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+  return words.filter((w) => w.length >= MIN_TOKEN_LENGTH && !GENERIC_SCIENCE_STOPWORDS.has(w));
+}
+
+/** Communities whose name, purpose (`description`), or explore_topics
+ *  contain any TOKEN of `query` — not a whole-phrase substring match.
+ *  "pancreatic cancer" tokenizes to ["pancreatic", "cancer"], either of
+ *  which matching is enough; a phrase match would miss ColaboFest's own
+ *  topic "pancreatic ductal adenocarcinoma" entirely, since neither string
+ *  contains the other. Real queries essentially never repeat an admin's
+ *  exact topic wording, so phrase-containment was failing most searches,
+ *  not an edge case.
  *
- *  A topic match is checked BOTH directions (topic-contains-query OR
- *  query-contains-topic) — topics are short keyword phrases ("PHGDH",
- *  "glioblastoma metabolism"), so a query of "pancreatic cancer research"
- *  should still match a community whose topic is just "pancreatic cancer",
- *  not only the reverse.
+ *  STOPWORDS: GENERIC_SCIENCE_STOPWORDS (lib/server/genericScienceStopwords.ts,
+ *  ported from backend/explore-mcp/tools/wiki_agent.py's
+ *  _GENERIC_SCIENCE_STOPWORDS — see that file's own comment for why this
+ *  reuses that list specifically rather than a new one: it already exists
+ *  BECAUSE connective/hedge words like "however" and "signaling" caused a
+ *  real false match elsewhere, which is exactly the failure mode a
+ *  token search here would otherwise reintroduce — a search for "cancer
+ *  patients" tokenizing to ["cancer", "patients"] would match every
+ *  community whose purpose happens to mention patients, not because
+ *  "patients" says anything about what that community is about.
+ *
+ *  RANKING: communities are sorted by how many DISTINCT query tokens
+ *  matched (across name + purpose + all topics combined), descending — a
+ *  community matching on 2 of 2 tokens outranks one matching on only 1,
+ *  same "the more of what you typed it actually has, the more relevant it
+ *  is" logic a real search should have. Ties keep listCommunities()' own
+ *  alphabetical order (Array.prototype.sort is a stable sort).
+ *
+ *  Fields checked, and why all three: name and purpose (`description`) are
+ *  the obvious two; explore_topics is checked too since a topic is often
+ *  the MOST accurate description of what a community is actually about —
+ *  `description` is prose for a human reader, the same "not specific
+ *  enough to drive a search" gap explore_topics exists to fill (see
+ *  2026-09-06_community_feed.sql's own reasoning for why topics are a
+ *  separate field from description in the first place).
  *
  *  IMPLEMENTATION: filters the same full list listCommunities() already
- *  returns, in memory, rather than a second SQL query or a new RPC —
- *  communities are a small, fully public table already fetched whole for
- *  every other read in this file (no pagination anywhere), so a second
- *  round-trip or a full-text-search index would be solving a scale problem
- *  this table doesn't have yet. Reuses listCommunities() verbatim, so a
- *  search result carries the SAME member_count every other card-grid
- *  context does — no separate code path to keep in sync. */
+ *  returns, in memory, rather than a second SQL query, a new RPC, or a
+ *  full-text-search index — communities are a small, fully public table
+ *  already fetched whole for every other read in this file (no pagination
+ *  anywhere), so those would be solving a scale problem this table
+ *  doesn't have yet. Reuses listCommunities() verbatim, so a search result
+ *  carries the SAME member_count every other card-grid context does — no
+ *  separate code path to keep in sync. */
 export async function searchCommunities(query: string): Promise<Community[]> {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
+  const tokens = searchTokens(query);
+  if (tokens.length === 0) return [];
 
   const all = await listCommunities();
-  return all.filter((c) => {
-    if (c.name.toLowerCase().includes(q)) return true;
-    if (c.description && c.description.toLowerCase().includes(q)) return true;
-    return c.explore_topics.some((topic) => {
-      const t = topic.trim().toLowerCase();
-      return t.length > 0 && (t.includes(q) || q.includes(t));
-    });
+
+  const scored = all.map((c) => {
+    const haystacks = [c.name, c.description ?? "", ...c.explore_topics].map((s) =>
+      s.toLowerCase()
+    );
+    const matched = tokens.filter((token) => haystacks.some((h) => h.includes(token)));
+    return { community: c, score: matched.length };
   });
+
+  return scored
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((r) => r.community);
 }
 
 /** One community plus the signed-in caller's relationship to it — the shape
