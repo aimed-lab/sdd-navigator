@@ -92,10 +92,10 @@ export default async function CommunityDetailPage({
   // own comment on why.
   const announcements = isMember ? await listAnnouncements(community.id) : [];
 
-  // Resources — same "only fetch when isMember" reasoning, same author-name
-  // source as announcements (the SAME roster fetched above), just under a
-  // name that matches how ResourcesSection reads it ("who added it" rather
-  // than "who wrote it").
+  // Resources — same "only fetch when isMember" reasoning as announcements.
+  // added_by isn't resolved to a name here right now: ResourcesSection
+  // doesn't render "Added by" (see its own comment on why and when it
+  // comes back), so there's nothing here that needs authorNames yet.
   const resources = isMember ? await listCommunityResources(community.id) : [];
 
   // The stored Explore feed — same "only fetch when isMember" reasoning as
@@ -249,7 +249,6 @@ export default async function CommunityDetailPage({
                     slug={community.slug}
                     isAdmin={membership.isAdmin}
                     resources={resources}
-                    addedByNames={authorNames}
                   />
                 );
               case "explore":

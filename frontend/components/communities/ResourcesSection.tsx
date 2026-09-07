@@ -24,13 +24,8 @@
 // internally keeping whatever order it already had in the (server-sorted)
 // list.
 //
-// ADDED-BY NAME comes from `authorNames` (built in the page from
-// listMemberRoster()/community_member_roster()), never from an email —
-// same reasoning and same "Unknown" fallback as AnnouncementsSection. Shown
-// only when the SECTION has more than one distinct contributor (see
-// ResourcesSection's own `showAddedBy` computation) — identical byline
-// repeated on every card is a wasted row when one admin curated all of them,
-// which is the common case.
+// ADDED-BY is not shown on the card right now — see ResourceItem's own
+// comment on why, and where it comes back.
 //
 // CARD SURFACE is `glass-panel` (app/globals.css) — same static, non-lifting
 // glass surface Promote's ShowcaseCard uses for its own grid cards, not the
@@ -350,19 +345,11 @@ function DeleteResourceConfirm({
 
 function ResourceItem({
   resource,
-  addedByName,
-  showAddedBy,
   communityId,
   slug,
   isAdmin,
 }: {
   resource: CommunityResource;
-  addedByName: string;
-  /** True only when the SECTION (not just this card) has more than one
-   *  distinct contributor — see ResourcesSection's own computation. A
-   *  single admin curating all ten cards makes an identical byline on
-   *  every one a wasted row, not information. */
-  showAddedBy: boolean;
   communityId: string;
   slug: string;
   isAdmin: boolean;
@@ -528,11 +515,15 @@ function ResourceItem({
           </p>
         )}
 
-        {showAddedBy && (
-          <p className="mt-auto pt-2 font-body-sm text-body-sm text-secondary/70 truncate">
-            Added by {addedByName}
-          </p>
-        )}
+        {/* No "Added by <name>" here right now — removed, not just hidden.
+         *  Every resource today is admin-added, so `resource.added_by` is
+         *  the same one or two people on every card in a section; the
+         *  conditional-on-distinct-contributors version of this line was
+         *  never actually right either. `added_by` STAYS on the row in the
+         *  database — once non-admin members can contribute resources,
+         *  attribution becomes the point (who found this), and at that
+         *  point it should show on every card unconditionally, not behind
+         *  a distinct-contributor check. */}
       </article>
 
       {confirmingDelete && (
@@ -568,7 +559,6 @@ export default function ResourcesSection({
   defaultOpen,
   isAdmin,
   resources,
-  addedByNames,
 }: {
   title: string;
   communityId: string;
@@ -579,20 +569,8 @@ export default function ResourcesSection({
    *  whether to render the affordance at all. */
   isAdmin: boolean;
   resources: CommunityResource[];
-  /** user_id -> display name, from listMemberRoster()/
-   *  community_member_roster() (built in the page) — never an email. */
-  addedByNames: Record<string, string>;
-  /** The community's STORED Explore feed (listCommunityFeedItems) — as of
-   *  the last Refresh, never a live search. Defaults to [] so a community
-   *  that predates this feature (or has it disabled) renders exactly as it
-   *  did before. */
 }) {
   const [adding, setAdding] = useState(false);
-
-  // "Added by" is worth a row only when it actually distinguishes cards
-  // from each other — a single admin curating every resource makes an
-  // identical byline on all ten a wasted row, not information.
-  const showAddedBy = new Set(resources.map((r) => r.added_by)).size > 1;
 
   // Owns its own CollapsibleSection, same reason as AnnouncementsSection:
   // the header's "Add resource" button and the add form below share the
@@ -641,8 +619,6 @@ export default function ResourcesSection({
                       <ResourceItem
                         key={r.id}
                         resource={r}
-                        addedByName={addedByNames[r.added_by] ?? "Unknown"}
-                        showAddedBy={showAddedBy}
                         communityId={communityId}
                         slug={slug}
                         isAdmin={isAdmin}
