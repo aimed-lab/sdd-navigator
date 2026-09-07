@@ -21,11 +21,34 @@
 // the viewer has exactly one project. That's deliberate, not a missing
 // feature; asking every time is the point.
 //
-// Dialog shell copied from ResourcesSection.tsx's DeleteResourceConfirm —
-// same fixed-overlay/role="dialog" idiom used everywhere else in this app
-// for a modal, not a native confirm().
+// Dialog shell copied from ResourcesSection.tsx's DeleteResourceConfirm /
+// LeaveButton's LeaveConfirm — same fixed-overlay/role="dialog" idiom (NOT
+// a new one) used everywhere else in this app for a modal, not a native
+// confirm(): `fixed inset-0 z-[60] flex items-center justify-center
+// bg-on-background/40 backdrop-blur-sm`.
+//
+// PORTALED TO document.body, unlike those two — this is the one thing that
+// actually differs, and it's load-bearing, not stylistic. This picker is
+// opened from inside CollapsibleSection's `.glass-panel` wrapper
+// (ResourcesSection -> CollapsibleSection), and `.glass-panel` sets
+// `backdrop-filter: blur(12px)` (app/globals.css). Per the CSS spec, an
+// element with `backdrop-filter` becomes the CONTAINING BLOCK for any
+// `position: fixed` descendant — so without the portal, this dialog's
+// "fixed inset-0" was computing relative to that glass-panel `<section>`'s
+// box, not the viewport: a backdrop sized to the Resources card instead of
+// the screen, with the dialog itself rendering wherever that card happened
+// to scroll to on a long page. Verified in the browser (getComputedStyle +
+// getBoundingClientRect), not by re-reading the CSS — a shrunk-to-card
+// backdrop rect was the actual measured symptom.
+// LeaveButton/DeleteCommunityButton never hit this: they mount inside
+// ManageCommunityCard, which is deliberately "no glass" (plain
+// bg-surface-container-low, see that component's own comment) — no
+// backdrop-filter ancestor, so their identical fixed/z-[60] classes land
+// on the viewport correctly without needing a portal. Same visual pattern,
+// different mount point is the fix, not a new pattern.
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { createProjectAction } from "@/app/projects/actions";
 import { saveForMeAction, saveToProjectAction } from "@/app/explore/actions";
@@ -49,6 +72,11 @@ export default function SaveItemPicker({
   const [newDescription, setNewDescription] = useState("");
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+
+  // document.body doesn't exist during SSR — this flips true only after
+  // the client mounts, same guard every createPortal-to-body needs.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +143,9 @@ export default function SaveItemPicker({
     if (saved.ok) router.refresh();
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-on-background/40 backdrop-blur-sm p-0 sm:p-4"
       onClick={() => !busy && onClose()}
@@ -250,6 +280,7 @@ export default function SaveItemPicker({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
