@@ -65,6 +65,7 @@ const config: Config = {
         "headline-lg": ["Geist", "sans-serif"],
         "headline-lg-mobile": ["Geist", "sans-serif"],
         "headline-md": ["Geist", "sans-serif"],
+        "headline-sm": ["Geist", "sans-serif"],
         "label-md": ["Geist", "sans-serif"],
         "label-sm": ["Geist", "sans-serif"],
         "body-lg": ["Inter", "sans-serif"],
@@ -77,6 +78,20 @@ const config: Config = {
         "headline-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.01em", fontWeight: "600" }],
         "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "600" }],
         "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
+        // Fills the gap between headline-md (24px) and body-lg (18px) —
+        // four call sites (WikiGraph.tsx x2, CommunityCard.tsx,
+        // AnnouncementsSection.tsx) were already reaching for
+        // "headline-sm" before this token existed; it silently compiled to
+        // nothing and those elements rendered at the browser/body default
+        // (16px/400 Inter, measured) instead of a headline. 20px continues
+        // the scale's own decelerating step-down (48 -> 32 -> 24, diffs of
+        // 16 then 8, so 24 -> 20 is the next diff-of-4 step); 28px
+        // line-height matches body-lg's exactly, same ratio the rest of
+        // the scale keeps; 600 weight matches headline-md/-lg, the weight
+        // that actually makes something read as a headline rather than
+        // body text. No letterSpacing, same as headline-md (only
+        // headline-lg and display-lg tighten tracking).
+        "headline-sm": ["20px", { lineHeight: "28px", fontWeight: "600" }],
         "body-lg": ["18px", { lineHeight: "28px", fontWeight: "400" }],
         "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }],
         "body-sm": ["14px", { lineHeight: "20px", fontWeight: "400" }],

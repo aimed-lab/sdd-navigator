@@ -91,6 +91,47 @@ const TYPE_ICON: Record<CommunityResourceType, string> = {
   other: "auto_awesome",
 };
 
+// Per-type colour, reusing lib/showcaseTypes.ts's SHOWCASE_TYPE_COVER
+// approach verbatim rather than inventing a second mapping: this palette
+// only has three real hue families (primary/green, secondary, tertiary —
+// secondary and tertiary are themselves close neighbors, #565e74 vs
+// #505f76), so SHOWCASE_TYPE_COVER pairs two categories per hue at
+// different intensities (paper=primary/10, award=primary/20; talk=
+// secondary/10, tool=secondary-container/60) rather than pretending there
+// are six distinct hues. Same trick here, and the SAME literal classes
+// where the type already has a showcase equivalent:
+//   green (primary):    paper (light — identical to showcase's own
+//                        "paper" entry) / dataset (stronger tint, same
+//                        primary/20 intensity showcase uses for "award")
+//   secondary:          link (plain secondary/10, same as showcase's
+//                        "talk") / tool (secondary-container/60, same
+//                        exact entry showcase already uses for ITS "tool")
+//   tertiary:           podcast (tertiary/10, same treatment as showcase's
+//                        "poster") — alone in this family, since 5 real
+//                        types don't split evenly into 3 pairs
+//   neutral (no hue):   other — same surface-container-high/
+//                        on-surface-variant treatment as showcase's own
+//                        "other"
+// `bar` is now a LEFT edge accent (border-l, not the earlier top bar — see
+// ResourceItem's own comment on why), one flat colour per kind. `chipBg`/
+// `chipText` fill the icon's circle badge, same hue.
+const TYPE_COLOR: Record<CommunityResourceType, { bar: string; chipBg: string; chipText: string }> = {
+  paper: { bar: "border-l-primary", chipBg: "bg-primary/10", chipText: "text-primary" },
+  dataset: { bar: "border-l-primary", chipBg: "bg-primary/20", chipText: "text-primary" },
+  link: { bar: "border-l-secondary", chipBg: "bg-secondary/10", chipText: "text-secondary" },
+  tool: {
+    bar: "border-l-secondary",
+    chipBg: "bg-secondary-container/60",
+    chipText: "text-on-secondary-container",
+  },
+  podcast: { bar: "border-l-tertiary", chipBg: "bg-tertiary/10", chipText: "text-tertiary" },
+  other: {
+    bar: "border-l-outline-variant",
+    chipBg: "bg-surface-container-high",
+    chipText: "text-on-surface-variant",
+  },
+};
+
 // Same list/order as COMMUNITY_RESOURCE_TYPES (lib/communityTypes.ts,
 // mirrors the DB's own CHECK constraint) — kept as a separate constant here
 // only because TYPE_LABEL needs the exact same order for its group headings.
@@ -348,9 +389,23 @@ function ResourceItem({
     );
   }
 
+  const color = TYPE_COLOR[resource.resource_type];
+
   return (
     <>
-      <article className="glass-panel rounded-2xl p-6 relative group flex flex-col gap-2">
+      {/* LEFT border, not the earlier top bar — reads as a category marker
+          running alongside the content rather than a decorative strip
+          along an edge nothing else touches. No shadow anywhere on this
+          card: it sits on glass-panel (blur + translucency already), and
+          nothing else in this app uses drop shadows — a shadow on ten
+          identical, non-clickable-as-a-whole cards would signal nothing.
+          More generous padding/gaps (p-7, gap-4) instead — verified in the
+          browser that the earlier p-6/gap-2 read as CRAMPED, not merely
+          "missing elevation": there was no dead space for the eye to rest
+          in between icon, title and description. */}
+      <article
+        className={`glass-panel rounded-2xl border-l-[3px] ${color.bar} p-7 relative group flex flex-col gap-4`}
+      >
         {/* Admin actions — hover-revealed kebab menu, absolutely positioned
             over the corner so it never occupies layout space, copied
             verbatim from components/promote/ShowcaseCard.tsx's ownerMenu
@@ -401,14 +456,27 @@ function ResourceItem({
           </div>
         )}
 
-        {/* Type chip — carries the signal the group heading above already
-            gives, but ON the card, since the heading scrolls out of view
-            while the cards underneath keep scrolling past it. */}
-        <div className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary pr-8">
-          <span className="material-symbols-outlined text-base">
-            {TYPE_ICON[resource.resource_type]}
+        {/* Type icon in a filled, tinted circle — this is where the visual
+            weight now sits, since the icon is the part actually carrying
+            meaning (which of six types this is), not the label text next
+            to it. Previously the icon just floated inline next to the
+            label at body size, no more visually significant than any other
+            piece of text on the card. The label stays plain tinted text
+            beside the circle, not a second pill — one filled shape per
+            card reads as a badge; two competing tinted shapes would not. */}
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${color.chipBg}`}
+          >
+            <span className={`material-symbols-outlined text-xl ${color.chipText}`}>
+              {TYPE_ICON[resource.resource_type]}
+            </span>
+          </div>
+          <span
+            className={`font-label-sm text-label-sm uppercase tracking-wide ${color.chipText}`}
+          >
+            {TYPE_LABEL[resource.resource_type]}
           </span>
-          {TYPE_LABEL[resource.resource_type]}
         </div>
 
         {/* Title — a link (with an external-link glyph) when there's a URL;
@@ -419,16 +487,30 @@ function ResourceItem({
             BEERE are both in this state today. text-secondary (this
             codebase's standard de-emphasized-text token, same one "Added
             by" and every meta line already uses) reads unambiguously as
-            "not a link" rather than "a link that didn't render". */}
+            "not a link" rather than "a link that didn't render".
+            SIZE/WEIGHT: `font-headline-sm text-headline-sm` used to be
+            here, and is again — but at the time this card was built,
+            neither was a real Tailwind utility in this project's config
+            (no "headline-sm" entry anywhere in tailwind.config.ts), so the
+            title was silently rendering at the browser default (measured:
+            16px/400 Inter), one step above the 14px/400 description —
+            exactly why nothing anchored the eye. Patched at the time with
+            `text-xl font-semibold` (real, always-defined utilities, same
+            20px/600 numbers) as a stopgap. Now that headline-sm exists as
+            a real token (tailwind.config.ts — 20px/28px/600, filling the
+            gap between headline-md and body-lg the four OTHER call sites
+            had independently hit the same hole on), switched back to it:
+            identical size/weight, but Geist (this app's headline
+            typeface) instead of Inter (body text) — reverified below. */}
         {resource.url ? (
           <a
             href={resource.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-start gap-1 font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
+            className="inline-flex items-start gap-1.5 font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
           >
             <span>{resource.title}</span>
-            <span className="material-symbols-outlined text-[16px] shrink-0 translate-y-0.5">
+            <span className="material-symbols-outlined text-[18px] shrink-0 translate-y-1">
               open_in_new
             </span>
           </a>
