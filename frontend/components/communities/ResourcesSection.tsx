@@ -26,9 +26,34 @@
 //
 // ADDED-BY NAME comes from `authorNames` (built in the page from
 // listMemberRoster()/community_member_roster()), never from an email —
-// same reasoning and same "Unknown" fallback as AnnouncementsSection.
+// same reasoning and same "Unknown" fallback as AnnouncementsSection. Shown
+// only when the SECTION has more than one distinct contributor (see
+// ResourcesSection's own `showAddedBy` computation) — identical byline
+// repeated on every card is a wasted row when one admin curated all of them,
+// which is the common case.
+//
+// CARD SURFACE is `glass-panel` (app/globals.css) — same static, non-lifting
+// glass surface Promote's ShowcaseCard uses for its own grid cards, not the
+// flat `bg-surface-container-low` block this used to be. Same reasoning:
+// each card needs its own distinct edge, not ten blocks butted flush
+// together with no visual separation.
+//
+// TYPE ICON + LABEL: RESOURCE_TYPE_ICON below is this file's own map (no
+// equivalent existed anywhere else — ShowcaseCard's SHOWCASE_TYPE_ICON is a
+// DIFFERENT vocabulary, showcase entry types, not community resource
+// types). A small type chip on the card itself, not just the group heading
+// above it, since the heading scrolls out of view while the cards
+// underneath keep scrolling past.
+//
+// ADMIN EDIT/DELETE is a hover-revealed kebab menu, absolutely positioned
+// over the top-right corner — copied from ShowcaseCard's ownerMenu pattern
+// verbatim (same classes, same group/group-hover mechanics, same
+// click-outside catcher), not a second implementation of the same idea.
+// This is a browsing surface; Edit/Delete at the same visual weight as the
+// title and description read as an admin table, not a card someone reads.
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   createCommunityResourceAction,
@@ -48,6 +73,22 @@ const TYPE_LABEL: Record<CommunityResourceType, string> = {
   link: "Links",
   podcast: "Podcasts",
   other: "Other",
+};
+
+// Material Symbols name per type — a flask for a tool, a document for a
+// paper, a link glyph for a link, a waveform for a podcast, matching the
+// spec's own wording as closely as the icon set allows ("science" IS a
+// flask glyph in Material Symbols, "article" a lined document, "podcasts"
+// a broadcast/waveform mark). "other" reuses ShowcaseCard's own
+// DEFAULT_SHOWCASE_TYPE_ICON value (auto_awesome) rather than picking a
+// fresh generic icon — same fallback meaning, same glyph.
+const TYPE_ICON: Record<CommunityResourceType, string> = {
+  tool: "science",
+  paper: "article",
+  dataset: "dataset",
+  link: "link",
+  podcast: "podcasts",
+  other: "auto_awesome",
 };
 
 // Same list/order as COMMUNITY_RESOURCE_TYPES (lib/communityTypes.ts,
@@ -180,7 +221,20 @@ function ResourceForm({
 
 /** Same dialog shell as DeleteAnnouncementConfirm/LeaveButton's
  *  LeaveConfirm — confirm before a destructive action, not a native
- *  confirm(). */
+ *  confirm().
+ *
+ *  PORTALED TO document.body — this card grid now lives inside
+ *  CollapsibleSection's own `glass-panel` wrapper (same surface treatment
+ *  ResourceItem's cards themselves now use), and `.glass-panel` sets
+ *  `backdrop-filter: blur(12px)` (app/globals.css). Per the CSS spec, an
+ *  element with `backdrop-filter` becomes the CONTAINING BLOCK for any
+ *  `position: fixed` descendant — so without the portal, this dialog's
+ *  "fixed inset-0" computed relative to that glass-panel section's box,
+ *  not the viewport. Verified in the browser (getBoundingClientRect): the
+ *  backdrop rect came back sized to the Resources card
+ *  ({x:190, y:96, w:1310, h:862}) instead of the actual viewport, the
+ *  exact same measured symptom as SaveItemPicker.tsx's own version of this
+ *  bug (see that file's comment) — same fix here, not a new pattern. */
 function DeleteResourceConfirm({
   title,
   busy,
@@ -194,7 +248,13 @@ function DeleteResourceConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  return (
+  // document.body doesn't exist during SSR — same guard SaveItemPicker.tsx
+  // uses for the same reason.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-on-background/40 backdrop-blur-sm p-0 sm:p-4"
       onClick={() => !busy && onCancel()}
@@ -242,19 +302,26 @@ function DeleteResourceConfirm({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 function ResourceItem({
   resource,
   addedByName,
+  showAddedBy,
   communityId,
   slug,
   isAdmin,
 }: {
   resource: CommunityResource;
   addedByName: string;
+  /** True only when the SECTION (not just this card) has more than one
+   *  distinct contributor — see ResourcesSection's own computation. A
+   *  single admin curating all ten cards makes an identical byline on
+   *  every one a wasted row, not information. */
+  showAddedBy: boolean;
   communityId: string;
   slug: string;
   isAdmin: boolean;
@@ -264,6 +331,7 @@ function ResourceItem({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   if (editing) {
     return (
@@ -282,47 +350,107 @@ function ResourceItem({
 
   return (
     <>
-      <article className="rounded-xl bg-surface-container-low p-4">
+      <article className="glass-panel rounded-2xl p-6 relative group flex flex-col gap-2">
+        {/* Admin actions — hover-revealed kebab menu, absolutely positioned
+            over the corner so it never occupies layout space, copied
+            verbatim from components/promote/ShowcaseCard.tsx's ownerMenu
+            (same classes, same group/group-hover mechanics, same
+            click-outside catcher) rather than a second implementation. */}
+        {isAdmin && (
+          <div className="absolute top-3 right-3 z-10">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenuOpen((v) => !v);
+              }}
+              aria-label="Resource actions"
+              className="w-8 h-8 rounded-full bg-surface-container-lowest/90 backdrop-blur flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
+            >
+              <span className="material-symbols-outlined text-secondary text-lg">more_vert</span>
+            </button>
+
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 mt-1 w-32 rounded-lg bg-surface-container-lowest shadow-lg border border-outline-variant/30 overflow-hidden z-20">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setEditing(true);
+                    }}
+                    className="block w-full text-left px-4 py-2 font-label-sm text-label-sm text-on-background hover:bg-surface-container-low"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setConfirmingDelete(true);
+                    }}
+                    className="block w-full text-left px-4 py-2 font-label-sm text-label-sm text-error hover:bg-surface-container-low"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Type chip — carries the signal the group heading above already
+            gives, but ON the card, since the heading scrolls out of view
+            while the cards underneath keep scrolling past it. */}
+        <div className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary pr-8">
+          <span className="material-symbols-outlined text-base">
+            {TYPE_ICON[resource.resource_type]}
+          </span>
+          {TYPE_LABEL[resource.resource_type]}
+        </div>
+
+        {/* Title — a link (with an external-link glyph) when there's a URL;
+            deliberately NOT link-colored/underlined otherwise. A resource
+            with no URL used to render in the same weight as a link minus
+            the color, which next to a page full of green linked titles
+            reads as a broken link, not a description — GeneTerrain and
+            BEERE are both in this state today. text-secondary (this
+            codebase's standard de-emphasized-text token, same one "Added
+            by" and every meta line already uses) reads unambiguously as
+            "not a link" rather than "a link that didn't render". */}
         {resource.url ? (
           <a
             href={resource.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
+            className="inline-flex items-start gap-1 font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
           >
-            {resource.title}
+            <span>{resource.title}</span>
+            <span className="material-symbols-outlined text-[16px] shrink-0 translate-y-0.5">
+              open_in_new
+            </span>
           </a>
         ) : (
-          <h3 className="font-headline-sm text-headline-sm text-on-background">
-            {resource.title}
-          </h3>
+          <h3 className="font-headline-sm text-headline-sm text-secondary">{resource.title}</h3>
         )}
+
+        {/* Clamped to two lines — the full text belongs on the linked
+            destination (or, for an unlinked item, there's nowhere else it
+            needs to go in full), not spelled out here at 140 characters a
+            line. */}
         {resource.description && (
-          <p className="mt-2 font-body-md text-body-md text-secondary whitespace-pre-wrap">
+          <p className="font-body-sm text-body-sm text-secondary line-clamp-2">
             {resource.description}
           </p>
         )}
-        <div className="mt-3 flex items-center gap-2 font-body-sm text-body-sm text-secondary/70">
-          <span className="truncate">Added by {addedByName}</span>
-          {isAdmin && (
-            <span className="ml-auto flex items-center gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors"
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingDelete(true)}
-                className="font-label-sm text-label-sm text-secondary hover:text-error transition-colors"
-              >
-                Delete
-              </button>
-            </span>
-          )}
-        </div>
+
+        {showAddedBy && (
+          <p className="mt-auto pt-2 font-body-sm text-body-sm text-secondary/70 truncate">
+            Added by {addedByName}
+          </p>
+        )}
       </article>
 
       {confirmingDelete && (
@@ -379,6 +507,11 @@ export default function ResourcesSection({
 }) {
   const [adding, setAdding] = useState(false);
 
+  // "Added by" is worth a row only when it actually distinguishes cards
+  // from each other — a single admin curating every resource makes an
+  // identical byline on all ten a wasted row, not information.
+  const showAddedBy = new Set(resources.map((r) => r.added_by)).size > 1;
+
   // Owns its own CollapsibleSection, same reason as AnnouncementsSection:
   // the header's "Add resource" button and the add form below share the
   // same `adding` state, which has to live in one client component.
@@ -421,19 +554,19 @@ export default function ResourcesSection({
                   <span className="block font-label-sm text-label-sm text-secondary/70 uppercase mb-2">
                     {TYPE_LABEL[type]}
                   </span>
-                  <ul className="flex flex-col gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {group.map((r) => (
-                      <li key={r.id}>
-                        <ResourceItem
-                          resource={r}
-                          addedByName={addedByNames[r.added_by] ?? "Unknown"}
-                          communityId={communityId}
-                          slug={slug}
-                          isAdmin={isAdmin}
-                        />
-                      </li>
+                      <ResourceItem
+                        key={r.id}
+                        resource={r}
+                        addedByName={addedByNames[r.added_by] ?? "Unknown"}
+                        showAddedBy={showAddedBy}
+                        communityId={communityId}
+                        slug={slug}
+                        isAdmin={isAdmin}
+                      />
                     ))}
-                  </ul>
+                  </div>
                 </div>
               );
             })}
