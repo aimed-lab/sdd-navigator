@@ -60,6 +60,31 @@ ALTER TABLE public.communities
 -- an item has no stable id) — combined with community_id + kind into one
 -- UNIQUE constraint so a refresh can upsert instead of accumulating
 -- duplicates every time the same paper/trial/etc. reappears.
+--
+-- published_at is the ExploreItem's own `date_iso` — ALREADY fetched by
+-- every Explore source (it's what the rest of Explore sorts by; see
+-- search_papers.py's _order_and_cap), just never previously carried through
+-- refreshCommunityFeed()'s insert. NULL when the source item's date_iso was
+-- unparseable (to_iso()'s epoch fallback, 1970-01-01 — refreshCommunityFeed
+-- maps that sentinel to NULL rather than storing a bogus 1970 date). This is
+-- what the Resources feed now sorts and displays by, since "the publication
+-- date matters most" — fetched_at (when Refresh happened to run) is not a
+-- proxy for how NEW the item itself is.
+--
+-- raw and signal are ExploreItem's own `raw`/`signal` fields, stored
+-- VERBATIM as JSONB — this is what lets a community's feed render through
+-- the SAME components/ItemCard.tsx Explore uses (dataset/geneset/trial/
+-- compound/target cards all read their type-specific metadata — organism,
+-- trial status, ChEMBL phase, Open Targets evidence, etc. — out of `raw`;
+-- `signal` drives the citation/star badge). Both are ALREADY present in
+-- what /api/explore-source returns (response.py's trim_items already
+-- reduces `raw` to just {prior_signal, sources} for external sources —
+-- pubmed/openalex/crossref — and leaves it untouched for the
+-- internal-grouped ones — geo/pager/clinicaltrials/chembl/opentargets —
+-- see that module's docstring), just never previously carried through
+-- refreshCommunityFeed()'s insert, same story as published_at above. NULL
+-- for a kind with no such data (e.g. paper items where WINNER never ran, so
+-- signal is whatever OpenAlex reported directly, or nothing).
 CREATE TABLE IF NOT EXISTS public.community_feed_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     community_id UUID NOT NULL REFERENCES public.communities(id) ON DELETE CASCADE,
@@ -69,8 +94,23 @@ CREATE TABLE IF NOT EXISTS public.community_feed_items (
     url TEXT,
     summary TEXT,
     source TEXT,
+    published_at TIMESTAMPTZ,
+    raw JSONB,
+    signal JSONB,
     fetched_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Belt-and-suspenders for a re-run against a table this migration already
+-- created before these columns existed — CREATE TABLE IF NOT EXISTS above
+-- wouldn't add them to an already-existing table.
+ALTER TABLE public.community_feed_items
+    ADD COLUMN IF NOT EXISTS published_at TIMESTAMPTZ;
+
+ALTER TABLE public.community_feed_items
+    ADD COLUMN IF NOT EXISTS raw JSONB;
+
+ALTER TABLE public.community_feed_items
+    ADD COLUMN IF NOT EXISTS signal JSONB;
 
 ALTER TABLE public.community_feed_items
     DROP CONSTRAINT IF EXISTS community_feed_items_kind_check;
@@ -91,6 +131,12 @@ ALTER TABLE public.community_feed_items
 
 CREATE INDEX IF NOT EXISTS community_feed_items_community_kind_idx
     ON public.community_feed_items (community_id, kind);
+
+-- Supports listCommunityFeedItems' newest-first ORDER BY within each kind
+-- group — see ResourcesSection.tsx's own comment on why publication date,
+-- not fetch time, is what the feed sorts by.
+CREATE INDEX IF NOT EXISTS community_feed_items_community_published_idx
+    ON public.community_feed_items (community_id, published_at DESC);
 
 ALTER TABLE public.community_feed_items ENABLE ROW LEVEL SECURITY;
 

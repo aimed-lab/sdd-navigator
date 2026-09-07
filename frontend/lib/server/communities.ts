@@ -1201,14 +1201,34 @@ export type CommunityFeedItem = {
   url: string | null;
   summary: string | null;
   source: string | null;
+  // The ITEM's own publication date (ExploreItem.date_iso), not when Refresh
+  // happened to run — NULL when the source gave nothing parseable (see
+  // normalizePublishedAt below). What the feed sorts and displays by, since
+  // "the publication date matters most" for telling a 2019 result apart
+  // from one from last week.
+  published_at: string | null;
+  // ExploreItem's own `raw`/`signal`, carried through verbatim — this is
+  // what lets ResourcesSection render each item through the SAME
+  // components/ItemCard.tsx Explore uses (a dataset/geneset/trial/compound/
+  // target card's type-specific metadata all comes from `raw`; `signal`
+  // drives the citation/star badge). See feedItemToExploreItem() in
+  // ResourcesSection.tsx for how this is reassembled into an ExploreItem.
+  raw: Record<string, unknown> | null;
+  signal: { metric: string; value: number; as_of: string } | null;
   fetched_at: string;
 };
 
-/** The community's stored feed, most-recently-fetched first — for any
- *  ACTIVE member, "Community feed items: member select" (RLS) is the real
- *  gate, same posture as listCommunityResources/listAnnouncements. This is
- *  what's IN the database right now, i.e. as of the last Refresh — never a
- *  live search, per spec. */
+/** The community's stored feed, newest-published first within each kind —
+ *  for any ACTIVE member, "Community feed items: member select" (RLS) is
+ *  the real gate, same posture as listCommunityResources/listAnnouncements.
+ *  This is what's IN the database right now, i.e. as of the last Refresh —
+ *  never a live search, per spec.
+ *
+ *  Ordered by published_at desc (nulls last, then fetched_at desc as a
+ *  stable tie-break for same-date or unknown-date items) — NOT by
+ *  fetched_at, which only says when this Refresh ran, not how new the item
+ *  itself is. ResourcesSection groups by kind client-side and relies on
+ *  this order surviving that filter. */
 export async function listCommunityFeedItems(communityId: string): Promise<CommunityFeedItem[]> {
   noStore();
   const session = await getSession();
@@ -1216,8 +1236,11 @@ export async function listCommunityFeedItems(communityId: string): Promise<Commu
 
   const { data, error } = await session.db
     .from("community_feed_items")
-    .select("id, community_id, kind, external_id, title, url, summary, source, fetched_at")
+    .select(
+      "id, community_id, kind, external_id, title, url, summary, source, published_at, raw, signal, fetched_at"
+    )
     .eq("community_id", communityId)
+    .order("published_at", { ascending: false, nullsFirst: false })
     .order("fetched_at", { ascending: false });
 
   if (error || !data) return [];
@@ -1235,6 +1258,21 @@ export type SourceOutcome = { kind: string; reason: "empty" | "rejected" };
 export type RefreshFeedResult =
   | { status: "ok"; count: number; emptySources: SourceOutcome[] }
   | { status: "error"; error: string; emptySources: SourceOutcome[] };
+
+// explore-mcp's to_iso() (backend/explore-mcp/sources/base.py) falls back to
+// this exact sentinel whenever a source's date string was unparseable —
+// never a real publication date. Stored as NULL instead of a bogus
+// 1970-01-01 that would otherwise sort dead last and render as "the oldest
+// paper on Earth".
+const EPOCH_DATE_ISO = "1970-01-01T00:00:00.000Z";
+
+/** ExploreItem.date_iso -> what community_feed_items.published_at stores.
+ *  NULL for a missing or epoch-sentinel value; otherwise passed through
+ *  as-is (already a real ISO string — see to_iso()). */
+function normalizePublishedAt(dateIso: string | null | undefined): string | null {
+  if (!dateIso || dateIso === EPOCH_DATE_ISO) return null;
+  return dateIso;
+}
 
 /** Max items PER TOPIC, per source, pulled from /api/explore-source before
  *  merge+dedupe — kept modest since one Refresh fires sources × topics
@@ -1310,6 +1348,9 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
     url: string | null;
     summary: string | null;
     source: string | null;
+    published_at: string | null;
+    raw: Record<string, unknown> | null;
+    signal: { metric: string; value: number; as_of: string } | null;
   };
   const rows: FeedRow[] = [];
   let emptySources: SourceOutcome[] = [];
@@ -1403,6 +1444,15 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
           url: item.url,
           summary: item.summary,
           source: item.source,
+          published_at: normalizePublishedAt(item.date_iso),
+          // Whatever /api/explore-source already returned — trimmed for
+          // pubmed/openalex/crossref (just {prior_signal, sources}, per
+          // response.py), untouched for geo/pager/clinicaltrials/chembl/
+          // opentargets. Stored as-is so ItemCard's per-kind metadata
+          // blocks (organism, trial status, ChEMBL phase, ...) work
+          // identically here to how they work on Explore itself.
+          raw: item.raw ?? null,
+          signal: item.signal ?? null,
         });
       }
     }

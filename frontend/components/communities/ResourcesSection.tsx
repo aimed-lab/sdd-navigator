@@ -32,6 +32,9 @@ import {
   EXPLORE_SOURCE_LABEL,
   type CommunityResourceType,
 } from "@/lib/communityTypes";
+import ItemCard from "@/components/ItemCard";
+import SaveItemPicker from "@/components/SaveItemPicker";
+import type { ExploreItem } from "@/types/explore";
 import CollapsibleSection from "./CollapsibleSection";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -49,6 +52,33 @@ const TYPE_LABEL: Record<CommunityResourceType, string> = {
 // mirrors the DB's own CHECK constraint) — kept as a separate constant here
 // only because TYPE_LABEL needs the exact same order for its group headings.
 const TYPE_ORDER: CommunityResourceType[] = COMMUNITY_RESOURCE_TYPES;
+
+/** CommunityFeedItem (the DB row) -> ExploreItem (what ItemCard actually
+ *  renders) — the whole point of storing `raw`/`signal` verbatim
+ *  (refreshCommunityFeed, lib/server/communities.ts) was to make this
+ *  reconstruction lossless for everything ItemCard reads. `doi` and
+ *  `dedupe_key` are the two ExploreItem fields with no column here; both
+ *  are safe to drop — ItemCard never reads either (grep confirms: it only
+ *  ever touches id/kind/title/summary/url/source/date_iso/signal/raw). */
+function feedItemToExploreItem(row: CommunityFeedItem): ExploreItem {
+  return {
+    id: row.external_id,
+    kind: row.kind,
+    title: row.title,
+    summary: row.summary,
+    url: row.url,
+    source: row.source ?? "",
+    date_iso: row.published_at,
+    signal: row.signal,
+    raw: row.raw ?? undefined,
+  };
+}
+
+/** How many generated items show per kind group before "Show all N" —
+ *  see ExpandableFeedGroup. Ninety papers in one flat list reads as a wall,
+ *  not a feed; this keeps the common case (a handful of genuinely new
+ *  items) scannable while still making the full set one click away. */
+const FEED_GROUP_COLLAPSED_LIMIT = 10;
 
 /** Shared by both "Add resource" and "Edit" — same fields, same validation
  *  (title required; url optional but must be http(s) if given — re-checked
@@ -346,41 +376,52 @@ function ResourceItem({
   );
 }
 
-/** One machine-found item, read-only — nothing to Edit/Delete here (a
- *  Refresh regenerates the whole set; see refreshCommunityFeed's own
- *  comment on why it wipes-then-inserts rather than merging). Same card
- *  shell as ResourceItem, but the "Added by X" slot reads "Found via
- *  Explore" instead of a person's name — that's the "distinguish the two"
- *  requirement: same visual position an admin already reads for
- *  provenance, just a different value for what came from the agent vs. a
- *  person. */
-function FeedItemCard({ item }: { item: CommunityFeedItem }) {
+/** One kind's generated items, rendered through the SAME ItemCard Explore
+ *  uses (components/ItemCard.tsx) — same colored top-border-by-kind, same
+ *  clamped title, same per-kind metadata blocks (organism for a dataset,
+ *  trial status, ChEMBL phase, Open Targets evidence, ...), same grid Explore
+ *  itself lays these out in (app/explore/page.tsx's own GRID constant).
+ *
+ *  No `projectId` passed — a community isn't a project, so there's no
+ *  single obvious save target. `onSaveClick` (from ResourcesSection) opens
+ *  SaveItemPicker instead of ItemCard's own local/project toggle — a real
+ *  persisted save (to a project, a NEW project, or the viewer's own saved
+ *  items), never the silent-reset-on-reload local toggle this used to fall
+ *  back to.
+ *
+ *  Capped at FEED_GROUP_COLLAPSED_LIMIT with a "Show all N" expander — a
+ *  community with ninety papers stored otherwise renders as one unbroken
+ *  wall under the "Papers" heading. `items` arrives pre-sorted
+ *  newest-published-first (listCommunityFeedItems' own ORDER BY), so the
+ *  collapsed slice is always the N most recent, not an arbitrary N. */
+function ExpandableFeedGroup({
+  items,
+  onSaveClick,
+}: {
+  items: CommunityFeedItem[];
+  onSaveClick: (item: ExploreItem) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? items : items.slice(0, FEED_GROUP_COLLAPSED_LIMIT);
+  const hiddenCount = items.length - visible.length;
+
   return (
-    <article className="rounded-xl bg-surface-container-low p-4">
-      {item.url ? (
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-headline-sm text-headline-sm text-primary hover:underline underline-offset-4"
-        >
-          {item.title}
-        </a>
-      ) : (
-        <h3 className="font-headline-sm text-headline-sm text-on-background">{item.title}</h3>
-      )}
-      {item.summary && (
-        <p className="mt-2 font-body-md text-body-md text-secondary whitespace-pre-wrap">
-          {item.summary}
-        </p>
-      )}
-      <div className="mt-3 flex items-center gap-2 font-body-sm text-body-sm text-secondary/70">
-        <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
-        <span className="truncate">
-          Found via Explore{item.source ? ` · ${item.source}` : ""}
-        </span>
+    <>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {visible.map((item) => (
+          <ItemCard key={item.id} item={feedItemToExploreItem(item)} onSaveClick={onSaveClick} />
+        ))}
       </div>
-    </article>
+      {hiddenCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="mt-3 font-label-sm text-label-sm text-primary hover:underline underline-offset-4"
+        >
+          Show all {items.length}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -413,6 +454,7 @@ export default function ResourcesSection({
   feedItems?: CommunityFeedItem[];
 }) {
   const [adding, setAdding] = useState(false);
+  const [savingItem, setSavingItem] = useState<ExploreItem | null>(null);
   const items = feedItems ?? [];
 
   // Owns its own CollapsibleSection, same reason as AnnouncementsSection:
@@ -480,7 +522,18 @@ export default function ResourcesSection({
                 merged into TYPE_ORDER's) since the two vocabularies don't
                 line up: a resource_type is a 6-value hand-picked category,
                 an Explore kind is the item's actual source (paper, trial,
-                dataset, ...). */}
+                dataset, ...).
+
+                Provenance ("Found via Explore") is said ONCE here, above
+                every generated group, not per row (see FeedItemCard's own
+                comment) — the kind headings below already say WHAT each
+                group is; this says HOW the whole block got here. */}
+            {items.length > 0 && (
+              <div className="flex items-center gap-1.5 -mb-2 font-label-sm text-label-sm text-secondary/70 uppercase">
+                <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+                Found via Explore
+              </div>
+            )}
             {EXPLORE_SOURCE_KEYS.map((kind) => {
               const group = items.filter((i) => i.kind === kind);
               if (group.length === 0) return null;
@@ -489,19 +542,15 @@ export default function ResourcesSection({
                   <span className="block font-label-sm text-label-sm text-secondary/70 uppercase mb-2">
                     {EXPLORE_SOURCE_LABEL[kind]}
                   </span>
-                  <ul className="flex flex-col gap-3">
-                    {group.map((item) => (
-                      <li key={item.id}>
-                        <FeedItemCard item={item} />
-                      </li>
-                    ))}
-                  </ul>
+                  <ExpandableFeedGroup items={group} onSaveClick={setSavingItem} />
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {savingItem && <SaveItemPicker item={savingItem} onClose={() => setSavingItem(null)} />}
     </CollapsibleSection>
   );
 }

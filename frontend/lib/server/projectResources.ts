@@ -85,6 +85,30 @@ export type ListProjectResourcesResult =
   | { status: "ok"; resources: ProjectResources }
   | { status: "error"; error: string };
 
+// Shared by listProjectResources and listMySavedItems below — same tiling/
+// recent/items shape either way, only the WHERE clause differs (project_id
+// = X vs. project_id IS NULL).
+function buildProjectResources(
+  rows: { item_id: string; item_data: ExploreItem; created_at: string }[]
+): ProjectResources {
+  const countByKind = new Map<string, number>();
+  for (const row of rows) {
+    const kind = (row.item_data?.kind as string | undefined) ?? "unknown";
+    countByKind.set(kind, (countByKind.get(kind) ?? 0) + 1);
+  }
+
+  const tiles: ResourceTile[] = TILE_KINDS.map((kind) => ({
+    kind,
+    label: TILE_LABEL[kind],
+    count: countByKind.get(kind) ?? 0,
+  })).filter((t) => t.count > 0);
+
+  const items = rows.map((r) => r.item_data);
+  const recent = items.slice(0, 3);
+
+  return { total: rows.length, tiles, recent, items };
+}
+
 export async function listProjectResources(projectId: string): Promise<ListProjectResourcesResult> {
   const db = await getDb();
   if (!db) return { status: "error", error: "Service not configured." };
@@ -101,23 +125,99 @@ export async function listProjectResources(projectId: string): Promise<ListProje
   }
 
   const rows = (data ?? []) as { item_id: string; item_data: ExploreItem; created_at: string }[];
+  return { status: "ok", resources: buildProjectResources(rows) };
+}
 
-  const countByKind = new Map<string, number>();
-  for (const row of rows) {
-    const kind = (row.item_data?.kind as string | undefined) ?? "unknown";
-    countByKind.set(kind, (countByKind.get(kind) ?? 0) + 1);
+// ── Personal (non-project) saves ────────────────────────────────────────
+//
+// project_id IS NULL on saved_items — already the table's original, default
+// shape (see 2026-08-09_saved_items_projects.sql's own "project_id —
+// nullable, so personal saves ... are completely unaffected" comment), not
+// a new column or migration. RLS already covers this: the SELECT/INSERT/
+// DELETE policies' `auth.uid() = user_id` branch is unconditional and
+// doesn't care about project_id at all — a personal row is just a row this
+// user owns, same as any of theirs.
+//
+// A SEPARATE module (lib/server/savedItems.ts) already exists for
+// project_id IS NULL saves, but stores the narrower DiscoverItem shape for
+// an old discovery flow with no surviving caller anywhere in app/ or
+// components/ (grep confirms it's unreferenced) — left untouched rather
+// than repurposed, so as not to silently change a type contract some other
+// still-unknown caller might rely on. These three functions are the
+// ExploreItem-shaped equivalent, living here (not there) because this file
+// already owns the "personal or project — either way, one ExploreItem
+// saved into saved_items" concern (see the file's own top comment).
+
+/** The signed-in user's own personal saves (project_id IS NULL) — same
+ *  shape as a project's resources, since /saved renders through the same
+ *  tiling/grid UI. */
+export async function listMySavedItems(): Promise<ListProjectResourcesResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const { data, error } = await db
+    .from("saved_items")
+    .select("item_id, item_data, created_at")
+    .eq("user_id", user.id)
+    .is("project_id", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("listMySavedItems: query failed", error);
+    return { status: "error", error: "Couldn't load your saved items." };
   }
 
-  const tiles: ResourceTile[] = TILE_KINDS.map((kind) => ({
-    kind,
-    label: TILE_LABEL[kind],
-    count: countByKind.get(kind) ?? 0,
-  })).filter((t) => t.count > 0);
+  const rows = (data ?? []) as { item_id: string; item_data: ExploreItem; created_at: string }[];
+  return { status: "ok", resources: buildProjectResources(rows) };
+}
 
-  const items = rows.map((r) => r.item_data);
-  const recent = items.slice(0, 3);
+/** Save an Explore item for the caller alone — project_id NULL, not tied to
+ *  any project. No membership check needed (unlike saveToProject): a
+ *  personal save only ever touches the caller's own row, gated by RLS's
+ *  `auth.uid() = user_id` alone. */
+export async function saveItemForMe(item: ExploreItem): Promise<SaveToProjectResult> {
+  const { user, db } = await requireCurrentUser();
 
-  return { status: "ok", resources: { total: rows.length, tiles, recent, items } };
+  const { error } = await db.from("saved_items").insert({
+    user_id: user.id,
+    project_id: null,
+    item_id: item.id,
+    item_data: item,
+  });
+
+  if (error) {
+    // 23505 here means this exact item is already in the caller's personal
+    // saves (saved_items_personal_unique) — an expected outcome, not a
+    // failure worth logging, same posture as saveToProject's own 23505
+    // branch.
+    if (error.code === "23505") {
+      return { status: "error", error: "You've already saved that item." };
+    }
+    console.error("saveItemForMe: insert failed", error);
+    return { status: "error", error: "Couldn't save that item." };
+  }
+
+  return { status: "ok" };
+}
+
+/** Remove one of the caller's OWN personal saves. Unlike removeFromProject
+ *  (any project member may remove any member's save), this is scoped to
+ *  `user_id = caller` as well as `project_id IS NULL` — a personal save has
+ *  no "team" to share removal rights with. */
+export async function removeMyItem(itemId: string): Promise<RemoveFromProjectResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("saved_items")
+    .delete()
+    .eq("user_id", user.id)
+    .is("project_id", null)
+    .eq("item_id", itemId);
+
+  if (error) {
+    console.error("removeMyItem: delete failed", error);
+    return { status: "error", error: "Couldn't remove that item." };
+  }
+  return { status: "ok" };
 }
 
 // Internal only — a friendly membership check before insert, so a

@@ -11,7 +11,12 @@
 
 import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
-import { removeFromProject, saveToProject } from "@/lib/server/projectResources";
+import {
+  removeFromProject,
+  removeMyItem,
+  saveItemForMe,
+  saveToProject,
+} from "@/lib/server/projectResources";
 import type { ExploreItem } from "@/types/explore";
 
 export type SaveActionResult = { ok: true } | { ok: false; error: string };
@@ -49,6 +54,41 @@ export async function removeFromProjectAction(
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to remove items." };
     console.error("removeFromProjectAction failed", e);
+    return { ok: false, error: "Couldn't remove that item. Please try again." };
+  }
+}
+
+// ── Personal (non-project) saves — see lib/server/projectResources.ts's
+// "Personal (non-project) saves" section for why these live there rather
+// than in lib/server/savedItems.ts. Powers the "Just save it for me" choice
+// in SaveItemPicker.tsx, and /saved's own remove control.
+
+export async function saveForMeAction(item: ExploreItem): Promise<SaveActionResult> {
+  if (!item?.id) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await saveItemForMe(item);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath("/saved");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to save items." };
+    console.error("saveForMeAction failed", e);
+    return { ok: false, error: "Couldn't save that item. Please try again." };
+  }
+}
+
+export async function removeMyItemAction(itemId: string): Promise<SaveActionResult> {
+  if (!itemId) return { ok: false, error: "Missing item." };
+
+  try {
+    const result = await removeMyItem(itemId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath("/saved");
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to remove items." };
+    console.error("removeMyItemAction failed", e);
     return { ok: false, error: "Couldn't remove that item. Please try again." };
   }
 }

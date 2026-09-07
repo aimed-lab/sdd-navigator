@@ -160,6 +160,14 @@ export default function Nav() {
                       My projects
                     </Link>
                     <Link
+                      href="/saved"
+                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <span className="material-symbols-outlined text-secondary text-base">bookmark</span>
+                      Saved items
+                    </Link>
+                    <Link
                       href="/settings"
                       className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
                       onClick={() => setMenuOpen(false)}
@@ -234,6 +242,9 @@ export default function Nav() {
               </Link>
               <Link href="/projects" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 My projects
+              </Link>
+              <Link href="/saved" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
+                Saved items
               </Link>
               <Link href="/settings" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 Settings

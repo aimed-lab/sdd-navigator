@@ -14,6 +14,17 @@
 // behavior: a bare local toggle, no network call, no persistence — that
 // is deliberate, not an oversight; see app/explore/[topic]/page.tsx for
 // why Explore without project context must stay exactly as it was.
+//
+// onSaveClick FULLY OVERRIDES both of the above when given — the bookmark
+// click calls it and returns, with no local toggle and no projectId logic
+// at all. This is what a caller with no single obvious save target uses
+// (a community's generated feed: there's no project to default to, and a
+// bare local toggle would silently reset on reload — the exact bug this
+// prop exists to fix). See components/SaveItemPicker.tsx, the one current
+// caller: it opens a dialog offering "one of my projects" / "a new
+// project" / "just for me", then calls the matching Server Action itself.
+// Every other call site (Explore, project pages) never passes this and is
+// completely unaffected.
 
 import { useState } from "react";
 import type {
@@ -251,10 +262,12 @@ export default function ItemCard({
   projectId,
   initiallySaved = false,
   variant = "default",
+  onSaveClick,
 }: {
   item: ExploreItem;
   /** When set, the bookmark button saves into/removes from THIS project
-   *  instead of being a purely local toggle. */
+   *  instead of being a purely local toggle. Ignored when `onSaveClick` is
+   *  given. */
   projectId?: string;
   /** Seeds the bookmark's starting visual state — true for cards the
    *  project Resources section already knows are saved; false (the
@@ -267,6 +280,9 @@ export default function ItemCard({
    *  from item.raw, so the two subsections render consistently regardless
    *  of which item happens to carry raw.prior_signal. */
   variant?: "default" | "key";
+  /** Fully overrides the bookmark click — see this file's top comment.
+   *  When given, `projectId`/the local toggle are never consulted. */
+  onSaveClick?: (item: ExploreItem) => void;
 }) {
   const [saved, setSaved] = useState(initiallySaved);
   const [pending, setPending] = useState(false);
@@ -305,6 +321,11 @@ export default function ItemCard({
   const toggleSave = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (pending) return;
+
+    if (onSaveClick) {
+      onSaveClick(item);
+      return;
+    }
 
     if (!projectId) {
       // No project context — EXACTLY today's behavior: a bare local
