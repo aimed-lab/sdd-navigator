@@ -27,6 +27,7 @@ import CommunityProjectsList from "@/components/communities/CommunityProjectsLis
 import MembersSection from "@/components/communities/MembersSection";
 import AnnouncementsSection from "@/components/communities/AnnouncementsSection";
 import ResourcesSection from "@/components/communities/ResourcesSection";
+import ExploreSection from "@/components/communities/ExploreSection";
 import EmptySection from "@/components/communities/EmptySection";
 import CollapsibleSection from "@/components/communities/CollapsibleSection";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
@@ -98,8 +99,9 @@ export default async function CommunityDetailPage({
   const resources = isMember ? await listCommunityResources(community.id) : [];
 
   // The stored Explore feed — same "only fetch when isMember" reasoning as
-  // resources above; ResourcesSection renders it grouped by kind alongside
-  // the hand-added resources (see that component's own comment).
+  // resources above; rendered by its own Explore section (ExploreSection),
+  // separate from Resources — see that component's own comment for why
+  // the two split.
   const feedItems = isMember ? await listCommunityFeedItems(community.id) : [];
 
   const authorNames: Record<string, string> = Object.fromEntries(
@@ -169,18 +171,28 @@ export default async function CommunityDetailPage({
             same disclosure idiom as ManageCommunityCard below, which is
             deliberately on a quieter surface than these). Projects starts
             open; everything else starts closed. Only "projects", "members",
-            "announcements", and "resources" have real content today, per
-            spec; the rest render a "nothing here yet" placeholder
-            deliberately, not as something to hide — and have no count or
-            action to show while collapsed, unlike the other four.
+            "announcements", "resources", and "explore" have real content
+            today, per spec; the rest render a "nothing here yet"
+            placeholder deliberately, not as something to hide — and have
+            no count or action to show while collapsed, unlike those five.
 
-            Announcements and Resources each render themselves rather than
-            being wrapped here — their header action ("New announcement" /
-            "Add resource") and their create/add form share one piece of
-            client state, which has to live in that one component (see
-            their own comments). Projects doesn't need that: its action is
-            a plain link, so the page (server) builds it and hands it
-            straight to CollapsibleSection's `action` prop. */}
+            Resources (hand-curated) and Explore (Explore's generated
+            findings) are deliberately TWO sections, not one — a community
+            can enable either independently: curated tools with no feed, or
+            a feed with nothing curated yet. See ResourcesSection.tsx's own
+            comment for why they split.
+
+            Announcements, Resources, and Explore each render themselves
+            (own their own CollapsibleSection) rather than being wrapped
+            here. Announcements/Resources need that because their header
+            action ("New announcement" / "Add resource") and create/add
+            form share one piece of client state (see their own comments);
+            Explore has no add form at all — it renders itself only so its
+            "no items yet" copy and per-kind grouping live next to the data
+            they describe, not scattered into this switch. Projects doesn't
+            need any of that: its action is a plain link, so the page
+            (server) builds it and hands it straight to CollapsibleSection's
+            `action` prop here. */}
         {orderedSections
           .filter((s) => s.enabled)
           .map((s) => {
@@ -238,8 +250,11 @@ export default async function CommunityDetailPage({
                     isAdmin={membership.isAdmin}
                     resources={resources}
                     addedByNames={authorNames}
-                    feedItems={feedItems}
                   />
+                );
+              case "explore":
+                return (
+                  <ExploreSection key={s.key} title={SECTION_LABEL[s.key]} feedItems={feedItems} />
                 );
               default:
                 return (

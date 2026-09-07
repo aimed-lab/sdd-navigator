@@ -11,6 +11,21 @@
 //
 // Only rendered for a signed-in user — app/projects/new/page.tsx redirects to
 // /login otherwise. createProjectAction re-checks server-side regardless.
+//
+// REUSED FROM A DIALOG (components/SaveItemPicker.tsx's "create a new
+// project" step): rather than a second create-project form drifting from
+// this one, SaveItemPicker renders this component directly. The two things
+// that only make sense for a standalone PAGE — navigating away on success,
+// and a Cancel link back to /projects — are the ONLY two behaviors this
+// takes optional overrides for:
+//   - `onCreated`, when given, is called with the new project's id INSTEAD
+//     of the router.push/refresh below (the dialog needs the id to save the
+//     item into it next; it doesn't want to navigate anywhere).
+//   - `onCancel`, when given, replaces the "Cancel" link with a plain
+//     button calling it (a dialog has no /projects to link back to).
+// Neither prop is passed from app/projects/new/page.tsx, so that entry
+// point's behavior is untouched — same fields, same validation, same
+// submit handler either way.
 
 import { useState } from "react";
 import Link from "next/link";
@@ -24,6 +39,8 @@ export default function CreateProjectForm({
   colabofest,
   communityId,
   communitySlug,
+  onCreated,
+  onCancel,
 }: {
   colabofest: boolean;
   /** From /projects/new?community=<id> (see CommunityProjectsList's own
@@ -38,6 +55,13 @@ export default function CreateProjectForm({
    *  didn't resolve to a real community; either way this form still works,
    *  it just falls back to the plain /projects redirect below. */
   communitySlug?: string;
+  /** Dialog-embedding override — see this file's top comment. When given,
+   *  a successful create calls this with the new project's id instead of
+   *  navigating anywhere. */
+  onCreated?: (id: string) => void;
+  /** Dialog-embedding override — see this file's top comment. When given,
+   *  replaces the "Cancel" link with a button calling this. */
+  onCancel?: () => void;
 }) {
   const router = useRouter();
 
@@ -84,6 +108,13 @@ export default function CreateProjectForm({
     });
 
     if (res.ok) {
+      if (onCreated) {
+        // Dialog mode — see this file's top comment. The caller (e.g.
+        // SaveItemPicker) does something with the new id next; navigating
+        // away here would be wrong regardless of what that turns out to be.
+        onCreated(res.id);
+        return;
+      }
       // Created FOR a community (communitySlug resolved) — land back on
       // that community's page, where the new project now shows in its list,
       // rather than /projects, which a community member arriving here via
@@ -312,12 +343,22 @@ export default function CreateProjectForm({
           {saving ? "Creating…" : "Create project"}
           {!saving && <span className="material-symbols-outlined text-[18px]">arrow_forward</span>}
         </button>
-        <Link
-          href="/projects"
-          className="w-full text-center font-label-md text-label-md text-secondary hover:text-primary transition-colors py-2"
-        >
-          Cancel
-        </Link>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full text-center font-label-md text-label-md text-secondary hover:text-primary transition-colors py-2"
+          >
+            Cancel
+          </button>
+        ) : (
+          <Link
+            href="/projects"
+            className="w-full text-center font-label-md text-label-md text-secondary hover:text-primary transition-colors py-2"
+          >
+            Cancel
+          </Link>
+        )}
       </footer>
     </form>
   );

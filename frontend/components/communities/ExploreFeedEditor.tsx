@@ -119,7 +119,7 @@ export default function ExploreFeedEditor({
       <h3 className="font-label-lg text-label-lg text-on-background">Explore feed</h3>
       <p className="font-body-sm text-body-sm text-secondary">
         Pick which Explore sources this community searches and the topics that drive it. The
-        Resources section shows whatever the last Refresh found, not a live search — members see
+        Explore section shows whatever the last Refresh found, not a live search — members see
         the same feed until an admin refreshes it.
       </p>
 
