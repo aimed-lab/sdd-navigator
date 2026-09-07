@@ -92,7 +92,7 @@ export default function SaveItemPicker({
       } catch {
         // A failed list just means "Save to one of my projects" shows
         // none — same "never break a widget's host over a fetch" rule as
-        // the inbox badge / CommunitiesSection.
+        // the inbox badge / CommunitiesResultsSection.
         if (!cancelled) setProjects([]);
       }
     })();

@@ -23,9 +23,11 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
+import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { submitFeedbackAction } from "@/app/feedback/actions";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
+import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 const SECTION_TITLE: Record<string, string> = {
   news: "Industry News",
@@ -150,6 +152,30 @@ function SearchResults() {
   // the original project context while ignoring their edit.
   const isFirstLoadRef = useRef(true);
 
+  // Communities matching this search — fetched separately from the explore
+  // backend response below, since communities live in Supabase, not the
+  // Python search backend (see /api/communities-summary's own comment).
+  // Keyed on `topic` so re-searching re-scopes the match, same as the main
+  // fetch below.
+  const [communities, setCommunities] = useState<CommunitySummaryItem[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/communities-summary?q=${encodeURIComponent(topic)}`, {
+          cache: "no-store",
+        });
+        const json = (await res.json()) as { communities?: CommunitySummaryItem[] };
+        if (!cancelled) setCommunities(json.communities ?? []);
+      } catch {
+        if (!cancelled) setCommunities([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [topic]);
+
   // (Re)fetch whenever the routed topic changes.
   useEffect(() => {
     let cancelled = false;
@@ -208,7 +234,11 @@ function SearchResults() {
   //                  sources, which backendError is not.
   // Both are "settled" (not loading) and mutually exclusive.
   const backendError = !loading && (failed || data?.error === true);
-  const emptyResult = !loading && !backendError && totalItems === 0;
+  // Zero backend items is only a genuinely empty result when communities
+  // ALSO matched nothing — a search that turned up a matching community but
+  // no papers/trials/etc. still found something and must not read as "no
+  // results for X" (see the pinned Communities row below).
+  const emptyResult = !loading && !backendError && totalItems === 0 && communities.length === 0;
   const showError = backendError || emptyResult;
 
   // Auto-capture: page_path + the query, tagged with which of the two
@@ -325,151 +355,171 @@ function SearchResults() {
         </div>
       )}
 
-      {/* Loading */}
-      {loading && (
-        <div className="space-y-16">
-          {[0, 1].map((s) => (
-            <section key={s}>
-              <div className="h-8 w-48 rounded bg-surface-container mb-8 animate-pulse" />
-              <div className={GRID}>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <SkeletonCard key={i} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-
-      {/* Error / no results at all — copy differs by which settled outcome
-          this was. A backend failure must never read like an empty search:
-          "try a broader term" tells someone their query was the problem when
-          the actual problem is that nothing searched at all. */}
-      {!loading && showError && (
-        <div className="max-w-md mx-auto text-center py-24">
-          {backendError ? (
-            <>
-              <span className="material-symbols-outlined text-5xl text-secondary/50">
-                cloud_off
-              </span>
-              <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
-                Couldn&apos;t search right now
-              </h2>
-              <p className="mt-2 text-secondary font-body-md">
-                The discovery backend didn&apos;t respond. This isn&apos;t about your
-                search — please try again in a moment.
-              </p>
-            </>
-          ) : (
-            <>
-              <span className="material-symbols-outlined text-5xl text-secondary/50">
-                search_off
-              </span>
-              <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
-                No results for &ldquo;{topic}&rdquo;
-              </h2>
-              <p className="mt-2 text-secondary font-body-md">
-                Try a broader term, or browse the full feed.
-              </p>
-            </>
-          )}
-
-          <button
-            onClick={() => router.push("/explore")}
-            className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
-          >
-            Browse the full feed
-          </button>
-
-          {emptyResult && (
-            <div className="mt-8 text-left">
-              <InlineFeedback
-                prompt="What were you hoping to find?"
-                pagePath={`/explore/${encodeURIComponent(topic)}`}
-                context={{ query: topic }}
-              />
+      {/* Communities chip — its own view, independent of the explore-backend
+          loading/error/data state below: see app/explore/page.tsx for the
+          full rationale (kept in sync between the two pages). */}
+      {selected === "communities" ? (
+        communities.length === 0 ? (
+          <div className="text-center py-20 text-secondary font-body-md">
+            No communities found for &ldquo;{topic}&rdquo;.
+          </div>
+        ) : (
+          <CommunitiesResultsSection items={communities} />
+        )
+      ) : (
+        <>
+          {/* Loading */}
+          {loading && (
+            <div className="space-y-16">
+              {[0, 1].map((s) => (
+                <section key={s}>
+                  <div className="h-8 w-48 rounded bg-surface-container mb-8 animate-pulse" />
+                  <div className={GRID}>
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
-        </div>
-      )}
 
-      {/* Results */}
-      {!loading && !showError && (() => {
-        const activeSections =
-          selected === null
-            ? fullSections
-            : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
-        const showPooled = selected === null && pooledItems.length > 0;
+          {/* Error / no results at all — copy differs by which settled outcome
+              this was. A backend failure must never read like an empty search:
+              "try a broader term" tells someone their query was the problem when
+              the actual problem is that nothing searched at all. */}
+          {!loading && showError && (
+            <div className="max-w-md mx-auto text-center py-24">
+              {backendError ? (
+                <>
+                  <span className="material-symbols-outlined text-5xl text-secondary/50">
+                    cloud_off
+                  </span>
+                  <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                    Couldn&apos;t search right now
+                  </h2>
+                  <p className="mt-2 text-secondary font-body-md">
+                    The discovery backend didn&apos;t respond. This isn&apos;t about your
+                    search — please try again in a moment.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-5xl text-secondary/50">
+                    search_off
+                  </span>
+                  <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                    No results for &ldquo;{topic}&rdquo;
+                  </h2>
+                  <p className="mt-2 text-secondary font-body-md">
+                    Try a broader term, or browse the full feed.
+                  </p>
+                </>
+              )}
 
-        // Selected category with no results -> the A+D invitation card.
-        // FAILED vs GENUINELY EMPTY: a real per-tool failure (tools/explore.py
-        // sets section.error when that tool's call raised) must not read as
-        // "try a broader term" — that's a lie when the source never actually
-        // searched. `activeSections`/`pooledItems` above are built from
-        // `.items` alone and drop `.error`, so look it up separately, straight
-        // from the raw response, for whichever kind is selected.
-        if (selected !== null && activeSections.length === 0) {
-          const failedSection = (data?.sections ?? []).find(
-            (s) => s.kind === selected && !!s.error
-          );
-          return (
-            <CategoryEmptyCard
-              label={labelForKind(selected)}
-              kind={selected}
-              query={topic}
-              failed={!!failedSection}
-              onBrowseAll={() => setSelected(null)}
-            />
-          );
-        }
+              <button
+                onClick={() => router.push("/explore")}
+                className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
+              >
+                Browse the full feed
+              </button>
 
-        return (
-          <div className="space-y-16">
-            {activeSections.map((section: ExploreSection) => (
-              <section key={section.tool}>
-                <SectionHeader
-                  title={titleFor(section.kind)}
-                  note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
-                />
-                <div className={GRID}>
-                  {section.items.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} projectId={projectId} />
-                  ))}
+              {emptyResult && (
+                <div className="mt-8 text-left">
+                  <InlineFeedback
+                    prompt="What were you hoping to find?"
+                    pagePath={`/explore/${encodeURIComponent(topic)}`}
+                    context={{ query: topic }}
+                  />
                 </div>
+              )}
+            </div>
+          )}
 
-                {/* Key Papers — same pool as "Latest Papers" above, re-ordered
-                    by WINNER instead of date desc; a second subsection under
-                    the existing Papers section/tab, not a new CategoryStrip
-                    tab — see app/explore/page.tsx for the full rationale
-                    (kept in sync between the two pages). "★ Key paper" is
-                    the wording ItemCard already uses for a WINNER-ranked
-                    item's badge. */}
-                {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
-                  <div className="mt-12">
-                    <SectionHeader title="Key Papers" />
+          {/* Results */}
+          {!loading && !showError && (() => {
+            const activeSections =
+              selected === null
+                ? fullSections
+                : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
+            const showPooled = selected === null && pooledItems.length > 0;
+
+            // Selected category with no results -> the A+D invitation card.
+            // FAILED vs GENUINELY EMPTY: a real per-tool failure (tools/explore.py
+            // sets section.error when that tool's call raised) must not read as
+            // "try a broader term" — that's a lie when the source never actually
+            // searched. `activeSections`/`pooledItems` above are built from
+            // `.items` alone and drop `.error`, so look it up separately, straight
+            // from the raw response, for whichever kind is selected.
+            if (selected !== null && activeSections.length === 0) {
+              const failedSection = (data?.sections ?? []).find(
+                (s) => s.kind === selected && !!s.error
+              );
+              return (
+                <CategoryEmptyCard
+                  label={labelForKind(selected)}
+                  kind={selected}
+                  query={topic}
+                  failed={!!failedSection}
+                  onBrowseAll={() => setSelected(null)}
+                />
+              );
+            }
+
+            return (
+              <div className="space-y-16">
+                {/* Communities, pinned first on "All" — see
+                    app/explore/page.tsx for the full rationale (kept in sync
+                    between the two pages). */}
+                {selected === null && <CommunitiesResultsSection items={communities} />}
+
+                {activeSections.map((section: ExploreSection) => (
+                  <section key={section.tool}>
+                    <SectionHeader
+                      title={titleFor(section.kind)}
+                      note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
+                    />
                     <div className={GRID}>
-                      {section.items_key!.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} projectId={projectId} variant="key" />
+                      {section.items.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} projectId={projectId} />
                       ))}
                     </div>
-                  </div>
-                )}
-              </section>
-            ))}
 
-            {showPooled && (
-              <section>
-                <SectionHeader title="Also Found" />
-                <div className={GRID}>
-                  {pooledItems.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} projectId={projectId} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        );
-      })()}
+                    {/* Key Papers — same pool as "Latest Papers" above, re-ordered
+                        by WINNER instead of date desc; a second subsection under
+                        the existing Papers section/tab, not a new CategoryStrip
+                        tab — see app/explore/page.tsx for the full rationale
+                        (kept in sync between the two pages). "★ Key paper" is
+                        the wording ItemCard already uses for a WINNER-ranked
+                        item's badge. */}
+                    {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
+                      <div className="mt-12">
+                        <SectionHeader title="Key Papers" />
+                        <div className={GRID}>
+                          {section.items_key!.map((item: ExploreItem) => (
+                            <ItemCard key={item.id} item={item} projectId={projectId} variant="key" />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                ))}
+
+                {showPooled && (
+                  <section>
+                    <SectionHeader title="Also Found" />
+                    <div className={GRID}>
+                      {pooledItems.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} projectId={projectId} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            );
+          })()}
+        </>
+      )}
     </div>
   );
 }

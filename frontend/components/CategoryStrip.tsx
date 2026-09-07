@@ -24,6 +24,13 @@ export const CATEGORIES: {
   href?: string;
 }[] = [
   { label: "All", kind: null },
+  // Not an ExploreItem.kind (communities aren't a backend/Explore source —
+  // they live in Supabase, not the Python search backend) — a UI-only kind
+  // value the two pages that render this strip special-case to render
+  // components/communities/CommunityCard instead of ItemCard. Placed right
+  // after "All": a community is somewhere to join, which is a different
+  // kind of ask than every content kind after it.
+  { label: "Communities", kind: "communities" },
   { label: "Papers", kind: "paper" },
   { label: "Datasets", kind: "dataset" },
   { label: "Gene sets", kind: "geneset" },

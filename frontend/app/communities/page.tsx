@@ -56,6 +56,7 @@ export default async function CommunitiesPage() {
                   member
                   role={memberships[c.id]?.role}
                   pending={false}
+                  memberCount={c.member_count ?? 0}
                 />
               ))}
             </div>
@@ -77,6 +78,7 @@ export default async function CommunitiesPage() {
                 community={c}
                 member={false}
                 pending={memberships[c.id]?.status === "pending"}
+                memberCount={c.member_count ?? 0}
               />
             ))}
           </div>

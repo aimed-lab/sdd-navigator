@@ -126,8 +126,8 @@ export default async function CommunityDetailPage({
           (mb-4, matching the project page's own back-link wrapper) instead
           of inherited from that stack's gap. */}
       <div className="mb-4">
-        {/* Communities is a section of Explore now, not its own nav
-            destination (see components/explore/CommunitiesSection.tsx) —
+        {/* Communities is a category of Explore now, not its own nav
+            destination (see components/explore/CommunitiesResultsSection.tsx) —
             this returns there rather than to /communities, which still
             works as a URL but is no longer where anyone arrives from. */}
         <Link

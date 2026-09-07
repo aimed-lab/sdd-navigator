@@ -74,10 +74,24 @@ export type Community = {
   explore_sources: string[];
   explore_topics: string[];
   explore_refreshed_at: string | null;
+  // Active member count (database/migrations/2026-09-08_community_member_counts.sql's
+  // community_member_counts() RPC) — OPTIONAL because only listCommunities()
+  // below populates it; getCommunityBySlug/getCommunityById don't (a single
+  // community's own page already gets this from getCommunityStats(), and
+  // running the batched RPC for one row would be pure waste). 0 when the
+  // RPC's own read failed, same "degrade to a number, not a crash" posture
+  // as getCommunityStats().
+  member_count?: number;
 };
 
-/** All communities, ordered by name. Degrades to an empty list so the
- *  Collaborate page still renders (without chips) if this read fails.
+/** All communities, ordered by name, each with its active member count —
+ *  ONE extra query total (community_member_counts(), batched across every
+ *  community), not one per community, for card-grid contexts that render
+ *  many at once (Explore's Communities category, /communities). Degrades
+ *  to an empty list so the Collaborate page still renders (without chips)
+ *  if this read fails; degrades to member_count: 0 per row (not a failed
+ *  read) if only the count RPC fails — a community grid should still show
+ *  the communities themselves even if their counts didn't come back.
  *
  *  Also runs the by-email-add backstop claim (see addCommunityMemberByEmail's
  *  own comment) for whoever's currently signed in — same call site pattern
@@ -95,14 +109,83 @@ export async function listCommunities(): Promise<Community[]> {
   const supabase = getAnonServerClient();
   if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
-    .order("name", { ascending: true });
+  const [{ data, error }, countsResult] = await Promise.all([
+    supabase
+      .from("communities")
+      .select(
+        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at"
+      )
+      .order("name", { ascending: true }),
+    supabase.rpc("community_member_counts"),
+  ]);
 
   if (error || !data) return [];
-  return data as Community[];
+
+  if (countsResult.error) {
+    console.error("listCommunities: community_member_counts failed", countsResult.error);
+  }
+  const counts = new Map<string, number>(
+    ((countsResult.data ?? []) as { community_id: string; member_count: number | string }[]).map(
+      (row) => [row.community_id, Number(row.member_count) || 0]
+    )
+  );
+
+  return (data as Community[]).map((c) => ({ ...c, member_count: counts.get(c.id) ?? 0 }));
 }
+
+/** Communities whose name, purpose (`description`), or explore_topics match
+ *  `query` — case-insensitive substring, checked against ALL THREE fields
+ *  since a topic is often the most accurate description of what a
+ *  community is actually about (a community's `description` is prose for
+ *  a human reader, same "not specific enough" gap explore_topics exists to
+ *  fill — see 2026-09-06_community_feed.sql's own reasoning for why topics
+ *  are a separate field from description in the first place).
+ *
+ *  A topic match is checked BOTH directions (topic-contains-query OR
+ *  query-contains-topic) — topics are short keyword phrases ("PHGDH",
+ *  "glioblastoma metabolism"), so a query of "pancreatic cancer research"
+ *  should still match a community whose topic is just "pancreatic cancer",
+ *  not only the reverse.
+ *
+ *  IMPLEMENTATION: filters the same full list listCommunities() already
+ *  returns, in memory, rather than a second SQL query or a new RPC —
+ *  communities are a small, fully public table already fetched whole for
+ *  every other read in this file (no pagination anywhere), so a second
+ *  round-trip or a full-text-search index would be solving a scale problem
+ *  this table doesn't have yet. Reuses listCommunities() verbatim, so a
+ *  search result carries the SAME member_count every other card-grid
+ *  context does — no separate code path to keep in sync. */
+export async function searchCommunities(query: string): Promise<Community[]> {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+
+  const all = await listCommunities();
+  return all.filter((c) => {
+    if (c.name.toLowerCase().includes(q)) return true;
+    if (c.description && c.description.toLowerCase().includes(q)) return true;
+    return c.explore_topics.some((topic) => {
+      const t = topic.trim().toLowerCase();
+      return t.length > 0 && (t.includes(q) || q.includes(t));
+    });
+  });
+}
+
+/** One community plus the signed-in caller's relationship to it — the shape
+ *  a card-grid summary (Explore's Communities category, and eventually
+ *  /communities) needs per card: enough to render the badge (Admin/Member/
+ *  Pending/nothing) without a second per-card membership lookup. Built by
+ *  merging listMyMemberships()'s map onto whichever community list the
+ *  caller already has (all of them, or a search result) — see
+ *  app/api/communities-summary/route.ts, the one place this gets built. */
+export type CommunitySummaryItem = {
+  community: Community;
+  /** True if the viewer is an active member (admin/lead/member) already. */
+  member: boolean;
+  /** The viewer's role — set only when `member` is true, null otherwise. */
+  role: CommunityRole | null;
+  /** True if the viewer has an outstanding request into this community. */
+  pending: boolean;
+};
 
 export type CreateCommunityResult =
   | { status: "ok"; id: string; slug: string }

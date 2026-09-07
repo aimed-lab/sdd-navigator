@@ -15,9 +15,10 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
-import CommunitiesSection from "@/components/explore/CommunitiesSection";
+import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
 import ScopeChips from "@/components/ScopeChips";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
+import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 const SECTION_TITLE: Record<string, string> = {
   news: "Industry News",
@@ -128,6 +129,29 @@ function ExploreFeed() {
     categoryParam && CATEGORIES.some((c) => c.kind === categoryParam) ? categoryParam : null
   );
 
+  // Communities — fetched separately from the explore backend response
+  // above: communities live in Supabase, not the Python search backend, so
+  // they're not one of `data.sections`. Blank query on this page (the
+  // landing feed has no search text of its own) means "every community",
+  // same as the old block above the search used to show unconditionally.
+  const [communities, setCommunities] = useState<CommunitySummaryItem[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/communities-summary", { cache: "no-store" });
+        const json = (await res.json()) as { communities?: CommunitySummaryItem[] };
+        if (!cancelled) setCommunities(json.communities ?? []);
+      } catch {
+        // Same "never break Explore over a widget" rule as the old block.
+        if (!cancelled) setCommunities([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -188,7 +212,12 @@ function ExploreFeed() {
   }, [data]);
 
   const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
-  const showError = failed || data?.error === true || (!loading && totalItems === 0);
+  // Zero backend items is only a real "empty/broken feed" when communities
+  // ALSO have nothing to show — otherwise the pinned Communities row on
+  // "All" (see below) would have something worth seeing, and the generic
+  // "couldn't load the feed" card would be actively wrong (the feed did
+  // load something; the backend fan-out just found nothing itself).
+  const showError = failed || data?.error === true || (!loading && totalItems === 0 && communities.length === 0);
 
   const qsParams = new URLSearchParams();
   if (trialStatusParam) qsParams.set("trial_status", trialStatusParam);
@@ -210,11 +239,6 @@ function ExploreFeed() {
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
-      {/* Communities — moved here from its own nav pillar; see
-          components/explore/CommunitiesSection.tsx. Sits above the search
-          box and the source tabs below, which are otherwise untouched. */}
-      <CommunitiesSection />
-
       {/* Search */}
       <section className="max-w-3xl mx-auto mb-10">
         <form onSubmit={submit} className="relative">
@@ -271,110 +295,134 @@ function ExploreFeed() {
         </div>
       )}
 
-      {/* Loading */}
-      {loading && (
-        <div className="space-y-16">
-          {[0, 1].map((s) => (
-            <section key={s}>
-              <div className="h-8 w-48 rounded bg-surface-container mb-8 animate-pulse" />
-              <div className={GRID}>
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <SkeletonCard key={i} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-
-      {/* Error / empty */}
-      {!loading && showError && (
-        <div className="max-w-md mx-auto text-center py-24">
-          <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
-          <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
-            Couldn&apos;t load the feed right now
-          </h2>
-          <p className="mt-2 text-secondary font-body-md">
-            The discovery backend didn&apos;t respond. Please try again in a moment.
-          </p>
-          <button
-            onClick={() => location.reload()}
-            className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Feed */}
-      {!loading && !showError && (() => {
-        // "All" -> A+B feed (full sections + pooled). A specific category -> just
-        // that kind's section (regardless of item count, so a small section is
-        // still reachable via its chip).
-        const activeSections =
-          selected === null
-            ? fullSections
-            : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
-        const showPooled = selected === null && pooledItems.length > 0;
-        const label = labelForKind(selected);
-
-        if (selected !== null && activeSections.length === 0) {
-          return (
-            <div className="text-center py-20 text-secondary font-body-md">
-              No {label.toLowerCase()} in this feed yet.
+      {/* Communities chip — its own view, independent of the explore-backend
+          loading/error/data state above: communities never came from that
+          backend in the first place (see the communities fetch effect's own
+          comment), so a slow/failed Python backend must never block or
+          error out a Communities search. */}
+      {selected === "communities" ? (
+        communities.length === 0 ? (
+          <div className="text-center py-20 text-secondary font-body-md">
+            No communities found.
+          </div>
+        ) : (
+          <CommunitiesResultsSection items={communities} />
+        )
+      ) : (
+        <>
+          {/* Loading */}
+          {loading && (
+            <div className="space-y-16">
+              {[0, 1].map((s) => (
+                <section key={s}>
+                  <div className="h-8 w-48 rounded bg-surface-container mb-8 animate-pulse" />
+                  <div className={GRID}>
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <SkeletonCard key={i} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
-          );
-        }
+          )}
 
-        return (
-          <div className="space-y-16">
-            {activeSections.map((section: ExploreSection) => (
-              <section key={section.tool}>
-                <SectionHeader
-                  title={titleFor(section.kind)}
-                  note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
-                />
-                <div className={GRID}>
-                  {section.items.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} />
-                  ))}
+          {/* Error / empty */}
+          {!loading && showError && (
+            <div className="max-w-md mx-auto text-center py-24">
+              <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
+              <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                Couldn&apos;t load the feed right now
+              </h2>
+              <p className="mt-2 text-secondary font-body-md">
+                The discovery backend didn&apos;t respond. Please try again in a moment.
+              </p>
+              <button
+                onClick={() => location.reload()}
+                className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Feed */}
+          {!loading && !showError && (() => {
+            // "All" -> A+B feed (full sections + pooled). A specific category -> just
+            // that kind's section (regardless of item count, so a small section is
+            // still reachable via its chip).
+            const activeSections =
+              selected === null
+                ? fullSections
+                : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
+            const showPooled = selected === null && pooledItems.length > 0;
+            const label = labelForKind(selected);
+
+            if (selected !== null && activeSections.length === 0) {
+              return (
+                <div className="text-center py-20 text-secondary font-body-md">
+                  No {label.toLowerCase()} in this feed yet.
                 </div>
+              );
+            }
 
-                {/* Key Papers — same pool as "Latest Papers" above, re-ordered
-                    by WINNER instead of date desc. Lives as a second
-                    subsection under the existing Papers section/tab rather
-                    than a new top-level CategoryStrip tab: they're two views
-                    of the same underlying set, and CategoryStrip is already
-                    a no-wrap horizontal-scroll row on mobile that shouldn't
-                    grow another chip for this. "★ Key paper" is the wording
-                    ItemCard already uses for a WINNER-ranked item's badge —
-                    reused here instead of inventing new vocabulary. */}
-                {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
-                  <div className="mt-12">
-                    <SectionHeader title="Key Papers" />
+            return (
+              <div className="space-y-16">
+                {/* Communities, pinned first on "All" — a place to join, not
+                    a document to read, so its own row before every other
+                    source rather than interleaved among them. Renders
+                    nothing when there's nothing to show (see
+                    CommunitiesResultsSection's own empty check). */}
+                {selected === null && <CommunitiesResultsSection items={communities} />}
+
+                {activeSections.map((section: ExploreSection) => (
+                  <section key={section.tool}>
+                    <SectionHeader
+                      title={titleFor(section.kind)}
+                      note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
+                    />
                     <div className={GRID}>
-                      {section.items_key!.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} variant="key" />
+                      {section.items.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} />
                       ))}
                     </div>
-                  </div>
-                )}
-              </section>
-            ))}
 
-            {showPooled && (
-              <section>
-                <SectionHeader title="Also Found" />
-                <div className={GRID}>
-                  {pooledItems.map((item: ExploreItem) => (
-                    <ItemCard key={item.id} item={item} />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        );
-      })()}
+                    {/* Key Papers — same pool as "Latest Papers" above, re-ordered
+                        by WINNER instead of date desc. Lives as a second
+                        subsection under the existing Papers section/tab rather
+                        than a new top-level CategoryStrip tab: they're two views
+                        of the same underlying set, and CategoryStrip is already
+                        a no-wrap horizontal-scroll row on mobile that shouldn't
+                        grow another chip for this. "★ Key paper" is the wording
+                        ItemCard already uses for a WINNER-ranked item's badge —
+                        reused here instead of inventing new vocabulary. */}
+                    {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
+                      <div className="mt-12">
+                        <SectionHeader title="Key Papers" />
+                        <div className={GRID}>
+                          {section.items_key!.map((item: ExploreItem) => (
+                            <ItemCard key={item.id} item={item} variant="key" />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                ))}
+
+                {showPooled && (
+                  <section>
+                    <SectionHeader title="Also Found" />
+                    <div className={GRID}>
+                      {pooledItems.map((item: ExploreItem) => (
+                        <ItemCard key={item.id} item={item} />
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            );
+          })()}
+        </>
+      )}
 
     </div>
   );

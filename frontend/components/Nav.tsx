@@ -34,10 +34,10 @@ const PILLARS = [
 // community's Projects section, a project card, etc.) still points at the
 // same routes and needs no update.
 //
-// Communities used to be a pillar here too. It's now a section at the top
-// of Explore (components/explore/CommunitiesSection.tsx) instead of its
-// own destination — /communities and /communities/[slug] still work as
-// URLs, same as /projects does; they're just reached differently now.
+// Communities used to be a pillar here too. It's now a category inside
+// Explore (components/explore/CommunitiesResultsSection.tsx) instead of
+// its own destination — /communities and /communities/[slug] still work
+// as URLs, same as /projects does; they're just reached differently now.
 
 // Unseen count for the inbox badge. Refetched on every navigation so that
 // opening /inbox (which marks things seen) is reflected when you leave it.
