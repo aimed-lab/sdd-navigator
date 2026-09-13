@@ -17,6 +17,7 @@ import {
   listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
+import { listShowcaseByCommunity } from "@/lib/server/showcase";
 import { resolveExploreSources, resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
 import { getCurrentUser } from "@/lib/auth";
 import JoinLeaveControl from "@/components/communities/JoinLeaveControl";
@@ -30,6 +31,7 @@ import ResourcesSection from "@/components/communities/ResourcesSection";
 import ExploreSection from "@/components/communities/ExploreSection";
 import EmptySection from "@/components/communities/EmptySection";
 import CollapsibleSection from "@/components/communities/CollapsibleSection";
+import ShowcaseCard from "@/components/promote/ShowcaseCard";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
 import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
@@ -103,6 +105,15 @@ export default async function CommunityDetailPage({
   // separate from Resources — see that component's own comment for why
   // the two split.
   const feedItems = isMember ? await listCommunityFeedItems(community.id) : [];
+
+  // Showcase — UNLIKE resources/announcements/the feed above, fetched
+  // unconditionally, not only for an active member: this lists PUBLISHED
+  // Promote articles (listShowcaseByCommunity's own .eq("published", true)),
+  // which stay publicly readable regardless of community membership — see
+  // database/migrations/2026-09-13_promote_showcase_community.sql. Gating
+  // this fetch on isMember the way the others are would wrongly hide a
+  // community's own published content from a signed-out visitor.
+  const showcaseEntries = await listShowcaseByCommunity(community.id);
 
   const authorNames: Record<string, string> = Object.fromEntries(
     memberRoster.map((m) => [m.user_id, m.display_name])
@@ -254,6 +265,24 @@ export default async function CommunityDetailPage({
               case "explore":
                 return (
                   <ExploreSection key={s.key} title={SECTION_LABEL[s.key]} feedItems={feedItems} />
+                );
+              case "showcase":
+                return (
+                  <CollapsibleSection
+                    key={s.key}
+                    title={SECTION_LABEL[s.key]}
+                    count={showcaseEntries.length}
+                  >
+                    {showcaseEntries.length === 0 ? (
+                      <EmptySection />
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {showcaseEntries.map((e) => (
+                          <ShowcaseCard key={e.id} entry={e} />
+                        ))}
+                      </div>
+                    )}
+                  </CollapsibleSection>
                 );
               default:
                 return (

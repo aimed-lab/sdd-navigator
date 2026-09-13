@@ -98,22 +98,11 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublishedArticleBySlug, isOwnerOfShowcase } from "@/lib/server/showcase";
-import { estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
+import { articleUrl, estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
 import { LEGACY_SHOWCASE_TYPE_LABEL, SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
 import ShareButtons from "@/components/promote/ShareButtons";
 
 export const dynamic = "force-dynamic";
-
-// smartdrugdiscovery.org is the Wix marketing site (a 404 for anything under
-// /promote) — the app itself is served from v2.smartdrugdiscovery.org. This
-// is the only absolute-URL construction in the app; NEXT_PUBLIC_SITE_URL
-// isn't set anywhere yet (not in .env.example/.env.local), so it always
-// falls through to this default today.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://v2.smartdrugdiscovery.org";
-
-function articleUrl(slug: string) {
-  return `${SITE_URL}/promote/${slug}`;
-}
 
 // Turn the "## Heading\n\nparagraph" body generateArticle.ts produces into
 // headings + paragraphs. Deliberately not a markdown library — the shape is
@@ -256,6 +245,19 @@ export default async function ArticlePage({ params }: PageProps) {
             <span className="px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm">
               {typeLabel}
             </span>
+            {/* Next to the category pill, not replacing it — this article
+                still has its OWN type independent of whichever community it
+                may also belong to. Communities are publicly readable (RLS:
+                USING (true)), so this renders for every visitor, same as
+                the category pill next to it. */}
+            {article.community && (
+              <Link
+                href={`/communities/${article.community.slug}`}
+                className="px-3 py-1 rounded-full bg-secondary/10 text-secondary font-label-sm text-label-sm hover:bg-secondary/20 transition-colors"
+              >
+                {article.community.name}
+              </Link>
+            )}
             {isOwner && (
               <Link
                 href={`/promote/${article.slug}/edit`}
@@ -318,7 +320,12 @@ export default async function ArticlePage({ params }: PageProps) {
                 Read the original paper
               </a>
             )}
-            <ShareButtons url={articleUrl(article.slug)} title={article.headline} layout="column" />
+            <ShareButtons
+              url={articleUrl(article.slug)}
+              title={article.headline}
+              linkedinPost={article.linkedinPost}
+              layout="column"
+            />
           </div>
         </div>
 
@@ -410,7 +417,11 @@ export default async function ArticlePage({ params }: PageProps) {
               takes over at 2xl and up, so exactly one instance is ever
               visible, never both, never neither. */}
           <div className="mt-10 border-t border-outline-variant/30 pt-8 2xl:hidden">
-            <ShareButtons url={articleUrl(article.slug)} title={article.headline} />
+            <ShareButtons
+              url={articleUrl(article.slug)}
+              title={article.headline}
+              linkedinPost={article.linkedinPost}
+            />
           </div>
         </div>
       </article>

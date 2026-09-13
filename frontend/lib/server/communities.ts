@@ -344,6 +344,50 @@ export async function listMyMemberships(): Promise<
   return out;
 }
 
+/** Every community the signed-in viewer is an ACTIVE (approved) member of,
+ *  with a name to show — for the Promote editor's community picker
+ *  (components/promote/ArticleEditor.tsx), which must only ever offer
+ *  communities the author actually belongs to. Deliberately narrower than
+ *  listMyMemberships() above: that one also returns "pending" rows (an
+ *  outstanding request, not yet approved), which have no business showing up
+ *  as an attachable community here. Empty when signed out or a member of
+ *  nothing — the editor's own prop comment says what it does with that (no
+ *  dropdown at all, not an empty one).
+ *
+ *  Only ever reads an explicit community_members row — NOT
+ *  is_community_member()'s broader "or a ColaboFest lead/project-member via
+ *  `projects`" form (see that function's own comment in
+ *  2026-08-20_communities.sql). A ColaboFest lead who has never actually
+ *  joined `community_members` won't see ColaboFest in this picker; they
+ *  would still be allowed to save it (promote_showcase's WITH CHECK uses
+ *  can_post_to_community, which DOES cover that derived form) if a request
+ *  reached the server some other way, but the picker itself only lists what
+ *  a plain "active member" reading of this feature's own spec asked for. */
+export async function listMyActiveCommunities(): Promise<
+  { id: string; slug: string; name: string }[]
+> {
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("community_members")
+    .select("communities(id, slug, name)")
+    .eq("user_id", session.user.id)
+    .eq("status", "active");
+
+  if (error || !data) return [];
+
+  // Same "object or single-element array" defensiveness as
+  // lib/server/showcase.ts's toCommunity() — supabase-js's embed shape here
+  // depends on how it infers the relationship, and this is cheap to handle
+  // once rather than assume.
+  type Row = { communities: { id: string; slug: string; name: string } | { id: string; slug: string; name: string }[] | null };
+  return (data as Row[])
+    .map((row) => (Array.isArray(row.communities) ? row.communities[0] : row.communities))
+    .filter((c): c is { id: string; slug: string; name: string } => Boolean(c))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ── Membership state ────────────────────────────────────────────────────────
 
 export type MembershipState = "signed_out" | "none" | "pending" | "active";

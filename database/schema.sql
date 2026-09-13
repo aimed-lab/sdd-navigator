@@ -819,6 +819,12 @@ CREATE TABLE IF NOT EXISTS public.promote_showcase (
     article_body TEXT        NOT NULL DEFAULT '',
     journal      TEXT,
     doi          TEXT,
+    -- The LinkedIn post that links to this article — hook/contrast/bullets/
+    -- humility/ask, with a "{{ARTICLE_LINK}}" placeholder where the article
+    -- URL goes (filled in client-side at copy time, since the same stored
+    -- text is reused across the editor preview and the public share button).
+    -- See lib/server/promote/generateArticle.ts and components/promote/ShareButtons.tsx.
+    linkedin_post TEXT        NOT NULL DEFAULT '',
     -- Draft-then-publish: a row is NOT publicly readable until this is true.
     -- Defaults false so a freshly created article starts as a private draft.
     published    BOOLEAN     NOT NULL DEFAULT false,

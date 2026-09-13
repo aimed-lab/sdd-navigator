@@ -13,6 +13,7 @@ export const SECTION_KEYS = [
   "announcements",
   "events",
   "who_can_help",
+  "showcase",
 ] as const;
 
 export type SectionKey = (typeof SECTION_KEYS)[number];
@@ -27,6 +28,10 @@ export const SECTION_LABEL: Record<SectionKey, string> = {
   announcements: "Announcements",
   events: "Events",
   who_can_help: "Who can help",
+  // Promote articles (database/migrations/2026-09-13_promote_showcase_community.sql)
+  // attached to this community — see app/communities/[slug]/page.tsx's
+  // "showcase" case and lib/server/showcase.ts:listShowcaseByCommunity.
+  showcase: "Showcase",
 };
 
 /** SECTION_KEYS order, all enabled — what a NULL `communities.sections`

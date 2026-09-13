@@ -88,6 +88,17 @@ export type ShowcaseOwner = {
   affiliation: string | null;
 };
 
+/** The community a showcase entry is attached to — just enough to render a
+ *  link, never the full Community shape (that's lib/server/communities.ts's
+ *  job). Communities are publicly readable (RLS: USING (true)), so this can
+ *  always be resolved regardless of who's viewing, the same way `owner`
+ *  above is resolved for a signed-out visitor. */
+export type ShowcaseCommunity = {
+  id: string;
+  slug: string;
+  name: string;
+};
+
 export type ShowcaseEntry = {
   id: string;
   type: ShowcaseType;
@@ -119,6 +130,12 @@ export type ShowcaseEntry = {
    *  directly there (the full body is the article page's job). */
   articleBody: string;
   publishedAt: string | null;
+  /** Null for an entry attached to no community (the default) — see
+   *  database/migrations/2026-09-13_promote_showcase_community.sql. Not
+   *  rendered on the gallery card today (ShowcaseCard.tsx); it's what the
+   *  community page's own Showcase section and the article page's eyebrow
+   *  link use. */
+  community: ShowcaseCommunity | null;
   /** The card's actual image, already resolved server-side, per request, to
    *  a real URL: the first `image`-kind attached media (signed, short-lived
    *  — see lib/server/showcase.ts:getShowcaseHeroImages) if there is one,
@@ -152,6 +169,12 @@ export type GeneratorResult = {
   /** "## Section heading" separated plain-prose body — see
    *  lib/server/promote/generateArticle.ts. Editable as one plain textarea. */
   articleBody: string;
+  /** The LinkedIn post — hook/contrast/bullets/humility/ask/hashtags, with a
+   *  literal "{{ARTICLE_LINK}}" placeholder in place of the URL (filled in
+   *  at copy time — see ShareButtons.tsx). This, not the article, is the
+   *  thing the flow is actually for; the article is the page the post links
+   *  to. See lib/server/promote/generateArticle.ts for the shape rules. */
+  linkedinPost: string;
 };
 
 // ── article draft (create/edit/publish) ────────────────────────────────────
@@ -170,6 +193,16 @@ export type CreateArticleInput = {
   doi: string | null;
   link: string | null;
   journal: string | null;
+  /** See GeneratorResult's own comment — the "{{ARTICLE_LINK}}" placeholder
+   *  convention applies here too. */
+  linkedinPost: string;
+  /** Optional, defaults to none (null) — see ShowcaseCommunity's own
+   *  comment. Only ever one of the ids listMyActiveCommunities() (lib/server
+   *  /communities.ts) returned for the signed-in author; a forged id isn't
+   *  stopped by anything client-side, but is by
+   *  promote_showcase_insert_own/update_own's WITH CHECK
+   *  (can_post_to_community) in the database. */
+  communityId: string | null;
 };
 
 export type ArticleDraftPatch = {
@@ -178,6 +211,8 @@ export type ArticleDraftPatch = {
   standfirst?: string;
   articleBody?: string;
   authors?: string;
+  linkedinPost?: string;
+  communityId?: string | null;
   /** Only ever set together, by SubmitFlow's generate() when a DOI lookup
    *  succeeds against a row that already exists (lazily created earlier
    *  from typing or an attached file, before the person used the DOI box) —
@@ -214,6 +249,10 @@ export type PublicArticle = {
   headline: string;
   standfirst: string;
   articleBody: string;
+  /** See GeneratorResult's own comment — never rendered raw; ShareButtons
+   *  substitutes "{{ARTICLE_LINK}}" for this article's own URL before
+   *  copying it. Empty for an entry created before this field existed. */
+  linkedinPost: string;
   title: string;
   authors: string;
   doi: string | null;
@@ -221,6 +260,10 @@ export type PublicArticle = {
   journal: string | null;
   image_url: string | null;
   media: ShowcaseMedia[];
+  /** Null for an article attached to no community — see ShowcaseEntry's own
+   *  comment. Rendered as a pill/link in the eyebrow row, next to the
+   *  category pill (app/promote/[slug]/page.tsx). */
+  community: ShowcaseCommunity | null;
   created_at: string;
   /** When this article was (most recently) published — null is only
    *  reachable in practice through a direct/urltampered slug lookup, since

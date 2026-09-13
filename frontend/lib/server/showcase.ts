@@ -30,6 +30,7 @@ import {
   type CreateArticleInput,
   type MediaKind,
   type PublicArticle,
+  type ShowcaseCommunity,
   type ShowcaseEntry,
   type ShowcaseMedia,
   type ShowcaseOwner,
@@ -44,8 +45,28 @@ export {
   type ShowcaseType,
 } from "@/lib/showcaseTypes";
 
+// `community:communities(id, slug, name)` — an embedded read through the
+// FK, not a second query. communities' own SELECT policy is USING (true)
+// (see database/migrations/2026-08-20_communities.sql), so this is safe to
+// embed even for the anon-client reads below (getPublishedArticleBySlug):
+// nothing here can expose a community a plain unauthenticated visitor
+// couldn't already look up directly. NULL community_id -> NULL here, same
+// as any other to-one embed with no matching row.
 const ENTRY_SELECT =
-  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, tags, created_at, published_at, owner_id";
+  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, tags, created_at, published_at, owner_id, community_id, community:communities(id, slug, name)";
+
+/** Pull the embedded `community:communities(...)` object (see ENTRY_SELECT's
+ *  own comment) into a ShowcaseCommunity, or null. Supabase can return this
+ *  as an object OR (depending on how it infers the relationship) a
+ *  single-element array — handled here once rather than in every caller. */
+function toCommunity(row: Record<string, unknown>): ShowcaseCommunity | null {
+  const raw = row.community;
+  const c = Array.isArray(raw) ? raw[0] : raw;
+  if (!c || typeof c !== "object") return null;
+  const obj = c as Record<string, unknown>;
+  if (!obj.id) return null;
+  return { id: obj.id as string, slug: obj.slug as string, name: obj.name as string };
+}
 
 function toEntry(
   row: Record<string, unknown>,
@@ -73,6 +94,7 @@ function toEntry(
     standfirst: (row.standfirst as string) ?? "",
     articleBody: (row.article_body as string) ?? "",
     publishedAt: (row.published_at as string | null) ?? null,
+    community: toCommunity(row),
     // Attached media wins over the legacy column — see the field's own
     // comment in showcaseTypes.ts for why this can't be re-derived client-side.
     heroImageUrl: heroImages.get(row.id as string) ?? (row.image_url as string | null) ?? null,
@@ -171,6 +193,36 @@ export async function listShowcase(
   return rows.map((r) => toEntry(r, owners, viewer?.id ?? null, heroImages));
 }
 
+/** A community's own Showcase section (app/communities/[slug]/page.tsx) —
+ *  PUBLISHED articles attached to this community, newest first. Public, same
+ *  as listShowcase: a published article stays publicly readable whether or
+ *  not it has a community (promote_showcase_select_published), so this never
+ *  gates on membership — an unpublished draft never reaches this query
+ *  regardless of who the viewer is, the same .eq("published", true) guard
+ *  listShowcase itself relies on rather than trusting RLS alone to filter
+ *  drafts out of a page meant to show only finished work. */
+export async function listShowcaseByCommunity(communityId: string): Promise<ShowcaseEntry[]> {
+  const db = await getDb();
+  if (!db) throw new ServerConfigError();
+
+  const { data, error } = await db
+    .from("promote_showcase")
+    .select(ENTRY_SELECT)
+    .eq("published", true)
+    .eq("community_id", communityId)
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+
+  const rows = data as Record<string, unknown>[];
+  const viewer = await getCurrentUser();
+  const [owners, heroImages] = await Promise.all([
+    ownerMap(db),
+    getShowcaseHeroImages(db, rows.map((r) => r.id as string)),
+  ]);
+  return rows.map((r) => toEntry(r, owners, viewer?.id ?? null, heroImages));
+}
+
 /** One PUBLISHED showcase entry. Null when it doesn't exist or isn't
  *  published. Currently unused by any route (the gallery links straight to
  *  /promote/[slug] for anything that has one) but kept for a future
@@ -255,6 +307,13 @@ export async function createArticleEntry(
         doi: input.doi ?? null,
         link: input.link ?? null,
         journal: input.journal ?? null,
+        linkedin_post: input.linkedinPost ?? "",
+        // NULL (no community) unless the caller passed one — enforced
+        // server-side beyond just the picker only offering communities the
+        // author actually belongs to: promote_showcase_insert_own's WITH
+        // CHECK (can_post_to_community) rejects a forged id outright, same
+        // as owner_id is already enforced by RLS rather than trusted here.
+        community_id: input.communityId ?? null,
         slug,
         // published intentionally omitted -> column default (false): a
         // freshly created draft is private until publishArticle().
@@ -283,6 +342,8 @@ export async function updateArticleEntry(id: string, patch: ArticleDraftPatch): 
   if (patch.standfirst !== undefined) update.standfirst = patch.standfirst;
   if (patch.articleBody !== undefined) update.article_body = patch.articleBody;
   if (patch.authors !== undefined) update.authors = patch.authors;
+  if (patch.linkedinPost !== undefined) update.linkedin_post = patch.linkedinPost;
+  if (patch.communityId !== undefined) update.community_id = patch.communityId;
   if (patch.doi !== undefined) update.doi = patch.doi;
   if (patch.link !== undefined) update.link = patch.link;
   if (patch.journal !== undefined) update.journal = patch.journal;
@@ -549,7 +610,7 @@ export async function removeShowcaseMedia(showcaseId: string, mediaId: string): 
 // ── public article page ──────────────────────────────────────────────────────
 
 const PUBLIC_ARTICLE_SELECT =
-  "id, slug, type, headline, standfirst, article_body, title, authors, doi, link, journal, image_url, created_at, published_at, owner_id";
+  "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, created_at, published_at, owner_id, community:communities(id, slug, name)";
 
 /** Look up a PUBLISHED article by slug, for the public /promote/[slug] page.
  *
@@ -595,6 +656,7 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     headline: (data.headline as string) || (data.title as string),
     standfirst: (data.standfirst as string) ?? "",
     articleBody: (data.article_body as string) ?? "",
+    linkedinPost: (data.linkedin_post as string) ?? "",
     title: data.title as string,
     authors: (data.authors as string) ?? "",
     doi: (data.doi as string | null) ?? null,
@@ -602,6 +664,7 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     journal: (data.journal as string | null) ?? null,
     image_url: (data.image_url as string | null) ?? null,
     media,
+    community: toCommunity(data as Record<string, unknown>),
     created_at: data.created_at as string,
     publishedAt: (data.published_at as string | null) ?? null,
     owner: owners.get(data.owner_id as string) ?? null,
@@ -663,7 +726,9 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
 
   const { data, error } = await db
     .from("promote_showcase")
-    .select("id, slug, type, headline, standfirst, article_body, authors, published, owner_id")
+    .select(
+      "id, slug, type, headline, standfirst, article_body, linkedin_post, community_id, authors, published, owner_id"
+    )
     .eq("slug", slug)
     .maybeSingle();
 
@@ -680,6 +745,8 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
       headline: (data.headline as string) ?? "",
       standfirst: (data.standfirst as string) ?? "",
       articleBody: (data.article_body as string) ?? "",
+      linkedinPost: (data.linkedin_post as string) ?? "",
+      communityId: (data.community_id as string | null) ?? null,
       authors: (data.authors as string) ?? "",
     },
     media,

@@ -20,3 +20,34 @@ export function formatPublishedDate(iso: string): string {
     day: "numeric",
   });
 }
+
+// smartdrugdiscovery.org is the Wix marketing site (a 404 for anything under
+// /promote) — the app itself is served from v2.smartdrugdiscovery.org. This
+// is the only absolute-URL construction in the app; NEXT_PUBLIC_SITE_URL
+// isn't set anywhere yet (not in .env.example/.env.local), so it always
+// falls through to this default today. Reads NEXT_PUBLIC_ (not a plain env
+// var) specifically so this also works from ArticleEditor.tsx, a client
+// component — Next.js inlines NEXT_PUBLIC_ vars into the client bundle at
+// build time.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://v2.smartdrugdiscovery.org";
+
+/** The public URL for a published (or draft — the slug exists from the
+ *  moment the row does) article. Shared by the article page itself and by
+ *  the LinkedIn post's "{{ARTICLE_LINK}}" substitution (ShareButtons.tsx,
+ *  ArticleEditor.tsx) so there is exactly one place that knows the shape of
+ *  a /promote/[slug] URL. */
+export function articleUrl(slug: string): string {
+  return `${SITE_URL}/promote/${slug}`;
+}
+
+/** Replace the LinkedIn post's "{{ARTICLE_LINK}}" placeholder (see
+ *  generateArticle.ts) with a real article URL. A no-op on text that
+ *  doesn't contain the placeholder, so it's safe to call unconditionally —
+ *  on a post that's already been substituted (ArticleEditor.tsx does this
+ *  every render, so nobody, not even a row written before this helper
+ *  existed, ever sees the raw placeholder), or on one that never had it.
+ *  Takes the URL itself, not a slug, so callers that already built one
+ *  (ShareButtons.tsx's `url` prop) don't reconstruct it a second way. */
+export function withArticleLink(linkedinPost: string, url: string): string {
+  return linkedinPost.replaceAll("{{ARTICLE_LINK}}", url);
+}

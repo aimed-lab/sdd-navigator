@@ -13,14 +13,19 @@
 import Link from "next/link";
 import SubmitFlow from "@/components/promote/SubmitFlow";
 import { getCurrentUser } from "@/lib/auth";
+import { listMyActiveCommunities } from "@/lib/server/communities";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
 export default async function SubmitShowcasePage() {
   const user = await getCurrentUser();
+  // Only fetched for a signed-in user — listMyActiveCommunities() itself
+  // degrades to [] when signed out, but there's nothing to hand it to below
+  // in that case anyway (the sign-in gate renders instead of SubmitFlow).
+  const communities = user ? await listMyActiveCommunities() : [];
 
   return (
-    <div className="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16">
+    <div className="max-w-[1400px] mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16">
       <Link
         href="/promote"
         className="inline-flex items-center gap-1 mb-8 font-label-md text-label-md text-secondary hover:text-primary transition-colors"
@@ -29,19 +34,21 @@ export default async function SubmitShowcasePage() {
         Back to Promote
       </Link>
 
-      <h1 className="font-headline-lg text-headline-lg text-on-background">
-        Submit to the showcase
-      </h1>
-      <p className="mt-3 font-body-lg text-body-lg text-secondary">
-        Paste a DOI or PubMed ID to draft the article automatically, or write
-        it yourself below — a talk, a poster, an award, a tool, or anything
-        else worth sharing. Either way you edit it, attach media, and publish
-        when you&apos;re ready.
-      </p>
+      <div className="max-w-2xl">
+        <h1 className="font-headline-lg text-headline-lg text-on-background">
+          Submit to the showcase
+        </h1>
+        <p className="mt-3 font-body-lg text-body-lg text-secondary">
+          Paste a DOI or PubMed ID to draft the article automatically, or write
+          it yourself below — a talk, a poster, an award, a tool, or anything
+          else worth sharing. Either way you edit it, attach media, and publish
+          when you&apos;re ready.
+        </p>
+      </div>
 
       <div className="mt-10">
         {user ? (
-          <SubmitFlow />
+          <SubmitFlow communities={communities} />
         ) : (
           <div className="glass-panel rounded-2xl p-10 text-center">
             <span className="material-symbols-outlined text-4xl text-primary">lock</span>

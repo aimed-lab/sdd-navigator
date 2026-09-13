@@ -54,7 +54,16 @@ type PaperInfo = {
 
 type Entry = { id: string; slug: string };
 
-export default function SubmitFlow() {
+export default function SubmitFlow({
+  communities = [],
+}: {
+  /** Communities the signed-in author is an active member of — threaded
+   *  straight through to ArticleEditor's own picker (see that component's
+   *  prop comment). The picker only ever appears once you're in
+   *  ArticleEditor, not on this screen's own DOI/manual form, so nothing
+   *  here needs it beyond passing it along. */
+  communities?: { id: string; slug: string; name: string }[];
+}) {
   // DOI path
   const [input, setInput] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -69,6 +78,7 @@ export default function SubmitFlow() {
   const [headline, setHeadline] = useState("");
   const [standfirst, setStandfirst] = useState("");
   const [articleBody, setArticleBody] = useState("");
+  const [linkedinPost, setLinkedinPost] = useState("");
   const [authors, setAuthors] = useState("");
 
   const [entry, setEntry] = useState<Entry | null>(null);
@@ -98,10 +108,12 @@ export default function SubmitFlow() {
         headline: "",
         standfirst: "",
         articleBody: "",
+        linkedinPost: "",
         authors: "",
         doi: null,
         link: null,
         journal: null,
+        communityId: null,
       });
       if (!created.ok) throw new Error(created.error);
       return { id: created.id, slug: created.slug };
@@ -155,6 +167,7 @@ export default function SubmitFlow() {
       setHeadline(json.headline);
       setStandfirst(json.standfirst);
       setArticleBody(json.articleBody);
+      setLinkedinPost(json.linkedinPost);
       setAuthors(authorsStr);
       setType("paper");
 
@@ -167,6 +180,7 @@ export default function SubmitFlow() {
           headline: json.headline,
           standfirst: json.standfirst,
           articleBody: json.articleBody,
+          linkedinPost: json.linkedinPost,
           authors: authorsStr,
           doi: paperInfo.doi,
           link: paperInfo.sourceUrl,
@@ -180,10 +194,12 @@ export default function SubmitFlow() {
           headline: json.headline,
           standfirst: json.standfirst,
           articleBody: json.articleBody,
+          linkedinPost: json.linkedinPost,
           authors: authorsStr,
           doi: paperInfo.doi,
           link: paperInfo.sourceUrl,
           journal: paperInfo.journal,
+          communityId: null,
         });
         if (created.ok) setEntry({ id: created.id, slug: created.slug });
         else setSaveError(created.error);
@@ -210,6 +226,7 @@ export default function SubmitFlow() {
         headline: headline.trim(),
         standfirst,
         articleBody,
+        linkedinPost,
         authors,
       });
       if (res.ok) setManualContinued(true);
@@ -243,17 +260,24 @@ export default function SubmitFlow() {
           headline,
           standfirst,
           articleBody,
+          linkedinPost,
           authors,
+          communityId: null,
         }}
         media={[]}
         paper={paperInfo}
+        communities={communities}
       />
     );
   }
 
   // ── One screen: DOI box, then the manual form ─────────────────────────────
+  // Capped at max-w-2xl even though the page container is wider — that width
+  // is for ArticleEditor's two-column layout below, which doesn't exist yet
+  // at this stage; a bare form stretched to the full width would just make
+  // its own fields uncomfortably long.
   return (
-    <div className="space-y-6">
+    <div className="max-w-2xl space-y-6">
       <section className="glass-panel rounded-2xl p-6 space-y-4">
         <h2 className="font-headline-md text-lg text-on-background">
           Paste a DOI or PubMed ID

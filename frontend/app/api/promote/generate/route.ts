@@ -61,6 +61,7 @@ async function generate(input: string): Promise<GeneratorResult | null> {
     headline: article.headline,
     standfirst: article.standfirst,
     articleBody: article.articleBody,
+    linkedinPost: article.linkedinPost,
   };
 }
 
