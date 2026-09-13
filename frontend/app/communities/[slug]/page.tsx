@@ -6,6 +6,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
+  claimPendingCommunityMemberships,
   getCommunityBySlug,
   getCommunityStats,
   getMembership,
@@ -55,6 +56,15 @@ export default async function CommunityDetailPage({
   const { slug } = await params;
   const community = await getCommunityBySlug(slug);
   if (!community) notFound();
+
+  // Claim any community_members row added by email before this account
+  // existed or before it was ever linked — normally done by
+  // listCommunities() (via the SAME RPC), but a direct link or a QR code
+  // straight to this page never goes through that. Must finish before
+  // getMembership() below reads this viewer's row, so it's awaited here,
+  // not folded into the Promise.all — a race between the two would read
+  // stale (still-unlinked) membership state.
+  await claimPendingCommunityMemberships();
 
   const [user, membership, projects, stats] = await Promise.all([
     getCurrentUser(),

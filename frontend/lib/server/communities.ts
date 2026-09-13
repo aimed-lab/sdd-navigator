@@ -440,7 +440,51 @@ export async function joinCommunity(communityId: string, isOpen: boolean): Promi
     status: isOpen ? "active" : "pending",
   });
 
-  if (error) throw error;
+  if (error) {
+    // 23505 here means community_members_email_key
+    // (community_id, lower(email)) — an admin already added this person by
+    // email (an imported roster, most often) and this session reached this
+    // insert before that row ever got linked to this account. Normally
+    // linking happens either at sign-up (handle_new_user()) or via
+    // claim_pending_community_memberships() — called from listCommunities()
+    // and now also from this community page itself
+    // (app/communities/[slug]/page.tsx) — but a direct link or a QR code
+    // straight to this page, on a session where neither of those has run
+    // yet, can still land here first.
+    //
+    // Claim the existing row instead of leaving a raw 23505 on screen: same
+    // SECURITY DEFINER RPC every other reconciliation path in this file
+    // uses, not a plain UPDATE — no RLS policy grants a signed-in user
+    // UPDATE rights on a row that isn't theirs yet (user_id IS NULL), by
+    // design, so setting user_id on that row has to go through the definer
+    // function. It links by email for every pending row across every
+    // community, not just this one, which is fine — it's exactly what
+    // would have happened on the very next page load anyway.
+    if (error.code === "23505") {
+      const { error: claimError } = await db.rpc("claim_pending_community_memberships");
+      if (claimError) throw claimError;
+      return;
+    }
+    throw error;
+  }
+}
+
+/** Best-effort claim of any community_members row (across every community)
+ *  added by email before this account existed or before it was ever linked
+ *  — the same reconciliation listCommunities() already runs before its own
+ *  read, exposed here so a page that does NOT call listCommunities() (most
+ *  notably /communities/[slug], reached directly via a shared link or a QR
+ *  code — see joinCommunity's own comment) can run it too, before reading
+ *  this viewer's membership. Never throws; a signed-out caller is a no-op,
+ *  matching getMembership's own "signed_out" handling. */
+export async function claimPendingCommunityMemberships(): Promise<void> {
+  const session = await getSession();
+  if (!session) return;
+
+  const { error } = await session.db.rpc("claim_pending_community_memberships");
+  if (error) {
+    console.error("claimPendingCommunityMemberships: RPC failed", error);
+  }
 }
 
 export type LeaveCommunityResult = { status: "ok" } | { status: "error"; error: string };
