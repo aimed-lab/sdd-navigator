@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import {
   changeCommunityMemberRoleAction,
   removeCommunityMemberAction,
+  updateCommunityMemberFocusAction,
 } from "@/app/communities/actions";
 import type { CommunityMember, CommunityRole } from "@/lib/server/communities";
 
@@ -42,6 +43,13 @@ export default function MemberRoster({
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Draft focus text per member row — seeded from `members` on first
+  // render, then edited locally until Save; not re-synced from props on
+  // every render so mid-edit text survives an unrelated router.refresh()
+  // (e.g. from changing someone else's role) without being clobbered.
+  const [focusDrafts, setFocusDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(members.map((m) => [m.id, m.focus ?? ""]))
+  );
 
   return (
     <div>
@@ -50,7 +58,8 @@ export default function MemberRoster({
           const isOtherAdmin = m.role === "admin" && m.user_id !== viewerUserId;
           const busy = busyId === m.id;
           return (
-            <li key={m.id} className="flex items-center justify-between gap-3 py-2.5">
+            <li key={m.id} className="py-2.5">
+            <div className="flex items-center justify-between gap-3">
               <span className="font-body-sm text-body-sm text-on-background truncate">
                 {m.email || "Unlinked"}
                 {!m.user_id && (
@@ -104,6 +113,39 @@ export default function MemberRoster({
                   </>
                 )}
               </div>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                value={focusDrafts[m.id] ?? ""}
+                disabled={busy}
+                onChange={(e) => setFocusDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))}
+                placeholder="What do they work on here?"
+                maxLength={160}
+                className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-md px-2 py-1 font-body-sm text-body-sm text-on-background"
+              />
+              {(focusDrafts[m.id] ?? "") !== (m.focus ?? "") && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusyId(m.id);
+                    setError(null);
+                    const res = await updateCommunityMemberFocusAction(
+                      communityId,
+                      m.id,
+                      focusDrafts[m.id] ?? "",
+                      slug
+                    );
+                    if (res.ok) router.refresh();
+                    else setError(res.error);
+                    setBusyId(null);
+                  }}
+                  className="font-label-sm text-label-sm text-primary shrink-0"
+                >
+                  Save
+                </button>
+              )}
+            </div>
             </li>
           );
         })}

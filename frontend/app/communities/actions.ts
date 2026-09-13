@@ -26,8 +26,10 @@ import {
   removeCommunityMember,
   updateAnnouncement,
   updateCommunityExploreConfig,
+  updateCommunityMemberFocus,
   updateCommunityResource,
   updateCommunitySections,
+  updateMyCommunityFocus,
   type CommunityRole,
   type SourceOutcome,
 } from "@/lib/server/communities";
@@ -191,6 +193,54 @@ export async function changeCommunityMemberRoleAction(
     }
     console.error("changeCommunityMemberRoleAction failed", e);
     return { ok: false, error: "Couldn't change that member's role. Please try again." };
+  }
+}
+
+/** The signed-in member setting their own "what I work on here" line. */
+export async function updateMyCommunityFocusAction(
+  communityId: string,
+  focus: string,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateMyCommunityFocus(communityId, focus);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateMyCommunityFocusAction failed", e);
+    return { ok: false, error: "Couldn't save your research focus. Please try again." };
+  }
+}
+
+/** An admin setting a DIFFERENT member's focus line — the imported-roster
+ *  case (see updateCommunityMemberFocus's own comment). */
+export async function updateCommunityMemberFocusAction(
+  communityId: string,
+  memberRowId: string,
+  focus: string,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !memberRowId) return { ok: false, error: "Missing member." };
+
+  try {
+    const result = await updateCommunityMemberFocus(communityId, memberRowId, focus);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityMemberFocusAction failed", e);
+    return { ok: false, error: "Couldn't save that member's focus. Please try again." };
   }
 }
 

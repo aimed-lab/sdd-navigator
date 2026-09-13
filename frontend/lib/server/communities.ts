@@ -649,6 +649,7 @@ export type CommunityMember = {
   user_id: string | null;
   role: CommunityRole;
   status: "active" | "pending";
+  focus: string | null;
 };
 
 /** The full member roster, WITH email — admin-only. "Community members:
@@ -668,7 +669,7 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
 
   const { data, error } = await session.db
     .from("community_members")
-    .select("id, email, user_id, role, status")
+    .select("id, email, user_id, role, status, focus")
     .eq("community_id", communityId)
     .eq("status", "active")
     .order("role", { ascending: true }); // 'admin' < 'lead' < 'member' alphabetically — admins first
@@ -689,6 +690,12 @@ export type MemberRosterEntry = {
    *  2026-09-02_community_member_roster_institution.sql's own comment on
    *  why only institution was added). */
   institution: string | null;
+  /** "What they work on" in THIS community — set by the member themselves,
+   *  or by an admin filling in a roster ahead of signup (see
+   *  database/migrations/2026-09-13_community_member_focus.sql). Lives on
+   *  the membership, not on public.users, since the same person may want a
+   *  different line in a different community. Null until someone sets it. */
+  focus: string | null;
 };
 
 /** The member-facing roster — display name (or role) for any ACTIVE member
@@ -717,6 +724,7 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
     name: string | null;
     email: string | null;
     institution: string | null;
+    focus: string | null;
   }[];
 
   return rows
@@ -725,6 +733,7 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
       role: r.role,
       display_name: r.name || r.email || "Unnamed member",
       institution: r.institution,
+      focus: r.focus,
     }))
     .sort((a, b) => {
       if (a.role === "admin" && b.role !== "admin") return -1;
@@ -768,6 +777,80 @@ export async function changeCommunityMemberRole(
     // another admin." / "A community must always keep at least one
     // admin." — rather than translated into something generic here.
     return { status: "error", error: error.message || "Couldn't change that member's role." };
+  }
+
+  return { status: "ok" };
+}
+
+export type UpdateFocusResult = { status: "ok" } | { status: "error"; error: string };
+
+const MAX_FOCUS_LENGTH = 160;
+
+/** Set or clear the caller's own "what I work on here" line for one
+ *  community, shown on their member card (MembersSection). Self-only —
+ *  "Community members: self update focus"
+ *  (2026-09-13_community_member_focus.sql) is the real gate, and its
+ *  BEFORE UPDATE trigger is what stops this same path being used to touch
+ *  role/status/anything else; a forged extra field in the update below
+ *  would be rejected by the trigger, not by this function. Matches on
+ *  (community_id, user_id) rather than a member-row id — the caller only
+ *  ever has their own community_id in hand, not their own row's id. */
+export async function updateMyCommunityFocus(
+  communityId: string,
+  focus: string
+): Promise<UpdateFocusResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const trimmed = focus.trim().slice(0, MAX_FOCUS_LENGTH);
+
+  const { error } = await db
+    .from("community_members")
+    .update({ focus: trimmed || null })
+    .eq("community_id", communityId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("updateMyCommunityFocus: update failed", error);
+    return {
+      status: "error",
+      error:
+        "Couldn't save your research focus — this is a server-side problem, not something wrong with what you entered. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+/** Set another member's focus line as an admin — for an imported cohort
+ *  (e.g. HEREP) filled in from a roster before that person has signed in.
+ *  Admin-only, app-level check only: "Community members: admin manages"
+ *  (RLS) already covers any column on any row in the admin's own
+ *  community, so this needs no new policy — same shape as
+ *  changeCommunityMemberRole/removeCommunityMember above. */
+export async function updateCommunityMemberFocus(
+  communityId: string,
+  memberRowId: string,
+  focus: string
+): Promise<UpdateFocusResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can set another member's focus." };
+  }
+
+  const trimmed = focus.trim().slice(0, MAX_FOCUS_LENGTH);
+
+  const { error } = await db
+    .from("community_members")
+    .update({ focus: trimmed || null })
+    .eq("id", memberRowId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    return { status: "error", error: error.message || "Couldn't save that member's focus." };
   }
 
   return { status: "ok" };

@@ -236,7 +236,13 @@ export default async function CommunityDetailPage({
                     title={SECTION_LABEL[s.key]}
                     count={stats.memberCount}
                   >
-                    <MembersSection isMember={isMember} roster={memberRoster} />
+                    <MembersSection
+                      isMember={isMember}
+                      roster={memberRoster}
+                      communityId={community.id}
+                      slug={slug}
+                      viewerUserId={user?.id ?? null}
+                    />
                   </CollapsibleSection>
                 );
               case "announcements":
