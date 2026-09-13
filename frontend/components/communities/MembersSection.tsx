@@ -1,4 +1,5 @@
 import type { CommunityRole, MemberRosterEntry } from "@/lib/server/communities";
+import ConnectButton from "./ConnectButton";
 import FocusField from "./FocusField";
 import HiddenToggle from "./HiddenToggle";
 
@@ -96,7 +97,7 @@ function MemberCard({
           )
         )}
       </div>
-      {isSelf && (
+      {isSelf ? (
         <>
           {member.hidden && (
             <p className="mt-1.5 font-body-sm text-body-sm text-secondary/70 italic">
@@ -105,6 +106,14 @@ function MemberCard({
           )}
           <HiddenToggle communityId={communityId} slug={slug} hidden={member.hidden} />
         </>
+      ) : (
+        // Connect reveals this member's email only once clicked — see
+        // ConnectButton's own comment on why that's a separate on-demand
+        // read rather than something already in `member`. Never rendered
+        // on the viewer's own card (the isSelf branch above), and only
+        // reachable at all because MembersSection itself already requires
+        // isMember to render any card.
+        <ConnectButton communityId={communityId} memberId={member.member_id} />
       )}
     </div>
   );

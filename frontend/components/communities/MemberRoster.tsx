@@ -16,6 +16,7 @@ import { useRouter } from "next/navigation";
 import {
   changeCommunityMemberRoleAction,
   removeCommunityMemberAction,
+  updateCommunityMemberDisplayNameAction,
   updateCommunityMemberFocusAction,
   updateCommunityMemberHiddenAction,
 } from "@/app/communities/actions";
@@ -50,6 +51,12 @@ export default function MemberRoster({
   // (e.g. from changing someone else's role) without being clobbered.
   const [focusDrafts, setFocusDrafts] = useState<Record<string, string>>(() =>
     Object.fromEntries(members.map((m) => [m.id, m.focus ?? ""]))
+  );
+  // Same local-draft pattern as focusDrafts above, for display_name — what
+  // to call this member before they've signed in (see
+  // database/migrations/2026-09-15_community_member_display_name.sql).
+  const [displayNameDrafts, setDisplayNameDrafts] = useState<Record<string, string>>(() =>
+    Object.fromEntries(members.map((m) => [m.id, m.display_name ?? ""]))
   );
 
   return (
@@ -139,6 +146,40 @@ export default function MemberRoster({
                   </>
                 )}
               </div>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <input
+                value={displayNameDrafts[m.id] ?? ""}
+                disabled={busy}
+                onChange={(e) =>
+                  setDisplayNameDrafts((prev) => ({ ...prev, [m.id]: e.target.value }))
+                }
+                placeholder="What to call them until they sign in"
+                maxLength={80}
+                className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-md px-2 py-1 font-body-sm text-body-sm text-on-background"
+              />
+              {(displayNameDrafts[m.id] ?? "") !== (m.display_name ?? "") && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusyId(m.id);
+                    setError(null);
+                    const res = await updateCommunityMemberDisplayNameAction(
+                      communityId,
+                      m.id,
+                      displayNameDrafts[m.id] ?? "",
+                      slug
+                    );
+                    if (res.ok) router.refresh();
+                    else setError(res.error);
+                    setBusyId(null);
+                  }}
+                  className="font-label-sm text-label-sm text-primary shrink-0"
+                >
+                  Save
+                </button>
+              )}
             </div>
             <div className="mt-1.5 flex items-center gap-2">
               <input

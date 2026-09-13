@@ -699,6 +699,12 @@ export type CommunityMember = {
    *  a community rather than part of the cohort it's for. Never affects
    *  role/access; only visible here, in the admin panel. */
   hidden: boolean;
+  /** Admin-set name to show for this row until it's linked to a real
+   *  account — see database/migrations/2026-09-15_community_member_display_name.sql.
+   *  Admin-only, unlike `focus`/`hidden`: there's no session to self-set
+   *  this from before signing in, and once signed in the real account name
+   *  wins over it automatically. */
+  display_name: string | null;
 };
 
 /** The full member roster, WITH email — admin-only. "Community members:
@@ -718,7 +724,7 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
 
   const { data, error } = await session.db
     .from("community_members")
-    .select("id, email, user_id, role, status, focus, hidden")
+    .select("id, email, user_id, role, status, focus, hidden, display_name")
     .eq("community_id", communityId)
     .eq("status", "active")
     .order("role", { ascending: true }); // 'admin' < 'lead' < 'member' alphabetically — admins first
@@ -814,11 +820,12 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
       member_id: r.member_id,
       user_id: r.user_id,
       role: r.role,
-      // For a not-yet-signed-in row, `name` is always null (there's no
-      // public.users row yet) and `email` is community_members.email — the
-      // one stored on the membership itself when it was added — so this
-      // still resolves to something readable, just never "Unnamed member"
-      // for a row that's simply waiting on someone to sign in.
+      // r.name is already COALESCE(linked account's real name, admin-set
+      // display_name) — see community_member_roster's own comment
+      // (2026-09-15_community_member_display_name.sql). Email is only the
+      // last resort now, for a not-yet-signed-in row an admin never gave a
+      // display name to; "Unnamed member" is the final fallback, reached
+      // only if somehow neither exists.
       display_name: r.name || r.email || "Unnamed member",
       institution: r.institution,
       focus: r.focus,
@@ -830,6 +837,50 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
       if (b.role === "admin" && a.role !== "admin") return 1;
       return a.display_name.localeCompare(b.display_name);
     });
+}
+
+export type RevealMemberEmailResult =
+  | { status: "ok"; email: string }
+  | { status: "error"; error: string };
+
+/** Reveal ONE other member's email, on demand — the Connect button on a
+ *  member card (MembersSection.tsx). Deliberately a separate, on-request
+ *  read rather than something included in listMemberRoster()'s own result:
+ *  that result is what gets rendered into the page on load, and the whole
+ *  point of Connect is that an email isn't shipped to every viewer just
+ *  because they can see the roster — "member-gated" (who's allowed to ever
+ *  see it) and "shown by default" (what the page renders unasked) are
+ *  different guarantees, and this function is what keeps the second one
+ *  true. Goes through the same community_member_roster() RPC listMemberRoster
+ *  uses — same gate (is_community_member), same hidden-row exclusion — just
+ *  called on click instead of on page render, and only this one row's email
+ *  is ever returned to the caller. Refuses the caller's own row: the
+ *  Connect button never renders on the viewer's own card, and there's no
+ *  reason to reveal your own email to yourself through this path. */
+export async function getMemberEmailForConnect(
+  communityId: string,
+  memberId: string
+): Promise<RevealMemberEmailResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const { data, error } = await db.rpc("community_member_roster", {
+    community_ids: [communityId],
+  });
+  if (error || !Array.isArray(data)) {
+    return { status: "error", error: "Couldn't load that member's email." };
+  }
+
+  const row = (data as { member_id: string; user_id: string | null; email: string | null }[]).find(
+    (r) => r.member_id === memberId
+  );
+  if (!row || row.user_id === user.id) {
+    return { status: "error", error: "Couldn't load that member's email." };
+  }
+  if (!row.email) {
+    return { status: "error", error: "This member hasn't shared an email yet." };
+  }
+
+  return { status: "ok", email: row.email };
 }
 
 export type ChangeRoleResult =
@@ -941,6 +992,45 @@ export async function updateCommunityMemberFocus(
 
   if (error) {
     return { status: "error", error: error.message || "Couldn't save that member's focus." };
+  }
+
+  return { status: "ok" };
+}
+
+export type UpdateDisplayNameResult = { status: "ok" } | { status: "error"; error: string };
+
+const MAX_DISPLAY_NAME_LENGTH = 80;
+
+/** Set what to call a member on their card before they've signed in — an
+ *  imported roster's real problem (see
+ *  database/migrations/2026-09-15_community_member_display_name.sql's own
+ *  header): without this, a not-yet-linked row has nothing to show but its
+ *  email. Admin-only, no self path — there's no session to self-set this
+ *  from before signing in, and once signed in the real account name wins
+ *  over it automatically (community_member_roster's own COALESCE), so
+ *  there's never a case where a member would set their own. */
+export async function updateCommunityMemberDisplayName(
+  communityId: string,
+  memberRowId: string,
+  displayName: string
+): Promise<UpdateDisplayNameResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can set another member's display name." };
+  }
+
+  const trimmed = displayName.trim().slice(0, MAX_DISPLAY_NAME_LENGTH);
+
+  const { error } = await db
+    .from("community_members")
+    .update({ display_name: trimmed || null })
+    .eq("id", memberRowId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    return { status: "error", error: error.message || "Couldn't save that member's display name." };
   }
 
   return { status: "ok" };

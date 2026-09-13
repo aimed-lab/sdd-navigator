@@ -19,6 +19,7 @@ import {
   deleteAnnouncement,
   deleteCommunity,
   deleteCommunityResource,
+  getMemberEmailForConnect,
   joinCommunity,
   leaveCommunity,
   refreshCommunityFeed,
@@ -26,6 +27,7 @@ import {
   removeCommunityMember,
   updateAnnouncement,
   updateCommunityExploreConfig,
+  updateCommunityMemberDisplayName,
   updateCommunityMemberFocus,
   updateCommunityMemberHidden,
   updateCommunityResource,
@@ -195,6 +197,56 @@ export async function changeCommunityMemberRoleAction(
     }
     console.error("changeCommunityMemberRoleAction failed", e);
     return { ok: false, error: "Couldn't change that member's role. Please try again." };
+  }
+}
+
+/** An admin setting what to call a member before they've signed in — see
+ *  updateCommunityMemberDisplayName's own comment on why there's no
+ *  self-service counterpart. */
+export async function updateCommunityMemberDisplayNameAction(
+  communityId: string,
+  memberRowId: string,
+  displayName: string,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !memberRowId) return { ok: false, error: "Missing member." };
+
+  try {
+    const result = await updateCommunityMemberDisplayName(communityId, memberRowId, displayName);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityMemberDisplayNameAction failed", e);
+    return { ok: false, error: "Couldn't save that member's display name. Please try again." };
+  }
+}
+
+export type RevealEmailActionResult = { ok: true; email: string } | { ok: false; error: string };
+
+/** Connect — reveal one other member's email on click. No revalidatePath:
+ *  this doesn't write anything, it's a read the page deliberately didn't
+ *  do up front (see getMemberEmailForConnect's own comment on why). */
+export async function revealMemberEmailAction(
+  communityId: string,
+  memberId: string
+): Promise<RevealEmailActionResult> {
+  if (!communityId || !memberId) return { ok: false, error: "Missing member." };
+
+  try {
+    const result = await getMemberEmailForConnect(communityId, memberId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    return { ok: true, email: result.email };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("revealMemberEmailAction failed", e);
+    return { ok: false, error: "Couldn't load that member's email. Please try again." };
   }
 }
 
