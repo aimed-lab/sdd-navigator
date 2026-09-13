@@ -95,6 +95,22 @@ export default async function CommunityDetailPage({
   // reasoning as the admin-only reads above.
   const memberRoster = isMember ? await listMemberRoster(community.id) : [];
 
+  // The Members section header's own count — deliberately NOT
+  // stats.memberCount for an active member. getCommunityStats() /
+  // community_member_stats() is a public, signed-out-safe activity number
+  // (COUNT(*) WHERE status = 'active') used all over the app — the
+  // /communities grid, the home page, CommunityCard — and it has no idea
+  // `hidden` exists; it counts a hidden staff row same as anyone else's.
+  // Once a member can actually see the roster, the header above it has to
+  // match what's rendered below it, or it reads as the exact bug this
+  // section fixes ("says twelve, renders eleven") — so for an active
+  // member this is memberRoster.length (the SAME hidden-aware,
+  // signed-up-included list MembersSection renders), and only falls back
+  // to the public stat for a non-member/signed-out viewer, who never sees
+  // roster.length in the first place (memberRoster is [] for them, not a
+  // smaller true count).
+  const membersSectionCount = isMember ? memberRoster.length : stats.memberCount;
+
   // Announcements — same "only fetch when isMember" reasoning as
   // memberRoster above; a non-member's fetch would return [] anyway
   // (community_announcements' own is_community_member() SELECT policy),
@@ -244,7 +260,7 @@ export default async function CommunityDetailPage({
                   <CollapsibleSection
                     key={s.key}
                     title={SECTION_LABEL[s.key]}
-                    count={stats.memberCount}
+                    count={membersSectionCount}
                   >
                     <MembersSection
                       isMember={isMember}

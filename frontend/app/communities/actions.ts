@@ -27,9 +27,11 @@ import {
   updateAnnouncement,
   updateCommunityExploreConfig,
   updateCommunityMemberFocus,
+  updateCommunityMemberHidden,
   updateCommunityResource,
   updateCommunitySections,
   updateMyCommunityFocus,
+  updateMyCommunityHidden,
   type CommunityRole,
   type SourceOutcome,
 } from "@/lib/server/communities";
@@ -241,6 +243,53 @@ export async function updateCommunityMemberFocusAction(
     }
     console.error("updateCommunityMemberFocusAction failed", e);
     return { ok: false, error: "Couldn't save that member's focus. Please try again." };
+  }
+}
+
+/** The signed-in member hiding or unhiding THEMSELVES from the roster. */
+export async function updateMyCommunityHiddenAction(
+  communityId: string,
+  hidden: boolean,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateMyCommunityHidden(communityId, hidden);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateMyCommunityHiddenAction failed", e);
+    return { ok: false, error: "Couldn't update your roster visibility. Please try again." };
+  }
+}
+
+/** An admin hiding or unhiding a DIFFERENT member from the roster. */
+export async function updateCommunityMemberHiddenAction(
+  communityId: string,
+  memberRowId: string,
+  hidden: boolean,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !memberRowId) return { ok: false, error: "Missing member." };
+
+  try {
+    const result = await updateCommunityMemberHidden(communityId, memberRowId, hidden);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityMemberHiddenAction failed", e);
+    return { ok: false, error: "Couldn't update that member's roster visibility. Please try again." };
   }
 }
 

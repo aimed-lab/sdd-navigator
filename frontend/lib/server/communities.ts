@@ -694,6 +694,11 @@ export type CommunityMember = {
   role: CommunityRole;
   status: "active" | "pending";
   focus: string | null;
+  /** Kept out of the member-facing roster (community_member_roster,
+   *  2026-09-14_community_member_roster_pending_hidden.sql) — staff running
+   *  a community rather than part of the cohort it's for. Never affects
+   *  role/access; only visible here, in the admin panel. */
+  hidden: boolean;
 };
 
 /** The full member roster, WITH email — admin-only. "Community members:
@@ -713,7 +718,7 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
 
   const { data, error } = await session.db
     .from("community_members")
-    .select("id, email, user_id, role, status, focus")
+    .select("id, email, user_id, role, status, focus, hidden")
     .eq("community_id", communityId)
     .eq("status", "active")
     .order("role", { ascending: true }); // 'admin' < 'lead' < 'member' alphabetically — admins first
@@ -723,9 +728,28 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
 }
 
 export type MemberRosterEntry = {
-  user_id: string;
+  /** community_members.id — the stable key. NOT `user_id`: a row for
+   *  someone who hasn't signed in yet has no user_id at all (see
+   *  `signed_up` below), so this is the only identifier every row is
+   *  guaranteed to have. */
+  member_id: string;
+  /** Null until this person has actually signed in and been linked
+   *  (handle_new_user() / claimPendingCommunityMemberships()) — see
+   *  `signed_up`. */
+  user_id: string | null;
   role: CommunityRole;
   display_name: string;
+  /** True once user_id is set — false means this row is a placeholder for
+   *  someone added by email (an imported roster) who hasn't signed in yet.
+   *  MembersSection marks that state explicitly on the card rather than
+   *  rendering it as an ordinary member. */
+  signed_up: boolean;
+  /** True only on the viewer's OWN row when they've hidden themselves from
+   *  the roster — every other member's hidden row is filtered out before
+   *  it ever reaches this list (see the RPC's own self-exception comment),
+   *  so this is never true for anyone else's entry. Lets MembersSection
+   *  mark "only visible to you" and offer the way back. */
+  hidden: boolean;
   /** Same field collab_post_owners() exposes for the Collaborate board's
    *  "Name · Institution" line (PostCard.tsx) — null when the person hasn't
    *  set one, same as there. Never affiliation (a role label like
@@ -751,7 +775,18 @@ export type MemberRosterEntry = {
  *  out a private-profile member instead of falling back to their email.
  *  Sorted admins first, then alphabetically by the resolved display name —
  *  never by raw role string, which would put "admin" ahead of "lead" ahead
- *  of "member" alphabetically only by coincidence. */
+ *  of "member" alphabetically only by coincidence.
+ *
+ *  INCLUDES rows for members who have not signed in yet (an imported
+ *  roster added by email, before this migration a not-yet-linked row was
+ *  silently dropped entirely — see
+ *  2026-09-14_community_member_roster_pending_hidden.sql's own header) and
+ *  EXCLUDES rows an admin (or the member themselves) has marked `hidden`
+ *  (staff running the community rather than part of the cohort it's for)
+ *  — EXCEPT a caller's own hidden row, which the RPC still returns (with
+ *  `hidden: true`) so they have a way to un-hide themselves; see that
+ *  function's own self-exception comment. Both filters are enforced in the
+ *  RPC's own WHERE clause, not filtered here. */
 export async function listMemberRoster(communityId: string): Promise<MemberRosterEntry[]> {
   noStore();
   const session = await getSession();
@@ -763,21 +798,32 @@ export async function listMemberRoster(communityId: string): Promise<MemberRoste
   if (error || !Array.isArray(data)) return [];
 
   const rows = data as {
-    user_id: string;
+    member_id: string;
+    user_id: string | null;
     role: CommunityRole;
     name: string | null;
     email: string | null;
     institution: string | null;
     focus: string | null;
+    signed_up: boolean;
+    hidden: boolean;
   }[];
 
   return rows
     .map((r) => ({
+      member_id: r.member_id,
       user_id: r.user_id,
       role: r.role,
+      // For a not-yet-signed-in row, `name` is always null (there's no
+      // public.users row yet) and `email` is community_members.email — the
+      // one stored on the membership itself when it was added — so this
+      // still resolves to something readable, just never "Unnamed member"
+      // for a row that's simply waiting on someone to sign in.
       display_name: r.name || r.email || "Unnamed member",
       institution: r.institution,
       focus: r.focus,
+      signed_up: r.signed_up,
+      hidden: r.hidden,
     }))
     .sort((a, b) => {
       if (a.role === "admin" && b.role !== "admin") return -1;
@@ -895,6 +941,72 @@ export async function updateCommunityMemberFocus(
 
   if (error) {
     return { status: "error", error: error.message || "Couldn't save that member's focus." };
+  }
+
+  return { status: "ok" };
+}
+
+export type UpdateHiddenResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Hide or unhide the caller's OWN row from the member-facing roster —
+ *  staff who are members (for access) but not part of the cohort the
+ *  roster exists to show. Self-only, same policy `focus` uses ("Community
+ *  members: self update own row", 2026-09-14) and the same trigger
+ *  (enforce_community_member_self_update_guard) — `hidden` is on that
+ *  trigger's allowed list alongside `focus`, nothing else. Never changes
+ *  role, status, or access; `is_community_member`/`is_community_admin`/
+ *  `can_post_to_community` don't read this column. */
+export async function updateMyCommunityHidden(
+  communityId: string,
+  hidden: boolean
+): Promise<UpdateHiddenResult> {
+  const { user, db } = await requireCurrentUser();
+
+  const { error } = await db
+    .from("community_members")
+    .update({ hidden })
+    .eq("community_id", communityId)
+    .eq("user_id", user.id);
+
+  if (error) {
+    console.error("updateMyCommunityHidden: update failed", error);
+    return {
+      status: "error",
+      error:
+        "Couldn't update your roster visibility — this is a server-side problem, not something wrong with what you did. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
+/** Hide or unhide a DIFFERENT member from the roster, as an admin — same
+ *  shape as updateCommunityMemberFocus: "Community members: admin manages"
+ *  (RLS) already covers any column on any row in the admin's own
+ *  community, so this needs no new policy, only the app-level isAdmin
+ *  check below. */
+export async function updateCommunityMemberHidden(
+  communityId: string,
+  memberRowId: string,
+  hidden: boolean
+): Promise<UpdateHiddenResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can change who's shown in the roster." };
+  }
+
+  const { error } = await db
+    .from("community_members")
+    .update({ hidden })
+    .eq("id", memberRowId)
+    .eq("community_id", communityId);
+
+  if (error) {
+    return { status: "error", error: error.message || "Couldn't update that member's roster visibility." };
   }
 
   return { status: "ok" };

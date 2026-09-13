@@ -1,5 +1,6 @@
 import type { CommunityRole, MemberRosterEntry } from "@/lib/server/communities";
 import FocusField from "./FocusField";
+import HiddenToggle from "./HiddenToggle";
 
 // The member-facing roster, grouped by role — a community exists so members
 // can find each other, so an ACTIVE member sees a card per person (name,
@@ -17,6 +18,14 @@ import FocusField from "./FocusField";
 // from the admin-only "Manage community" roster (MemberRoster.tsx), not
 // here, same split as every other admin-vs-member-facing pair in this
 // feature (listCommunityMembers vs listMemberRoster).
+//
+// NOT SIGNED UP YET: an imported roster (added by email, before anyone's
+// signed in) shows up here too now — listMemberRoster's own comment on why
+// — marked with the same wording the admin panel already uses
+// ("invited — not signed up yet") rather than rendered as an ordinary
+// member or silently dropped. `member.user_id` is null for these rows, so
+// they can never be `isSelf` and never get the focus editor — there's no
+// session to own that update yet.
 //
 // No avatars, per spec — a plain name + role card, three per row on
 // desktop, one on mobile.
@@ -61,6 +70,9 @@ function MemberCard({
       </p>
       <p className="mt-0.5 font-body-sm text-body-sm text-secondary truncate">
         {ROLE_LABEL[member.role]}
+        {!member.signed_up && (
+          <span className="italic text-secondary/70"> · invited — not signed up yet</span>
+        )}
       </p>
       {member.institution && (
         <p className="mt-1 font-body-sm text-body-sm text-secondary/70 truncate">
@@ -84,6 +96,16 @@ function MemberCard({
           )
         )}
       </div>
+      {isSelf && (
+        <>
+          {member.hidden && (
+            <p className="mt-1.5 font-body-sm text-body-sm text-secondary/70 italic">
+              Only visible to you — hidden from everyone else in this roster.
+            </p>
+          )}
+          <HiddenToggle communityId={communityId} slug={slug} hidden={member.hidden} />
+        </>
+      )}
     </div>
   );
 }
@@ -128,7 +150,7 @@ export default function MembersSection({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {group.map((m) => (
                 <MemberCard
-                  key={m.user_id}
+                  key={m.member_id}
                   member={m}
                   communityId={communityId}
                   slug={slug}

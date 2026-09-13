@@ -17,6 +17,7 @@ import {
   changeCommunityMemberRoleAction,
   removeCommunityMemberAction,
   updateCommunityMemberFocusAction,
+  updateCommunityMemberHiddenAction,
 } from "@/app/communities/actions";
 import type { CommunityMember, CommunityRole } from "@/lib/server/communities";
 
@@ -67,8 +68,33 @@ export default function MemberRoster({
                     (invited — not signed up yet)
                   </span>
                 )}
+                {m.hidden && (
+                  <span className="ml-2 font-body-sm text-body-sm text-secondary">
+                    (hidden from roster)
+                  </span>
+                )}
               </span>
               <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusyId(m.id);
+                    setError(null);
+                    const res = await updateCommunityMemberHiddenAction(
+                      communityId,
+                      m.id,
+                      !m.hidden,
+                      slug
+                    );
+                    if (res.ok) router.refresh();
+                    else setError(res.error);
+                    setBusyId(null);
+                  }}
+                  className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors px-2"
+                >
+                  {m.hidden ? "Show in roster" : "Hide from roster"}
+                </button>
                 {isOtherAdmin ? (
                   <span className="font-label-sm text-label-sm text-secondary px-2">Admin</span>
                 ) : (
