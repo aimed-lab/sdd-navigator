@@ -1920,11 +1920,11 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
               "refreshCommunityFeed: /api/explore-source rejected the request",
               { kind, topic, status: res.status, statusText: res.statusText, body: bodySnippet }
             );
-            return { kind, items: [] as ExploreItem[], failed: true };
+            return { kind, topic, items: [] as ExploreItem[], failed: true };
           }
 
           const json = (await res.json()) as { items?: ExploreItem[] };
-          return { kind, items: json.items ?? [], failed: false };
+          return { kind, topic, items: json.items ?? [], failed: false };
         } catch (e) {
           // One topic/source failing must never fail the whole refresh —
           // same "never let one bad call break the batch" posture as
@@ -1934,44 +1934,95 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
           // JSON, ...), so it's tracked as `failed` the same as a non-2xx
           // response above, not conflated with a real empty result.
           console.error("refreshCommunityFeed: fetch failed", kind, topic, e);
-          return { kind, items: [] as ExploreItem[], failed: true };
+          return { kind, topic, items: [] as ExploreItem[], failed: true };
         }
       })
     );
 
     const results = await Promise.all(fetches);
 
-    // Merge every topic's results per kind, de-duping by external id
+    // Group every topic's results per kind, de-duping by external id
     // (item.id, falling back to dedupe_key for a source that doesn't set
-    // id) — the SAME item turning up for two different topics must only be
-    // stored once. `failedKinds` tracks which sources had AT LEAST ONE
-    // rejected/errored call, so a source that's empty ONLY because the
-    // backend rejected it can be reported as such rather than as a quiet
-    // zero-result search.
-    const byKind = new Map<string, Map<string, ExploreItem>>();
+    // id) WITHIN that topic's own bucket — cross-topic de-dup happens at
+    // allocation time below (allocateByTopic's `used` set), not here.
+    // `failedKinds` tracks which sources had AT LEAST ONE rejected/errored
+    // call, so a source that's empty ONLY because the backend rejected it
+    // can be reported as such rather than as a quiet zero-result search.
+    const byKindTopic = new Map<string, Map<string, Map<string, ExploreItem>>>();
     const failedKinds = new Set<string>();
-    for (const { kind, items, failed } of results) {
+    for (const { kind, topic, items, failed } of results) {
       if (failed) failedKinds.add(kind);
-      const bucket = byKind.get(kind) ?? new Map<string, ExploreItem>();
+      const topicMap = byKindTopic.get(kind) ?? new Map<string, Map<string, ExploreItem>>();
+      const bucket = topicMap.get(topic) ?? new Map<string, ExploreItem>();
       for (const item of items) {
         const externalId = item.id || item.dedupe_key;
         if (!externalId || bucket.has(externalId)) continue;
         bucket.set(externalId, item);
       }
-      byKind.set(kind, bucket);
+      topicMap.set(topic, bucket);
+      byKindTopic.set(kind, topicMap);
     }
 
-    // A source with an empty (or missing) bucket found nothing across
-    // every topic — reported back regardless of outcome below, so an admin
-    // can tell "8 papers, but Grants came back empty" apart from a clean
-    // run of everything, AND tell that apart from "Grants was rejected by
-    // the backend", which looks identical from the item count alone.
+    // ALLOCATION, PER KIND: every topic that returned at least one item
+    // gets a GUARANTEED slot (in topic order, not competing on recency for
+    // it) before anything else is picked — this is the fix for the bug
+    // where merging every topic into one pool and sorting by date let a
+    // single prolific/fresh topic fill the entire per-kind cap, leaving
+    // every other topic's members with nothing. Only after every topic has
+    // its floor slot does the REMAINDER get filled from whatever's left
+    // over, pooled across all topics and sorted by recency — a genuinely
+    // more active or fresher topic still earns extra slots, just never at
+    // the cost of another topic getting zero. With topics >= the per-kind
+    // cap this degrades gracefully to "one each, whichever fit", which is
+    // exactly the right behavior, not a special case to code around.
+    function allocateByTopic(topicMap: Map<string, Map<string, ExploreItem>>): ExploreItem[] {
+      const used = new Set<string>();
+      const selected: ExploreItem[] = [];
+
+      for (const topic of topics) {
+        const bucket = topicMap.get(topic);
+        if (!bucket) continue;
+        for (const item of bucket.values()) {
+          const id = (item.id || item.dedupe_key) as string;
+          if (used.has(id)) continue;
+          selected.push(item);
+          used.add(id);
+          break; // exactly one floor slot per topic
+        }
+      }
+
+      const remainderPool: ExploreItem[] = [];
+      for (const bucket of topicMap.values()) {
+        for (const item of bucket.values()) {
+          const id = (item.id || item.dedupe_key) as string;
+          if (used.has(id)) continue;
+          used.add(id); // provisional — also guards against the same id from another topic's bucket
+          remainderPool.push(item);
+        }
+      }
+      remainderPool.sort((a, b) => (b.date_iso || "").localeCompare(a.date_iso || ""));
+
+      const remainingSlots = Math.max(0, FEED_PER_KIND_LIMIT - selected.length);
+      selected.push(...remainderPool.slice(0, remainingSlots));
+      return selected;
+    }
+
+    const byKind = new Map<string, ExploreItem[]>();
+    for (const [kind, topicMap] of byKindTopic) {
+      byKind.set(kind, allocateByTopic(topicMap));
+    }
+
+    // A source with no allocated items found nothing across every topic —
+    // reported back regardless of outcome below, so an admin can tell "8
+    // papers, but Grants came back empty" apart from a clean run of
+    // everything, AND tell that apart from "Grants was rejected by the
+    // backend", which looks identical from the item count alone.
     emptySources = sources
-      .filter((kind) => (byKind.get(kind)?.size ?? 0) === 0)
+      .filter((kind) => (byKind.get(kind)?.length ?? 0) === 0)
       .map((kind) => ({ kind, reason: failedKinds.has(kind) ? "rejected" : "empty" }) as const);
 
-    for (const [kind, bucket] of byKind) {
-      for (const item of Array.from(bucket.values()).slice(0, FEED_PER_KIND_LIMIT)) {
+    for (const [kind, items] of byKind) {
+      for (const item of items) {
         rows.push({
           community_id: communityId,
           kind,

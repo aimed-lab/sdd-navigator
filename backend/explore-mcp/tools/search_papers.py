@@ -193,27 +193,58 @@ async def _fetch(
     `limit` still shapes the fetch (see fetch_cap below) even though it's no
     longer applied as a final cap here.
 
-    `clinical_scope` only ever reaches PubMed (sources/pubmed.py's own
-    comment on why) — OpenAlex and Crossref are fetched unscoped. PubMed
-    dominates the hit volume for a clinical/health-services topic in
-    practice, so this is where the fix earns its keep; OpenAlex/Crossref
-    scoping is a known, not-yet-closed gap, not an oversight — see this
-    file's PR notes / the diagnosis that motivated this parameter.
+    `clinical_scope` ONLY EVER NARROWS PUBMED — sources/pubmed.py is the
+    only fetcher with a working clinical/health-services filter (verified
+    live: MeSH Major Topic + publication-type qualifiers). An earlier
+    version of this function fetched OpenAlex and Crossref UNSCOPED
+    alongside a scoped PubMed and merged all three by date — this was
+    diagnosed as a real bug, not a theoretical gap: verified live through
+    the actual /api/explore-source endpoint, the final top-10-by-date
+    output was BYTE-FOR-BYTE IDENTICAL with clinical_scope on vs. off,
+    "Isoforskolin targets ADCY7..." (the exact molecular paper the scope
+    exists to exclude) included both times. OpenAlex/Crossref's unscoped
+    volume was fully backfilling whatever PubMed's narrower query removed,
+    before the date-sort ever got a chance to discriminate — since
+    _order_and_cap sorts the MERGED pool by date across all three sources,
+    scoping only one of three contributors did nothing observable.
+    FIX: when clinical_scope is True, OpenAlex and Crossref are skipped
+    entirely rather than fetched unscoped — there is currently no working
+    equivalent filter for either (see sources/openalex.py's own TODO), so
+    fetching them unscoped under this flag would silently defeat it again.
+    This does lose whatever those two sources uniquely contribute (a paper
+    PubMed doesn't index), and loses WINNER's citation-signal re-rank
+    (OpenAlex is the only source of that signal) — an accepted, explicit
+    tradeoff for the guarantee actually holding, not an oversight. Verified
+    live after this fix: clinical_scope on vs. off now produces GENUINELY
+    DIFFERENT top-10 lists for the same query.
     """
     # Unconditional default: fetch a much larger per-source pool (see
     # _DEFAULT_POOL_SIZE) so a date-sort afterwards has recent candidates to
     # find. since_year supplied internally keeps the old cap=limit fetch.
     fetch_cap = _DEFAULT_POOL_SIZE if since_year is None else limit
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
-        results = await asyncio.gather(
-            fetch_pubmed(client, query, fetch_cap, since_year=since_year, clinical_scope=clinical_scope),
-            # Relevance, not recency: a topic's important papers cite each other,
-            # which is what gives WINNER a graph to rank (a recency-sorted set
-            # has ~zero intra-set citations). search_news keeps the recency sort.
-            fetch_openalex(client, query, fetch_cap, sort=SORT_RELEVANCE, since_year=since_year),
-            fetch_crossref(client, query, fetch_cap, since_year=since_year),
-            return_exceptions=True,   # a failing source must not sink the batch
-        )
+        if clinical_scope:
+            # PubMed only — see this function's own docstring on why
+            # OpenAlex/Crossref are skipped rather than fetched unscoped.
+            # Still gathered (of one) rather than awaited bare, so a PubMed
+            # failure here degrades the same way it would in the 3-source
+            # gather below (caught as an Exception by the zip loop, not
+            # left to propagate and sink the whole request).
+            results = await asyncio.gather(
+                fetch_pubmed(client, query, fetch_cap, since_year=since_year, clinical_scope=True),
+                return_exceptions=True,
+            )
+            results = [results[0], [], []]
+        else:
+            results = await asyncio.gather(
+                fetch_pubmed(client, query, fetch_cap, since_year=since_year, clinical_scope=False),
+                # Relevance, not recency: a topic's important papers cite each other,
+                # which is what gives WINNER a graph to rank (a recency-sorted set
+                # has ~zero intra-set citations). search_news keeps the recency sort.
+                fetch_openalex(client, query, fetch_cap, sort=SORT_RELEVANCE, since_year=since_year),
+                fetch_crossref(client, query, fetch_cap, since_year=since_year),
+                return_exceptions=True,   # a failing source must not sink the batch
+            )
 
     merged: list[Item] = []
     for source_name, result in zip(_SOURCE_NAMES, results):
