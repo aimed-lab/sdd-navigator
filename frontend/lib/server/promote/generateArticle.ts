@@ -162,8 +162,9 @@ Return only the JSON object described in the system prompt.`;
 
 // Tolerant parse of the model output into an object (matches generateExtras.ts):
 // strip markdown fences, fall back to the first {...} block. Returns null on
-// failure.
-function parseJson(content: string): Record<string, unknown> | null {
+// failure. Exported so generateToolArticle.ts (the GitHub/tool path) reuses
+// the exact same parsing instead of a second copy.
+export function parseJson(content: string): Record<string, unknown> | null {
   const cleaned = content.replace(/```(?:json)?/gi, "").trim();
   const tryParse = (s: string): Record<string, unknown> | null => {
     try {
@@ -178,7 +179,7 @@ function parseJson(content: string): Record<string, unknown> | null {
   return match ? tryParse(match[0]) : null;
 }
 
-function asString(v: unknown): string {
+export function asString(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
@@ -192,7 +193,7 @@ function asString(v: unknown): string {
 // terms down to the same plain hyphen, and non-breaking spaces to normal
 // ones (another Groq/unicode-punctuation habit) — never applied to the
 // "◆ " bullet marker itself, which isn't touched by any of these patterns.
-function normalizeUnicodePunctuation(s: string): string {
+export function normalizeUnicodePunctuation(s: string): string {
   return s
     .replace(/[\u2010-\u2015]/g, "-") // hyphen, non-breaking hyphen, figure/en/em dash, horizontal bar
     .replace(/\u00A0/g, " "); // non-breaking space

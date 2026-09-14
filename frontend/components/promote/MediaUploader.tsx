@@ -28,6 +28,7 @@ const MEDIA_HINT: Record<ShowcaseType, string> = {
   poster: "Upload the poster as an image or PDF.",
   award: "A photo of the award, plaque, or moment.",
   tool: "Screenshots or a demo.",
+  event: "Upload the flyer or a photo, if you have one.",
   other: "Anything that helps show what this is.",
 };
 

@@ -794,14 +794,17 @@ GRANT EXECUTE ON FUNCTION public.collab_post_owners() TO anon, authenticated;
 CREATE TABLE IF NOT EXISTS public.promote_showcase (
     id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id     UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
-    -- 'paper'/'talk'/'poster'/'award'/'tool'/'other' are the current
+    -- 'paper'/'talk'/'poster'/'award'/'tool'/'event'/'other' are the current
     -- "what are you showcasing?" picker (lib/showcaseTypes.ts
-    -- SHOWCASE_TYPES); 'case_study'/'white_paper'/'achievement' are legacy
-    -- values from before that picker existed, kept valid but never offered
-    -- as a new choice.
+    -- SHOWCASE_TYPES) — 'event' added in
+    -- 2026-09-16_promote_structured_form.sql, alongside talk/poster/award/
+    -- tool/other in the structured five-question form
+    -- (components/promote/SubmitFlow.tsx). 'case_study'/'white_paper'/
+    -- 'achievement' are legacy values from before that picker existed, kept
+    -- valid but never offered as a new choice.
     type         TEXT        NOT NULL
                      CHECK (type IN (
-                         'paper', 'talk', 'poster', 'award', 'tool', 'other',
+                         'paper', 'talk', 'poster', 'award', 'tool', 'event', 'other',
                          'case_study', 'white_paper', 'achievement'
                      )),
     title        TEXT        NOT NULL,

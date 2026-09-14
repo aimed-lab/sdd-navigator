@@ -92,6 +92,7 @@ import prewarm
 from cache import cache as _cache
 from response import trim_explore_result, trim_items
 from tools.explore import explore_async
+from tools.fetch_github_repo import fetch_github_repo_async
 from tools.find_provider import (
     classify_checklist_item_async,
     find_providers_for_item_async,
@@ -778,6 +779,43 @@ async def papers_http(request):
     except Exception as exc:
         logger.exception("GET /api/papers failed: query=%r limit=%r", query, limit)
         return JSONResponse({"query": query, "items": [], "error": str(exc)}, status_code=200)
+
+
+@mcp.custom_route("/api/github-repo", methods=["GET"])
+async def github_repo_http(request):
+    """Plain-HTTP bridge to fetch_github_repo_async() — ONE repo's metadata
+    plus README, for Promote's tool-post generation path
+    (frontend/lib/server/promote/fetchRepo.ts). Distinct from search_tools_async
+    (kind="tool" in _SOURCE_DISPATCH below), which searches MANY repos by
+    keyword and never fetches a README — this resolves exactly one repo by
+    owner/name.
+
+      GET /api/github-repo?repo=<owner>/<name>
+      -> { full_name, description, language, topics, stars, pushed_at,
+           html_url, readme }
+
+    A malformed `repo` param (not exactly one "/") is the one 400 in this
+    route family — there's no empty-query fallback the way search routes
+    have, since "no repo" isn't a valid request here the way "no query" is
+    a valid "give me nothing" for a search. A well-formed repo that doesn't
+    exist, or any upstream failure, returns {repo, error} with HTTP 404/200
+    respectively — never a 500.
+    """
+    repo_param = (request.query_params.get("repo") or "").strip().strip("/")
+    parts = repo_param.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return JSONResponse({"repo": repo_param, "error": "expected owner/repo"}, status_code=400)
+
+    owner, name = parts
+    try:
+        detail = await fetch_github_repo_async(owner, name)
+    except Exception as exc:
+        logger.exception("GET /api/github-repo failed: repo=%r", repo_param)
+        return JSONResponse({"repo": repo_param, "error": str(exc)}, status_code=200)
+
+    if detail is None:
+        return JSONResponse({"repo": repo_param, "error": "not found"}, status_code=404)
+    return JSONResponse(detail)
 
 
 # kind -> the SAME per-source async function each search_* tool above already

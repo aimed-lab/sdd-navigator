@@ -24,6 +24,9 @@ export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 export type ArticleDraftResult =
   | { ok: true; id: string; slug: string }
   | { ok: false; error: string };
+export type PublishActionResult =
+  | { ok: true; slug: string }
+  | { ok: false; error: string };
 export type MediaActionResult =
   | { ok: true; media: ShowcaseMedia }
   | { ok: false; error: string };
@@ -103,19 +106,26 @@ export async function updateArticleDraftAction(
 /** Toggle an article's visibility. `publish: true` makes it live at
  *  /promote/[slug]; `false` takes it back down to draft-only. Revalidates
  *  the gallery and the article's own path either way so a stale cached
- *  render never outlives the flag. */
+ *  render never outlives the flag.
+ *
+ *  Returns the article's FINAL slug — setArticlePublished may have just
+ *  regenerated it from a placeholder-derived slug to a real one (see that
+ *  function's own comment), so the caller (ArticleEditor.tsx) can update
+ *  its own "View"/share links, and revalidate the NEW path too, in case
+ *  the old one changed under it. */
 export async function setArticlePublishedAction(
   entryId: string,
   slug: string,
   publish: boolean
-): Promise<SimpleActionResult> {
+): Promise<PublishActionResult> {
   if (!entryId || !slug) return { ok: false, error: "Missing article." };
 
   try {
-    await setArticlePublished(entryId, publish);
+    const result = await setArticlePublished(entryId, publish);
     revalidatePath("/promote");
     revalidatePath(`/promote/${slug}`);
-    return { ok: true };
+    if (result.slug !== slug) revalidatePath(`/promote/${result.slug}`);
+    return { ok: true, slug: result.slug };
   } catch (e) {
     if (e instanceof UnauthorizedError) {
       return { ok: false, error: publish ? "Sign in to publish." : "Sign in to unpublish." };

@@ -19,8 +19,10 @@ import type { GeneratorResult } from "@/lib/showcaseTypes";
 // database and publishes nothing — turning a draft into a shareable page at
 // /promote/[slug] is a separate, signed-in step through
 // app/promote/actions.ts (createArticleDraftAction / publishArticleAction).
-// Only the "paper" category in the /promote/submit picker calls this route at
-// all; every other category is written by hand (components/promote/SubmitFlow.tsx).
+// Only the "paper" category in the /promote/submit flow calls this route —
+// every other category goes through /api/promote/generate-structured
+// instead (five short answers, not a fetch; see that route and
+// lib/showcaseTypes.ts's own comment on why).
 //
 // RATE-LIMIT DISCIPLINE. Each miss makes one Groq call (up to 3,072 of a
 // 12,000-tokens-per-minute budget — this used to be two calls/~6,144 tokens

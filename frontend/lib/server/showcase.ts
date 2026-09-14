@@ -25,6 +25,7 @@ import {
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
 import type { ArticleEditorEntry } from "@/components/promote/ArticleEditor";
 import {
+  SHOWCASE_TYPE_LABEL,
   SHOWCASE_TYPES,
   type ArticleDraftPatch,
   type CreateArticleInput,
@@ -357,6 +358,47 @@ export async function updateArticleEntry(id: string, patch: ArticleDraftPatch): 
   if (error) throw error;
 }
 
+/** True when `title` is exactly the placeholder ensureDraft() (SubmitFlow.tsx)
+ *  writes before a headline exists — SHOWCASE_TYPE_LABEL[type], e.g.
+ *  "Conference or talk" or "Tool or software". A row created this way never
+ *  gets `title` touched again (updateArticleEntry's patch has no `title`
+ *  field — only `headline` changes as generation/editing happens), so the
+ *  slug createArticleEntry derived from that placeholder at creation time
+ *  sticks around forever unless something notices and fixes it. */
+function looksLikePlaceholderTitle(title: string, type: ShowcaseType): boolean {
+  return title === SHOWCASE_TYPE_LABEL[type];
+}
+
+/** Re-slug (and re-title) a draft whose slug still derives from the
+ *  ensureDraft() placeholder rather than its real headline — e.g.
+ *  /promote/conference-or-talk-r3f91 instead of a slug that means
+ *  anything. Same collision-retry shape as createArticleEntry, but as an
+ *  UPDATE: a 23505 here means the new slug collides with a DIFFERENT row,
+ *  not this one (this row's OWN current slug is simply being replaced).
+ *  Best-effort — if every attempt collides (astronomically unlikely for a
+ *  headline-derived slug), the placeholder slug is left in place rather
+ *  than blocking the publish over it. */
+async function regenerateSlugFromHeadline(
+  db: Db,
+  id: string,
+  userId: string,
+  headline: string
+): Promise<string | null> {
+  const base = slugifyTitle(headline);
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const slug = attempt === 0 ? base : `${base}-${randomSlugSuffix()}`;
+    const { error } = await db
+      .from("promote_showcase")
+      .update({ title: headline, slug })
+      .eq("id", id)
+      .eq("owner_id", userId);
+    if (!error) return slug;
+    if (error.code !== "23505") throw error;
+  }
+  return null; // every attempt collided — leave the existing (placeholder) slug
+}
+
 /** Thrown by setArticlePublished when a draft has no headline/body yet.
  *  ArticleEditor already disables its Publish button for this case — this
  *  is the server-side half of that guard, since createArticleDraftAction
@@ -381,22 +423,47 @@ export class EmptyArticleError extends Error {
  *  article page's date line reads, not `created_at` (when the draft was
  *  started). Unpublishing leaves it as-is rather than clearing it, so
  *  re-publishing later reflects the most recent publish, not a fresh
- *  "first ever" date; that's an acceptable simplification for now. */
-export async function setArticlePublished(id: string, published: boolean): Promise<void> {
+ *  "first ever" date; that's an acceptable simplification for now.
+ *
+ *  FIRST PUBLISH ALSO REGENERATES A PLACEHOLDER SLUG. Every draft is
+ *  created before a headline exists (SubmitFlow.tsx's ensureDraft — DOI
+ *  path and structured-form path alike), so createArticleEntry has nothing
+ *  to slug from yet but SHOWCASE_TYPE_LABEL[type] ("Conference or talk",
+ *  "Tool or software"...). By the time this function runs, a real headline
+ *  is guaranteed to exist (the hasContent check just below throws
+ *  otherwise) — this is the first moment it's safe to re-slug from it. Only
+ *  fires while `title` still equals that placeholder verbatim: once it's
+ *  been regenerated, `title` no longer matches, so a later unpublish/
+ *  republish cycle leaves the (by-now shared) slug alone.
+ *
+ *  Returns the FINAL slug (regenerated or, in every other case, unchanged)
+ *  — the caller (setArticlePublishedAction) needs it to revalidate the
+ *  right path and hand the new slug back to the editor, since a slug that
+ *  changed out from under it would otherwise leave "View" and the share
+ *  link pointing at a page that no longer exists. */
+export async function setArticlePublished(id: string, published: boolean): Promise<{ slug: string }> {
   const { user, db } = await requireCurrentUser();
 
+  const { data } = await db
+    .from("promote_showcase")
+    .select("headline, article_body, title, type, slug")
+    .eq("id", id)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  let slug = (data?.slug as string | undefined) ?? "";
+
   if (published) {
-    const { data } = await db
-      .from("promote_showcase")
-      .select("headline, article_body")
-      .eq("id", id)
-      .eq("owner_id", user.id)
-      .maybeSingle();
-    const hasContent = Boolean(
-      (data?.headline as string | undefined)?.trim() &&
-        (data?.article_body as string | undefined)?.trim()
-    );
+    const headline = (data?.headline as string | undefined)?.trim() ?? "";
+    const hasContent = Boolean(headline && (data?.article_body as string | undefined)?.trim());
     if (!hasContent) throw new EmptyArticleError();
+
+    const title = (data?.title as string | undefined) ?? "";
+    const type = data?.type as ShowcaseType | undefined;
+    if (type && looksLikePlaceholderTitle(title, type)) {
+      const newSlug = await regenerateSlugFromHeadline(db, id, user.id, headline);
+      if (newSlug) slug = newSlug;
+    }
   }
 
   const { error } = await db
@@ -405,6 +472,8 @@ export async function setArticlePublished(id: string, published: boolean): Promi
     .eq("id", id)
     .eq("owner_id", user.id);
   if (error) throw error;
+
+  return { slug };
 }
 
 /** Delete a showcase entry as the signed-in user. Hard delete — same idiom as

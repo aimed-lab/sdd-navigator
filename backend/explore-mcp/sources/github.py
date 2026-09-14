@@ -21,6 +21,7 @@ authenticated: 30/min. Cache accordingly.
 
 from __future__ import annotations
 
+import base64
 import os
 from urllib.parse import quote
 
@@ -31,12 +32,26 @@ from models import Item, Signal
 
 from .base import filter_quality, get_json, now_iso, to_iso
 
+# README bodies run from a few hundred bytes to (rarely) tens of KB — capped
+# so a sprawling README doesn't blow past the LLM's prompt budget in
+# generateArticle.ts's tool-post path, the one caller of
+# fetch_github_repo_detail. Generous enough to keep the actual usage
+# section, which is usually well within the first few thousand characters.
+_MAX_README_CHARS = 8000
 
-async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+
+def _github_headers() -> dict[str, str]:
+    """Same Accept + optional bearer-token shape fetch_github already uses
+    below — pulled out so fetch_github_repo_detail doesn't duplicate it."""
     headers = {"Accept": "application/vnd.github+json"}
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
+    headers = _github_headers()
 
     q = f"{term} stars:>=5"   # keep the existing minimum-stars filter
     url = (
@@ -78,3 +93,58 @@ async def fetch_github(client: httpx.AsyncClient, term: str, cap: int) -> list[I
             )
         )
     return filter_quality(items)
+
+
+async def fetch_github_repo_detail(client: httpx.AsyncClient, owner: str, repo: str) -> dict:
+    """ONE repo's metadata plus its README body — for Promote's tool-post
+    generation path (tools/fetch_github_repo.py), not the search above.
+    fetch_github() only ever returns what /search/repositories hands back
+    (name, description, stars, pushed_at — see its own field mapping); it
+    has never fetched a single repo's full record or a README at all. This
+    is the first thing in this backend that does either.
+
+    Two calls, same auth/headers as fetch_github (_github_headers), against
+    the CORE API rate bucket (5000/hr authenticated), not the tight
+    30/minute SEARCH bucket fetch_github draws on — a single repo lookup on
+    demand doesn't need the same budgeting concern that module's own
+    docstring calls out.
+
+      GET /repos/{owner}/{repo}         -> description, language, topics,
+                                            stars, pushed_at, html_url
+      GET /repos/{owner}/{repo}/readme  -> base64-encoded body, decoded and
+                                            capped at _MAX_README_CHARS
+
+    The README call is isolated in its own try/except: a repo with no
+    README (very possible for a small research tool) is a 404 from GitHub,
+    not a reason to fail the whole detail fetch — `readme` in the result is
+    simply None. The metadata call is NOT isolated the same way; if the
+    repo itself doesn't exist or the metadata call fails, this raises and
+    the caller (tools/fetch_github_repo.py) treats that as "not found",
+    same posture fetch_github_repo_async's own docstring describes.
+    """
+    headers = _github_headers()
+
+    meta = await get_json(client, f"https://api.github.com/repos/{owner}/{repo}", headers=headers)
+
+    readme_text: str | None = None
+    try:
+        readme = await get_json(
+            client, f"https://api.github.com/repos/{owner}/{repo}/readme", headers=headers
+        )
+        content = (readme or {}).get("content")
+        if content:
+            decoded = base64.b64decode(content).decode("utf-8", errors="replace")
+            readme_text = decoded[:_MAX_README_CHARS].strip() or None
+    except Exception:
+        readme_text = None  # no README, private/renamed, or a transient failure — degrade, don't fail
+
+    return {
+        "full_name": meta.get("full_name") or f"{owner}/{repo}",
+        "description": meta.get("description"),
+        "language": meta.get("language"),
+        "topics": meta.get("topics") or [],
+        "stars": meta.get("stargazers_count"),
+        "pushed_at": to_iso(meta.get("pushed_at") or ""),
+        "html_url": meta.get("html_url") or f"https://github.com/{owner}/{repo}",
+        "readme": readme_text,
+    }

@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { setArticlePublishedAction, updateArticleDraftAction } from "@/app/promote/actions";
 import MediaUploader from "@/components/promote/MediaUploader";
 import ShareButtons from "@/components/promote/ShareButtons";
@@ -46,10 +47,16 @@ export type ArticleEditorEntry = {
   communityId: string | null;
 };
 
-/** Only relevant right after DOI generation (SubmitFlow) — the "Paper
- *  found" recap card. Absent when opening an existing entry to edit it, or
- *  when the entry was never DOI-sourced to begin with. */
+/** Only relevant right after generation (SubmitFlow) — the "Paper found" /
+ *  "Repository found" recap card. Absent when opening an existing entry to
+ *  edit it, or when the entry was never generated from a DOI or GitHub URL
+ *  to begin with. `kind` picks the card's label and byline shape — a repo
+ *  has no authors/journal, so the byline is just the pushed date, not an
+ *  empty "· date" left over from a paper-shaped line with nothing before
+ *  the separator. Defaults to "paper" so every existing call site (which
+ *  predates this field) keeps rendering exactly as it did. */
 export type ArticleEditorPaperInfo = {
+  kind?: "paper" | "tool";
   title: string;
   authors: string[];
   sourceUrl: string;
@@ -80,6 +87,8 @@ export default function ArticleEditor({
   doneHref?: string;
 }) {
   const [entry, setEntry] = useState(initialEntry);
+  const router = useRouter();
+  const pathname = usePathname();
   const [type, setType] = useState<ShowcaseType>(initialEntry.type);
   const [headline, setHeadline] = useState(initialEntry.headline);
   const [standfirst, setStandfirst] = useState(initialEntry.standfirst);
@@ -162,10 +171,24 @@ export default function ArticleEditor({
     }
     setSaving(true);
     setSaveError(null);
-    const res = await setArticlePublishedAction(entry.id, entry.slug, nextPublished);
+    const oldSlug = entry.slug;
+    const res = await setArticlePublishedAction(entry.id, oldSlug, nextPublished);
     setSaving(false);
-    if (res.ok) setEntry((e) => ({ ...e, published: nextPublished }));
-    else setSaveError(res.error);
+    if (res.ok) {
+      setEntry((e) => ({ ...e, published: nextPublished, slug: res.slug }));
+      // A FIRST publish may have just regenerated a placeholder-derived
+      // slug (setArticlePublished's own comment) — if this editor is
+      // sitting on /promote/<oldSlug>/edit (reopened via that route, not
+      // the submit-flow hand-off, which stays on /promote/submit), that
+      // URL now points at a slug that no longer exists. Swap it for the
+      // real one so a refresh — or "View" / the share link right below —
+      // doesn't 404.
+      if (res.slug !== oldSlug && pathname === `/promote/${oldSlug}/edit`) {
+        router.replace(`/promote/${res.slug}/edit`);
+      }
+    } else {
+      setSaveError(res.error);
+    }
   };
 
   return (
@@ -211,14 +234,19 @@ export default function ArticleEditor({
         {paper && (
           <section className="glass-panel rounded-2xl p-6">
             <p className="font-label-sm text-label-sm text-secondary uppercase mb-1">
-              Paper found
+              {paper.kind === "tool" ? "Repository found" : "Paper found"}
             </p>
             <h3 className="font-headline-md text-lg text-on-background">{paper.title}</h3>
             <p className="mt-1 font-body-sm text-body-sm text-secondary">
-              {paper.authors.slice(0, 4).join(", ")}
-              {paper.authors.length > 4 && " et al."}
-              {paper.journal && ` · ${paper.journal}`}
-              {paper.publishedDate && ` · ${paper.publishedDate}`}
+              {[
+                paper.authors.length
+                  ? paper.authors.slice(0, 4).join(", ") + (paper.authors.length > 4 ? " et al." : "")
+                  : null,
+                paper.journal,
+                paper.publishedDate,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
             <a
               href={paper.sourceUrl}
