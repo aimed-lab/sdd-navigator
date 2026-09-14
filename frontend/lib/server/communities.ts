@@ -810,13 +810,23 @@ export type MemberRosterEntry = {
  *  — EXCEPT a caller's own hidden row, which the RPC still returns (with
  *  `hidden: true`) so they have a way to un-hide themselves; see that
  *  function's own self-exception comment. Both filters are enforced in the
- *  RPC's own WHERE clause, not filtered here. */
+ *  RPC's own WHERE clause, not filtered here.
+ *
+ *  WORKS SIGNED OUT TOO, as of 2026-09-20_community_public_roster.sql —
+ *  the RPC's own WHERE clause now also returns rows when the community's
+ *  public_preview is 'open', regardless of the caller's own membership.
+ *  Falls back to the anon server client when there's no session (same
+ *  client getCommunityBySlug already uses for every other public read)
+ *  rather than bailing out the way this used to — the RPC call itself is
+ *  what decides whether anything comes back, the same as it always has
+ *  for a signed-in non-member. */
 export async function listMemberRoster(communityId: string): Promise<MemberRosterEntry[]> {
   noStore();
   const session = await getSession();
-  if (!session) return [];
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return [];
 
-  const { data, error } = await session.db.rpc("community_member_roster", {
+  const { data, error } = await db.rpc("community_member_roster", {
     community_ids: [communityId],
   });
   if (error || !Array.isArray(data)) return [];
@@ -1798,6 +1808,16 @@ export type CommunityFeedItem = {
  *  This is what's IN the database right now, i.e. as of the last Refresh —
  *  never a live search, per spec.
  *
+ *  WORKS SIGNED OUT TOO, as of 2026-09-20_community_public_roster.sql —
+ *  "Community feed items: public preview select" (RLS) now also covers
+ *  public_preview = 'open', not just 'standard', so a non-member's read
+ *  through this SAME function/query returns the FULL feed for an open
+ *  community (getCommunityFeedPreview is still what the 'standard' case
+ *  uses for its capped 3-4-item version — this function was never that
+ *  cap, and 'open' wants the uncapped view a member sees). Falls back to
+ *  the anon server client when there's no session, same pattern as
+ *  listMemberRoster's own generalization.
+ *
  *  Ordered by published_at desc (nulls last, then fetched_at desc as a
  *  stable tie-break for same-date or unknown-date items) — NOT by
  *  fetched_at, which only says when this Refresh ran, not how new the item
@@ -1806,9 +1826,10 @@ export type CommunityFeedItem = {
 export async function listCommunityFeedItems(communityId: string): Promise<CommunityFeedItem[]> {
   noStore();
   const session = await getSession();
-  if (!session) return [];
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return [];
 
-  const { data, error } = await session.db
+  const { data, error } = await db
     .from("community_feed_items")
     .select(
       "id, community_id, kind, external_id, title, url, summary, source, published_at, raw, signal, fetched_at"

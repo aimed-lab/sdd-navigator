@@ -73,32 +73,54 @@ const FEED_GROUP_COLLAPSED_LIMIT = 10;
  *  single obvious save target. `onSaveClick` (from ExploreSection) opens
  *  SaveItemPicker instead of ItemCard's own local/project toggle — a real
  *  persisted save (to a project, a NEW project, or the viewer's own saved
- *  items), never a silent-reset-on-reload local toggle.
+ *  items), never a silent-reset-on-reload local toggle. Only ever passed
+ *  when `interactive` — see below.
  *
- *  Capped at FEED_GROUP_COLLAPSED_LIMIT with a "Show all N" expander — a
- *  community with ninety papers stored otherwise renders as one unbroken
- *  wall under the "Papers" heading. `items` arrives pre-sorted
- *  newest-published-first (listCommunityFeedItems' own ORDER BY), so the
- *  collapsed slice is always the N most recent, not an arbitrary N. */
+ *  INTERACTIVE (the member view, unchanged): capped at
+ *  FEED_GROUP_COLLAPSED_LIMIT with a "Show all N" expander — a community
+ *  with ninety papers stored otherwise renders as one unbroken wall under
+ *  the "Papers" heading.
+ *
+ *  NOT INTERACTIVE (a non-member viewing an 'open' community's feed,
+ *  2026-09-20_community_public_roster.sql): every item renders directly,
+ *  no cap, no expander — "fully visible" means the whole stored feed is
+ *  there to look at, and there's nothing left to expand INTO once nothing
+ *  was held back. Each card itself is also non-interactive (ItemCard's own
+ *  `interactive` prop) — no click-through, no bookmark.
+ *
+ *  Either way `items` arrives pre-sorted newest-published-first
+ *  (listCommunityFeedItems' own ORDER BY), so a capped slice is always the
+ *  N most recent, not an arbitrary N. */
 function ExpandableFeedGroup({
   items,
   onSaveClick,
+  interactive,
 }: {
   items: CommunityFeedItem[];
-  onSaveClick: (item: ExploreItem) => void;
+  onSaveClick?: (item: ExploreItem) => void;
+  interactive: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const visible = expanded ? items : items.slice(0, FEED_GROUP_COLLAPSED_LIMIT);
+  const visible = interactive
+    ? expanded
+      ? items
+      : items.slice(0, FEED_GROUP_COLLAPSED_LIMIT)
+    : items;
   const hiddenCount = items.length - visible.length;
 
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {visible.map((item) => (
-          <ItemCard key={item.id} item={feedItemToExploreItem(item)} onSaveClick={onSaveClick} />
+          <ItemCard
+            key={item.id}
+            item={feedItemToExploreItem(item)}
+            onSaveClick={onSaveClick}
+            interactive={interactive}
+          />
         ))}
       </div>
-      {hiddenCount > 0 && (
+      {interactive && hiddenCount > 0 && (
         <button
           type="button"
           onClick={() => setExpanded(true)}
@@ -115,12 +137,18 @@ export default function ExploreSection({
   title,
   defaultOpen,
   feedItems,
+  interactive = true,
 }: {
   title: string;
   defaultOpen?: boolean;
   /** The community's STORED Explore feed (listCommunityFeedItems) — as of
    *  the last Refresh, never a live search. */
   feedItems: CommunityFeedItem[];
+  /** False for a non-member viewing an 'open' community's feed — "fully
+   *  visible but not interactive": every item shown (no collapse/expander),
+   *  each card look-only (no click-through, no bookmark). Default true,
+   *  the member view, unchanged. See ExpandableFeedGroup's own comment. */
+  interactive?: boolean;
 }) {
   const [savingItem, setSavingItem] = useState<ExploreItem | null>(null);
 
@@ -141,7 +169,11 @@ export default function ExploreSection({
                 <span className="block font-label-sm text-label-sm text-secondary/70 uppercase mb-2">
                   {EXPLORE_SOURCE_LABEL[kind]}
                 </span>
-                <ExpandableFeedGroup items={group} onSaveClick={setSavingItem} />
+                <ExpandableFeedGroup
+                  items={group}
+                  onSaveClick={interactive ? setSavingItem : undefined}
+                  interactive={interactive}
+                />
               </div>
             );
           })}

@@ -263,6 +263,7 @@ export default function ItemCard({
   initiallySaved = false,
   variant = "default",
   onSaveClick,
+  interactive = true,
 }: {
   item: ExploreItem;
   /** When set, the bookmark button saves into/removes from THIS project
@@ -283,6 +284,15 @@ export default function ItemCard({
   /** Fully overrides the bookmark click — see this file's top comment.
    *  When given, `projectId`/the local toggle are never consulted. */
   onSaveClick?: (item: ExploreItem) => void;
+  /** False renders a LOOK-ONLY card: no click-through to `item.url`, no
+   *  bookmark button, not keyboard-focusable — everything else (badges,
+   *  per-kind metadata, title/summary) stays exactly as-is. For a
+   *  non-member viewing an 'open' community's Explore feed
+   *  (2026-09-20_community_public_roster.sql): "can see what is there and
+   *  cannot act on it" — acting on it (opening the source, bookmarking)
+   *  is exactly what membership is for. Default true, so every other
+   *  caller (Explore proper, project Resources, ...) is unaffected. */
+  interactive?: boolean;
 }) {
   const [saved, setSaved] = useState(initiallySaved);
   const [pending, setPending] = useState(false);
@@ -352,16 +362,20 @@ export default function ItemCard({
 
   return (
     <div
-      role="link"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
-      className={`glass-card group flex flex-col overflow-hidden rounded-xl border-t-4 ${accent} min-h-[220px] cursor-pointer`}
+      role={interactive ? "link" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? open : undefined}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                open();
+              }
+            }
+          : undefined
+      }
+      className={`glass-card group flex flex-col overflow-hidden rounded-xl border-t-4 ${accent} min-h-[220px] ${interactive ? "cursor-pointer" : ""}`}
     >
       {imageUrl && (
         <div className="w-full aspect-video bg-surface-container-high overflow-hidden">
@@ -395,19 +409,21 @@ export default function ItemCard({
             </span>
           ) : null}
 
-          <button
-            onClick={toggleSave}
-            disabled={pending}
-            aria-label={saved ? "Remove bookmark" : "Save item"}
-            className="text-secondary hover:text-primary transition-colors shrink-0 ml-auto disabled:opacity-50"
-          >
-            <span
-              className="material-symbols-outlined"
-              style={{ fontVariationSettings: saved ? "'FILL' 1" : "'FILL' 0" }}
+          {interactive && (
+            <button
+              onClick={toggleSave}
+              disabled={pending}
+              aria-label={saved ? "Remove bookmark" : "Save item"}
+              className="text-secondary hover:text-primary transition-colors shrink-0 ml-auto disabled:opacity-50"
             >
-              bookmark
-            </span>
-          </button>
+              <span
+                className="material-symbols-outlined"
+                style={{ fontVariationSettings: saved ? "'FILL' 1" : "'FILL' 0" }}
+              >
+                bookmark
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Visible, not silent — a reverted save must say why. */}
@@ -456,7 +472,7 @@ export default function ItemCard({
               at-a-glance decision. */}
           {geo && (geo.accession || geo.experiment_type || geo.platform) && (
             <div className="mt-2 flex items-center gap-x-2 gap-y-1 flex-wrap text-secondary text-body-sm font-body-sm">
-              {geo.accession && item.url && (
+              {geo.accession && item.url && interactive ? (
                 <a
                   href={item.url}
                   target="_blank"
@@ -466,6 +482,8 @@ export default function ItemCard({
                 >
                   {geo.accession}
                 </a>
+              ) : (
+                geo.accession && <span>{geo.accession}</span>
               )}
               {geo.experiment_type && <span>{geo.experiment_type}</span>}
               {geo.platform && <span>{geo.platform}</span>}

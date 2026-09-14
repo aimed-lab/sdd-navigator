@@ -35,17 +35,24 @@ export const SECTION_LABEL: Record<SectionKey, string> = {
 };
 
 // What a NON-member sees before joining
-// (database/migrations/2026-09-18_community_public_preview.sql) — the
-// equivalent choice to SECTION_KEYS above, but for WHO can see it rather
-// than WHAT appears for a member. Split out here for the same reason as
-// everything else in this file: PublicPreviewEditor (a client component)
-// needs PUBLIC_PREVIEW_LABEL as a value.
-export const PUBLIC_PREVIEW_LEVELS = ["standard", "minimal"] as const;
+// (database/migrations/2026-09-18_community_public_preview.sql, extended
+// by 2026-09-20_community_public_roster.sql) — the equivalent choice to
+// SECTION_KEYS above, but for WHO can see it rather than WHAT appears for
+// a member. Applies to ANY non-member, signed out or signed in — see
+// app/communities/[slug]/page.tsx's own `showRoster`/`showFeed` (not just
+// a signed-out check). Split out here for the same reason as everything
+// else in this file: PublicPreviewEditor (a client component) needs
+// PUBLIC_PREVIEW_LABEL as a value.
+export const PUBLIC_PREVIEW_LEVELS = ["standard", "minimal", "open"] as const;
 export type PublicPreviewLevel = (typeof PUBLIC_PREVIEW_LEVELS)[number];
 
 export const PUBLIC_PREVIEW_LABEL: Record<PublicPreviewLevel, string> = {
   standard: "Standard — name, purpose, member count, and a preview of the feed",
   minimal: "Minimal — name and purpose only",
+  // "Fully visible but not interactive" (the feed) is the nuance a one-line
+  // label can't carry on its own — spelled out in PublicPreviewEditor's own
+  // copy under this option, not crammed in here.
+  open: "Open — the full member roster and feed, visible to anyone with the link",
 };
 
 /** SECTION_KEYS order, all enabled — what a NULL `communities.sections`

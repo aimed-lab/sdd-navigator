@@ -90,45 +90,63 @@ export default async function CommunityDetailPage({
 
   const isMember = membership.state === "active";
 
+  // What a non-member sees before joining
+  // (2026-09-18_community_public_preview.sql, extended by
+  // 2026-09-20_community_public_roster.sql) — three levels now:
+  //   'minimal'  — name and purpose only.
+  //   'standard' — the above plus member/feed COUNTS and a 3-4 item feed
+  //                PREVIEW (CommunityPublicPreview below).
+  //   'open'     — the SAME Members and Explore sections a member sees,
+  //                full roster (names/institution/focus, no Connect) and
+  //                full feed (every item, but look-only — no click-
+  //                through, no bookmark, no "Show all"). Replaces the
+  //                'standard' preview card entirely, doesn't add to it.
+  // Applies to ANY non-member — signed out or signed in — not just a
+  // signed-out visitor; `isMember` alone (not session presence) is what
+  // this branches on throughout the page.
+  const openPreview = !isMember && community.public_preview === "open";
+  const showPublicPreview = !isMember && community.public_preview === "standard";
+
+  // Members AND Explore share one gate: an active member always sees
+  // both; a non-member sees both together only under 'open', never one
+  // without the other (there's no partial state in the spec this
+  // implements). listMemberRoster/listCommunityFeedItems both now work
+  // signed-out too (see their own comments) — RLS/the RPC's own WHERE
+  // clause is what actually decides whether anything comes back for a
+  // non-member, this flag just decides whether to bother asking.
+  const canSeeMembersAndFeed = isMember || openPreview;
+
   // Member-facing roster (name + role, admins first) for the Members
-  // section below. listMemberRoster degrades to [] for anyone who isn't an
-  // active member (community_member_roster's own is_community_member() gate
-  // in the database, not just this check) — fetched only for an active
-  // member, same "avoid firing it for a viewer who can't see anything back"
-  // reasoning as the admin-only reads above.
-  const memberRoster = isMember ? await listMemberRoster(community.id) : [];
+  // section below. listMemberRoster degrades to [] for anyone the RPC
+  // doesn't cover (not a member, and not an 'open' community) — fetched
+  // only when it might show something, same "avoid firing it for a viewer
+  // who can't see anything back" reasoning as the admin-only reads above.
+  const memberRoster = canSeeMembersAndFeed ? await listMemberRoster(community.id) : [];
 
   // The Members section header's own count — deliberately NOT
-  // stats.memberCount for an active member. getCommunityStats() /
-  // community_member_stats() is a public, signed-out-safe activity number
-  // (COUNT(*) WHERE status = 'active') used all over the app — the
-  // /communities grid, the home page, CommunityCard — and it has no idea
-  // `hidden` exists; it counts a hidden staff row same as anyone else's.
-  // Once a member can actually see the roster, the header above it has to
-  // match what's rendered below it, or it reads as the exact bug this
-  // section fixes ("says twelve, renders eleven") — so for an active
-  // member this is memberRoster.length (the SAME hidden-aware,
-  // signed-up-included list MembersSection renders), and only falls back
-  // to the public stat for a non-member/signed-out viewer, who never sees
+  // stats.memberCount whenever the real roster is visible.
+  // getCommunityStats() / community_member_stats() is a public,
+  // signed-out-safe activity number (COUNT(*) WHERE status = 'active')
+  // used all over the app — the /communities grid, the home page,
+  // CommunityCard — and it has no idea `hidden` exists; it counts a
+  // hidden staff row same as anyone else's. Whenever the roster itself is
+  // visible (a member, or a non-member on an 'open' community), the
+  // header above it has to match what's rendered below it, or it reads
+  // as the exact bug this section fixes ("says twelve, renders eleven")
+  // — so this is memberRoster.length (the SAME hidden-aware,
+  // signed-up-included list MembersSection renders) whenever
+  // canSeeMembersAndFeed, and only falls back to the public stat for a
+  // non-member who can't see the roster at all, who never sees
   // roster.length in the first place (memberRoster is [] for them, not a
   // smaller true count).
-  const membersSectionCount = isMember ? memberRoster.length : stats.memberCount;
-
-  // What a non-member sees before joining
-  // (2026-09-18_community_public_preview.sql) — 'standard' (the default)
-  // shows the member count above plus a preview of the stored feed;
-  // 'minimal' shows neither, not even the count badge on the Members
-  // section below (see that section's own `count` prop) — "nothing beyond
-  // its name" means nothing, not "the standard preview minus the feed".
-  const showPublicPreview = !isMember && community.public_preview === "standard";
+  const membersSectionCount = canSeeMembersAndFeed ? memberRoster.length : stats.memberCount;
 
   // getCommunityFeedPreview goes through the SAME community_feed_items
   // table listCommunityFeedItems reads below, via RLS
   // ("Community feed items: public preview select") rather than a
-  // service-role bypass — see that function's own comment. Only fetched
-  // when it'll actually be shown, same "avoid firing a read for a viewer
-  // who can't see anything back" reasoning as every other member-gated
-  // fetch on this page.
+  // service-role bypass — see that function's own comment. Only ever the
+  // 'standard' case's capped 3-4 items; 'open' uses the full
+  // listCommunityFeedItems read instead (below), same as a member gets.
   const feedPreview = showPublicPreview
     ? await getCommunityFeedPreview(community.id)
     : { count: 0, items: [] };
@@ -148,11 +166,13 @@ export default async function CommunityDetailPage({
   // comes back), so there's nothing here that needs authorNames yet.
   const resources = isMember ? await listCommunityResources(community.id) : [];
 
-  // The stored Explore feed — same "only fetch when isMember" reasoning as
-  // resources above; rendered by its own Explore section (ExploreSection),
+  // The stored Explore feed — gated on canSeeMembersAndFeed, not isMember
+  // alone, so an 'open' community's non-member also gets the full feed
+  // (rendered non-interactively — see ExploreSection's own `interactive`
+  // prop below). Rendered by its own Explore section (ExploreSection),
   // separate from Resources — see that component's own comment for why
   // the two split.
-  const feedItems = isMember ? await listCommunityFeedItems(community.id) : [];
+  const feedItems = canSeeMembersAndFeed ? await listCommunityFeedItems(community.id) : [];
 
   // Showcase — UNLIKE resources/announcements/the feed above, fetched
   // unconditionally, not only for an active member: this lists PUBLISHED
@@ -224,12 +244,15 @@ export default async function CommunityDetailPage({
           </div>
         </section>
 
-        {/* The pitch for a non-member — see CommunityPublicPreview's own
-            comment on why this sits here (right under the header, before
-            anyone has to click into a section) rather than as one more
-            CollapsibleSection. Absent entirely, not an empty version of
-            itself, when public_preview is 'minimal' or the viewer is
-            already a member (who sees the real sections below instead). */}
+        {/* The pitch for a non-member on a 'standard' community — see
+            CommunityPublicPreview's own comment on why this sits here
+            (right under the header, before anyone has to click into a
+            section) rather than as one more CollapsibleSection. Absent
+            entirely, not an empty version of itself, when public_preview
+            is 'minimal' (nothing to show), the viewer is already a member
+            (who sees the real sections below instead), OR public_preview
+            is 'open' — there, the real Members/Explore sections below
+            replace this card outright rather than sitting alongside it. */}
         {showPublicPreview && (
           <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />
         )}
@@ -265,19 +288,27 @@ export default async function CommunityDetailPage({
 
             NON-MEMBER FILTER: a signed-out visitor (or any non-member) is
             member-gated OUT of every section here except "showcase" —
-            projects, members, announcements, resources, and explore all
-            resolve to an empty fetch for them (their own RLS policies, not
-            a check here), so rendering those headers just shows a
-            collapsed disclosure with nothing behind it: something to
-            click that goes nowhere, telling a visitor the community is
-            emptier than it is. "showcase" is the one exception because its
-            own read (listShowcaseByCommunity) is deliberately public
-            regardless of membership — see that fetch's own comment above.
-            The public-preview card above is what replaces everything this
-            filter removes. */}
+            projects, announcements, and resources all resolve to an empty
+            fetch for them (their own RLS policies, not a check here), so
+            rendering those headers just shows a collapsed disclosure with
+            nothing behind it: something to click that goes nowhere,
+            telling a visitor the community is emptier than it is.
+            "showcase" is the one exception because its own read
+            (listShowcaseByCommunity) is deliberately public regardless of
+            membership — see that fetch's own comment above. "members" and
+            "explore" join it too, but ONLY when canSeeMembersAndFeed
+            ('open' — see that flag's own comment): those two DO have real
+            content for such a non-member, unlike the others. The
+            'standard' preview card above is what replaces everything this
+            filter still removes at that level. */}
         {orderedSections
           .filter((s) => s.enabled)
-          .filter((s) => isMember || s.key === "showcase")
+          .filter(
+            (s) =>
+              isMember ||
+              s.key === "showcase" ||
+              (canSeeMembersAndFeed && (s.key === "members" || s.key === "explore"))
+          )
           .map((s) => {
             switch (s.key) {
               case "projects":
@@ -302,13 +333,13 @@ export default async function CommunityDetailPage({
                   </CollapsibleSection>
                 );
               case "members":
-                // This case is unreachable for a non-member now — the
-                // filter above already drops every section but "showcase"
-                // for them — so `count` no longer needs its own
-                // isMember/showPublicPreview branch; membersSectionCount
-                // itself already falls back to the public stat only for a
-                // non-member (see its own comment), which never reaches
-                // here anymore anyway.
+                // Reachable for a non-member again, but only when
+                // canSeeMembersAndFeed (the sections filter above already
+                // enforces that) — `canView` is what actually lets
+                // MembersSection render real cards instead of "Join to
+                // see"; `isMember` stays separate so a non-member on an
+                // 'open' community still gets no Connect button and no
+                // self-editing controls (see that component's own comment).
                 return (
                   <CollapsibleSection
                     key={s.key}
@@ -316,6 +347,7 @@ export default async function CommunityDetailPage({
                     count={membersSectionCount}
                   >
                     <MembersSection
+                      canView={canSeeMembersAndFeed}
                       isMember={isMember}
                       roster={memberRoster}
                       communityId={community.id}
@@ -349,7 +381,16 @@ export default async function CommunityDetailPage({
                 );
               case "explore":
                 return (
-                  <ExploreSection key={s.key} title={SECTION_LABEL[s.key]} feedItems={feedItems} />
+                  <ExploreSection
+                    key={s.key}
+                    title={SECTION_LABEL[s.key]}
+                    feedItems={feedItems}
+                    // Only a real member gets the interactive view
+                    // (click-through, bookmark, "Show all") — a non-member
+                    // on an 'open' community sees the same items but
+                    // strictly look-only, per spec.
+                    interactive={isMember}
+                  />
                 );
               case "showcase":
                 return (

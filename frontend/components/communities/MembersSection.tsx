@@ -7,11 +7,19 @@ import HiddenToggle from "./HiddenToggle";
 // can find each other, so an ACTIVE member sees a card per person (name,
 // role, institution when they have one, and what they work on in this
 // community — never an email; see listMemberRoster's own comment on why),
-// not just a count. A non-member (or a signed-out visitor) sees no cards at
-// all: the section's item count (member count) lives in the
-// CollapsibleSection header wrapped around this
-// (app/communities/[slug]/page.tsx), which IS public, same as before this
-// feature existed — only the roster itself is member-only.
+// not just a count.
+//
+// `canView` vs `isMember` — TWO DIFFERENT QUESTIONS. `canView` decides
+// whether the roster renders AT ALL: true for an active member, and ALSO
+// true for a non-member when the community's public_preview is 'open'
+// (2026-09-20_community_public_roster.sql) — an open community's roster is
+// deliberately readable by anyone with the link, the entire point of that
+// setting. `isMember` stays narrower and gates the two things that must
+// stay member-only regardless of `canView`: the Connect button (revealing
+// an email should require membership, not just roster visibility) and the
+// self-editing controls (FocusField/HiddenToggle — a non-member obviously
+// isn't a row in this roster to begin with, but the gate is explicit
+// below rather than relying on that coincidence).
 //
 // FOCUS ("what they work on"): editable inline, but only on the viewer's
 // OWN card (member.user_id === viewerUserId) — everyone else's shows as
@@ -57,13 +65,24 @@ function MemberCard({
   communityId,
   slug,
   viewerUserId,
+  isMember,
 }: {
   member: MemberRosterEntry;
   communityId: string;
   slug: string;
   viewerUserId: string | null;
+  /** True only for an ACTIVE member of this community — gates Connect and
+   *  the self-editing controls, independent of whether the roster itself
+   *  is visible (see this file's own top comment on `canView` vs
+   *  `isMember`). */
+  isMember: boolean;
 }) {
-  const isSelf = member.user_id === viewerUserId;
+  // `isMember &&` is belt-and-suspenders, not load-bearing on its own: a
+  // non-member viewer's user_id can never actually match a row in this
+  // roster (they aren't a member), but being explicit here means that
+  // stays true even if this component is ever reused somewhere that
+  // invariant doesn't hold.
+  const isSelf = isMember && member.user_id === viewerUserId;
   return (
     <div className="rounded-xl bg-surface-container-low p-4">
       <p className="font-label-md text-label-md text-on-background truncate">
@@ -109,23 +128,31 @@ function MemberCard({
       ) : (
         // Connect reveals this member's email only once clicked — see
         // ConnectButton's own comment on why that's a separate on-demand
-        // read rather than something already in `member`. Never rendered
-        // on the viewer's own card (the isSelf branch above), and only
-        // reachable at all because MembersSection itself already requires
-        // isMember to render any card.
-        <ConnectButton communityId={communityId} memberId={member.member_id} />
+        // read rather than something already in `member`. Gated on
+        // `isMember`, not just "not self": a non-member viewer (an open
+        // community's roster is visible to them, but they aren't a row in
+        // it — see this file's own comment on `canView` vs `isMember`)
+        // gets no Connect button at all — revealing an email requires
+        // actually being a member, not just being able to see the roster.
+        isMember && <ConnectButton communityId={communityId} memberId={member.member_id} />
       )}
     </div>
   );
 }
 
 export default function MembersSection({
+  canView,
   isMember,
   roster,
   communityId,
   slug,
   viewerUserId,
 }: {
+  /** Whether the roster renders at all — true for an active member, and
+   *  ALSO true for a non-member when this community's public_preview is
+   *  'open'. See this file's own top comment on why this is a separate
+   *  question from `isMember`. */
+  canView: boolean;
   isMember: boolean;
   roster: MemberRosterEntry[];
   communityId: string;
@@ -134,7 +161,7 @@ export default function MembersSection({
    *  which card (if any) gets the inline focus editor. */
   viewerUserId: string | null;
 }) {
-  if (!isMember) {
+  if (!canView) {
     return (
       <p className="font-body-md text-body-md text-secondary">
         Join this community to see who&apos;s in it.
@@ -164,6 +191,7 @@ export default function MembersSection({
                   communityId={communityId}
                   slug={slug}
                   viewerUserId={viewerUserId}
+                  isMember={isMember}
                 />
               ))}
             </div>

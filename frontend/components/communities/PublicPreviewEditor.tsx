@@ -70,6 +70,15 @@ export default function PublicPreviewEditor({
                 {PUBLIC_PREVIEW_LABEL[option]}
               </span>
             </label>
+            {option === "open" && (
+              <p className="mt-1 ml-[26px] font-body-sm text-body-sm text-secondary">
+                The feed is visible but not clickable or bookmarkable — a visitor can see
+                what&apos;s there, not act on it. This makes every member&apos;s name,
+                institution, and what they work on here readable by anyone with the link,
+                not just other members. No email is ever shown to a non-member — Connect
+                still requires joining.
+              </p>
+            )}
           </li>
         ))}
       </ul>
