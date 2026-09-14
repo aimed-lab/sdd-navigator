@@ -51,6 +51,7 @@ import {
   COMMUNITY_RESOURCE_TYPES,
   resolveExploreSources,
   type CommunityResourceType,
+  type PublicPreviewLevel,
   type SectionConfig,
 } from "@/lib/communityTypes";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
@@ -85,6 +86,13 @@ export type Community = {
   // source should keep — empty means no career-stage filter (today's
   // behavior). See the same migration and sources/grants_gov.py.
   explore_grant_activity_codes: string[];
+  // What a NON-member sees before joining
+  // (2026-09-18_community_public_preview.sql) — see that migration's own
+  // header and PUBLIC_PREVIEW_LABEL (lib/communityTypes.ts) for the two
+  // values. Read by app/communities/[slug]/page.tsx to decide whether to
+  // fetch/render getCommunityFeedPreview below at all; set by
+  // PublicPreviewEditor.tsx.
+  public_preview: PublicPreviewLevel;
   // Active member count (database/migrations/2026-09-08_community_member_counts.sql's
   // community_member_counts() RPC) — OPTIONAL because only listCommunities()
   // below populates it; getCommunityBySlug/getCommunityById don't (a single
@@ -124,7 +132,7 @@ export async function listCommunities(): Promise<Community[]> {
     supabase
       .from("communities")
       .select(
-        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes"
+        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview"
       )
       .order("name", { ascending: true }),
     supabase.rpc("community_member_counts"),
@@ -304,7 +312,7 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -322,7 +330,7 @@ export async function getCommunityById(id: string): Promise<Community | null> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview")
     .eq("id", id)
     .maybeSingle();
 
@@ -1252,6 +1260,49 @@ export async function updateCommunitySections(
   return { status: "ok" };
 }
 
+export type UpdatePublicPreviewResult = { status: "ok" } | { status: "error"; error: string };
+
+/** What a NON-member sees before joining — admin-only, same
+ *  is_community_admin re-check pattern as updateCommunitySections. Takes
+ *  effect immediately (unlike the Explore feed config): there's no
+ *  separate "Refresh" step here, this just changes which RLS-visible rows
+ *  a non-member's next page load is allowed to read. */
+export async function updateCommunityPublicPreview(
+  communityId: string,
+  level: PublicPreviewLevel
+): Promise<UpdatePublicPreviewResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can change what non-members see." };
+  }
+
+  const { error } = await db
+    .from("communities")
+    .update({ public_preview: level })
+    .eq("id", communityId);
+
+  if (error) {
+    console.error("updateCommunityPublicPreview: update failed", error);
+
+    // Same split as every other write in this file.
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't save this setting — ${error.message}.` };
+    }
+
+    return {
+      status: "error",
+      error:
+        "Couldn't save this setting — this is a server-side problem, not something wrong with what you chose. Check the server log (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+
+  return { status: "ok" };
+}
+
 // ── Announcements ────────────────────────────────────────────────────────
 
 export type Announcement = {
@@ -1768,6 +1819,46 @@ export async function listCommunityFeedItems(communityId: string): Promise<Commu
 
   if (error || !data) return [];
   return data as CommunityFeedItem[];
+}
+
+export type CommunityFeedPreviewItem = { title: string; source: string | null };
+export type CommunityFeedPreview = { count: number; items: CommunityFeedPreviewItem[] };
+
+const FEED_PREVIEW_ITEM_LIMIT = 4;
+
+/** A signed-out-safe preview of the STORED feed for a non-member — the
+ *  SAME community_feed_items table listCommunityFeedItems reads member-
+ *  side (never a separate query, never a separate table), title and
+ *  source only, up to FEED_PREVIEW_ITEM_LIMIT items, plus the TOTAL count
+ *  (unbounded by that limit — Supabase's exact count ignores .limit()).
+ *
+ *  RLS IS THE GATE, NOT THIS FUNCTION. Goes through the anon server client
+ *  — the same one getCommunityBySlug/getCommunityById already use for
+ *  every other public community read — never a service-role client, so
+ *  "Community feed items: public preview select"
+ *  (2026-09-18_community_public_preview.sql) is what actually decides
+ *  whether anything comes back: a community whose public_preview isn't
+ *  'standard' gets {count: 0, items: []} here for exactly the same reason
+ *  a direct forged query would — this function has no special access
+ *  beyond what that policy grants anyone.
+ *
+ *  Degrades to {count: 0, items: []} on any read failure — a preview is a
+ *  nice-to-have on a page whose main job (name, purpose, join) must still
+ *  render regardless. */
+export async function getCommunityFeedPreview(communityId: string): Promise<CommunityFeedPreview> {
+  const supabase = getAnonServerClient();
+  if (!supabase) return { count: 0, items: [] };
+
+  const { data, count, error } = await supabase
+    .from("community_feed_items")
+    .select("title, source", { count: "exact" })
+    .eq("community_id", communityId)
+    .order("published_at", { ascending: false, nullsFirst: false })
+    .order("fetched_at", { ascending: false })
+    .limit(FEED_PREVIEW_ITEM_LIMIT);
+
+  if (error || !data) return { count: 0, items: [] };
+  return { count: count ?? data.length, items: data as CommunityFeedPreviewItem[] };
 }
 
 /** Why a configured source ended up with zero stored items: "empty" means

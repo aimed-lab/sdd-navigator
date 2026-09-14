@@ -30,6 +30,7 @@ import {
   updateCommunityMemberDisplayName,
   updateCommunityMemberFocus,
   updateCommunityMemberHidden,
+  updateCommunityPublicPreview,
   updateCommunityResource,
   updateCommunitySections,
   updateMyCommunityFocus,
@@ -37,7 +38,7 @@ import {
   type CommunityRole,
   type SourceOutcome,
 } from "@/lib/server/communities";
-import type { SectionConfig } from "@/lib/communityTypes";
+import type { PublicPreviewLevel, SectionConfig } from "@/lib/communityTypes";
 
 export type ActionResult = { ok: true; slug: string } | { ok: false; error: string };
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -563,6 +564,31 @@ export async function updateCommunitySectionsAction(
     }
     console.error("updateCommunitySectionsAction failed", e);
     return { ok: false, error: "Couldn't save sections. Please try again." };
+  }
+}
+
+/** What a non-member sees before joining — admin-only, same pattern as
+ *  updateCommunitySectionsAction. Takes effect immediately (see
+ *  updateCommunityPublicPreview's own comment). */
+export async function updateCommunityPublicPreviewAction(
+  communityId: string,
+  level: PublicPreviewLevel,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateCommunityPublicPreview(communityId, level);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("updateCommunityPublicPreviewAction failed", e);
+    return { ok: false, error: "Couldn't save this setting. Please try again." };
   }
 }
 

@@ -8,6 +8,7 @@ import { notFound } from "next/navigation";
 import {
   claimPendingCommunityMemberships,
   getCommunityBySlug,
+  getCommunityFeedPreview,
   getCommunityStats,
   getMembership,
   listAnnouncements,
@@ -39,6 +40,8 @@ import LeaveButton from "@/components/communities/LeaveButton";
 import ManageCommunityCard from "@/components/communities/ManageCommunityCard";
 import SectionsEditor from "@/components/communities/SectionsEditor";
 import ExploreFeedEditor from "@/components/communities/ExploreFeedEditor";
+import PublicPreviewEditor from "@/components/communities/PublicPreviewEditor";
+import CommunityPublicPreview from "@/components/communities/CommunityPublicPreview";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -110,6 +113,25 @@ export default async function CommunityDetailPage({
   // roster.length in the first place (memberRoster is [] for them, not a
   // smaller true count).
   const membersSectionCount = isMember ? memberRoster.length : stats.memberCount;
+
+  // What a non-member sees before joining
+  // (2026-09-18_community_public_preview.sql) — 'standard' (the default)
+  // shows the member count above plus a preview of the stored feed;
+  // 'minimal' shows neither, not even the count badge on the Members
+  // section below (see that section's own `count` prop) — "nothing beyond
+  // its name" means nothing, not "the standard preview minus the feed".
+  const showPublicPreview = !isMember && community.public_preview === "standard";
+
+  // getCommunityFeedPreview goes through the SAME community_feed_items
+  // table listCommunityFeedItems reads below, via RLS
+  // ("Community feed items: public preview select") rather than a
+  // service-role bypass — see that function's own comment. Only fetched
+  // when it'll actually be shown, same "avoid firing a read for a viewer
+  // who can't see anything back" reasoning as every other member-gated
+  // fetch on this page.
+  const feedPreview = showPublicPreview
+    ? await getCommunityFeedPreview(community.id)
+    : { count: 0, items: [] };
 
   // Announcements — same "only fetch when isMember" reasoning as
   // memberRoster above; a non-member's fetch would return [] anyway
@@ -202,6 +224,16 @@ export default async function CommunityDetailPage({
           </div>
         </section>
 
+        {/* The pitch for a non-member — see CommunityPublicPreview's own
+            comment on why this sits here (right under the header, before
+            anyone has to click into a section) rather than as one more
+            CollapsibleSection. Absent entirely, not an empty version of
+            itself, when public_preview is 'minimal' or the viewer is
+            already a member (who sees the real sections below instead). */}
+        {showPublicPreview && (
+          <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />
+        )}
+
         {/* Enabled sections, in the configured order (default: every
             section, projects first — the same position it's always
             rendered in), each a card (CollapsibleSection — glass-panel,
@@ -260,7 +292,10 @@ export default async function CommunityDetailPage({
                   <CollapsibleSection
                     key={s.key}
                     title={SECTION_LABEL[s.key]}
-                    count={membersSectionCount}
+                    // A non-member's count badge is gated by public_preview
+                    // too — 'minimal' means "nothing beyond its name," which
+                    // includes this badge, not just the block above.
+                    count={isMember || showPublicPreview ? membersSectionCount : undefined}
                   >
                     <MembersSection
                       isMember={isMember}
@@ -331,6 +366,12 @@ export default async function CommunityDetailPage({
               communityId={community.id}
               slug={community.slug}
               sections={orderedSections}
+            />
+
+            <PublicPreviewEditor
+              communityId={community.id}
+              slug={community.slug}
+              level={community.public_preview}
             />
 
             <ExploreFeedEditor
