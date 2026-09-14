@@ -1,0 +1,51 @@
+-- =============================================================================
+-- Migration: community_feed_preview_anon_grant  (2026-09-19)
+-- =============================================================================
+-- FIXES A REAL BUG, CONFIRMED LIVE, NOT A THEORY: an anonymous read against
+-- community_feed_items — the exact query getCommunityFeedPreview()
+-- (lib/server/communities.ts) runs — was reproduced directly against the
+-- live database with the anon key and returned:
+--
+--   HTTP 401, code 42501, "permission denied for function is_community_member"
+--
+-- ROOT CAUSE: community_feed_items has TWO SELECT policies now —
+-- "Community feed items: member select" (2026-09-06), whose USING clause
+-- calls public.is_community_member(...), and
+-- "Community feed items: public preview select" (2026-09-18), the new one,
+-- which does not. RLS SELECT policies on one table are evaluated as an OR,
+-- but Postgres still has to EVALUATE each policy's USING expression against
+-- the calling role to decide the OR — it does not skip a sibling policy's
+-- expression just because a different policy might independently grant
+-- access. is_community_member's EXECUTE grant was deliberately revoked
+-- from anon in 2026-08-21_community_join.sql (reasoned, at the time, that
+-- "neither is ever called on behalf of a signed-out request" — true then,
+-- no longer true now that a second, anon-reachable policy sits on the same
+-- table). So the moment an anon caller's query reaches
+-- community_feed_items at all, evaluating the OLD policy's expression
+-- (not the new one) hits the revoked grant and the WHOLE query errors —
+-- the new policy's own logic never gets a chance to run, correct as it is.
+--
+-- This is why the preview silently disappeared rather than showing
+-- partial/wrong data: getCommunityFeedPreview() catches the resulting
+-- `error` and degrades to {count: 0, items: []} (a deliberate "a preview
+-- is a nice-to-have, never worth failing the page over" choice) — which
+-- reads, from the page, identically to "this community's feed is
+-- genuinely empty." It was never a matter of the new policy not matching,
+-- or the component not rendering; the request never got far enough to
+-- reach either.
+--
+-- FIX: re-grant anon EXECUTE on is_community_member. Safe to reverse
+-- 2026-08-21's revoke now: the function is SECURITY DEFINER and returns
+-- ONLY a boolean ("is this uid a member of this community") — it exposes
+-- no row data by itself, and is the exact same grant
+-- 2026-08-20_communities.sql originally shipped with before 2026-08-21
+-- tightened it. The new anon-facing use case (a non-member's feed preview,
+-- sharing a table with a member-only policy) is exactly the case that
+-- grant needs to exist for again.
+--
+-- Run once, top to bottom, in the Supabase SQL editor. Idempotent (a GRANT
+-- is safe to re-run). NOT run against any database as part of writing this
+-- file.
+-- =============================================================================
+
+GRANT EXECUTE ON FUNCTION public.is_community_member(UUID, UUID) TO anon;

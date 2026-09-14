@@ -261,9 +261,23 @@ export default async function CommunityDetailPage({
             they describe, not scattered into this switch. Projects doesn't
             need any of that: its action is a plain link, so the page
             (server) builds it and hands it straight to CollapsibleSection's
-            `action` prop here. */}
+            `action` prop here.
+
+            NON-MEMBER FILTER: a signed-out visitor (or any non-member) is
+            member-gated OUT of every section here except "showcase" —
+            projects, members, announcements, resources, and explore all
+            resolve to an empty fetch for them (their own RLS policies, not
+            a check here), so rendering those headers just shows a
+            collapsed disclosure with nothing behind it: something to
+            click that goes nowhere, telling a visitor the community is
+            emptier than it is. "showcase" is the one exception because its
+            own read (listShowcaseByCommunity) is deliberately public
+            regardless of membership — see that fetch's own comment above.
+            The public-preview card above is what replaces everything this
+            filter removes. */}
         {orderedSections
           .filter((s) => s.enabled)
+          .filter((s) => isMember || s.key === "showcase")
           .map((s) => {
             switch (s.key) {
               case "projects":
@@ -288,14 +302,18 @@ export default async function CommunityDetailPage({
                   </CollapsibleSection>
                 );
               case "members":
+                // This case is unreachable for a non-member now — the
+                // filter above already drops every section but "showcase"
+                // for them — so `count` no longer needs its own
+                // isMember/showPublicPreview branch; membersSectionCount
+                // itself already falls back to the public stat only for a
+                // non-member (see its own comment), which never reaches
+                // here anymore anyway.
                 return (
                   <CollapsibleSection
                     key={s.key}
                     title={SECTION_LABEL[s.key]}
-                    // A non-member's count badge is gated by public_preview
-                    // too — 'minimal' means "nothing beyond its name," which
-                    // includes this badge, not just the block above.
-                    count={isMember || showPublicPreview ? membersSectionCount : undefined}
+                    count={membersSectionCount}
                   >
                     <MembersSection
                       isMember={isMember}
