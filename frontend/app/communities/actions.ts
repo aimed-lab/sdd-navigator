@@ -570,17 +570,28 @@ export async function updateCommunitySectionsAction(
 
 /** Save which sources/topics drive this community's feed — admin-only, same
  *  pattern as updateCommunitySectionsAction. Does not itself run a refresh;
- *  see refreshCommunityFeedAction below for that. */
+ *  see refreshCommunityFeedAction below for that.
+ *
+ *  `paperScope`/`grantActivityCodes` are the audience-scope fields — see
+ *  updateCommunityExploreConfig's own comment. */
 export async function updateCommunityExploreConfigAction(
   communityId: string,
   sources: string[],
   topics: string[],
-  slug: string
+  slug: string,
+  paperScope: "all" | "clinical" = "all",
+  grantActivityCodes: string[] = []
 ): Promise<SimpleActionResult> {
   if (!communityId) return { ok: false, error: "Missing community." };
 
   try {
-    const result = await updateCommunityExploreConfig(communityId, sources, topics);
+    const result = await updateCommunityExploreConfig(
+      communityId,
+      sources,
+      topics,
+      paperScope,
+      grantActivityCodes
+    );
     if (result.status !== "ok") return { ok: false, error: result.error };
 
     revalidatePath(`/communities/${slug}`);

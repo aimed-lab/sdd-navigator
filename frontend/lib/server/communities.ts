@@ -75,6 +75,16 @@ export type Community = {
   explore_sources: string[];
   explore_topics: string[];
   explore_refreshed_at: string | null;
+  // Audience scope for the feed (2026-09-17_community_feed_audience_scope.sql)
+  // — see that migration's own header. 'all' (default) is today's
+  // unrestricted PubMed search; 'clinical' narrows it to health-services/
+  // clinical literature. Read by refreshCommunityFeed, set by
+  // ExploreFeedEditor.tsx.
+  explore_paper_scope: "all" | "clinical";
+  // NIH activity codes (e.g. ["K99","R00","K23","K01","R03"]) the Grants
+  // source should keep — empty means no career-stage filter (today's
+  // behavior). See the same migration and sources/grants_gov.py.
+  explore_grant_activity_codes: string[];
   // Active member count (database/migrations/2026-09-08_community_member_counts.sql's
   // community_member_counts() RPC) — OPTIONAL because only listCommunities()
   // below populates it; getCommunityBySlug/getCommunityById don't (a single
@@ -114,7 +124,7 @@ export async function listCommunities(): Promise<Community[]> {
     supabase
       .from("communities")
       .select(
-        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at"
+        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes"
       )
       .order("name", { ascending: true }),
     supabase.rpc("community_member_counts"),
@@ -294,7 +304,7 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -312,7 +322,7 @@ export async function getCommunityById(id: string): Promise<Community | null> {
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes")
     .eq("id", id)
     .maybeSingle();
 
@@ -1651,11 +1661,17 @@ export type UpdateExploreConfigResult = { status: "ok" } | { status: "error"; er
  *  updateCommunitySections. Does NOT run a refresh itself; a saved config
  *  only takes effect the next time an admin clicks Refresh (see
  *  refreshCommunityFeed below) — "stored, not live" applies to the config
- *  too, not just the results it produces. */
+ *  too, not just the results it produces.
+ *
+ *  `paperScope`/`grantActivityCodes` are the audience-scope fields
+ *  (2026-09-17_community_feed_audience_scope.sql) — see that migration's
+ *  own header on why these live on the community, not the topic. */
 export async function updateCommunityExploreConfig(
   communityId: string,
   sources: string[],
-  topics: string[]
+  topics: string[],
+  paperScope: "all" | "clinical" = "all",
+  grantActivityCodes: string[] = []
 ): Promise<UpdateExploreConfigResult> {
   const { db } = await requireCurrentUser();
 
@@ -1666,10 +1682,18 @@ export async function updateCommunityExploreConfig(
 
   const cleanSources = resolveExploreSources(sources);
   const cleanTopics = Array.from(new Set(topics.map((t) => t.trim()).filter(Boolean)));
+  const cleanActivityCodes = Array.from(
+    new Set(grantActivityCodes.map((c) => c.trim().toUpperCase()).filter(Boolean))
+  );
 
   const { error } = await db
     .from("communities")
-    .update({ explore_sources: cleanSources, explore_topics: cleanTopics })
+    .update({
+      explore_sources: cleanSources,
+      explore_topics: cleanTopics,
+      explore_paper_scope: paperScope === "clinical" ? "clinical" : "all",
+      explore_grant_activity_codes: cleanActivityCodes,
+    })
     .eq("id", communityId);
 
   if (error) {
@@ -1827,7 +1851,7 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
 
   const { data: config, error: readError } = await db
     .from("communities")
-    .select("explore_sources, explore_topics")
+    .select("explore_sources, explore_topics, explore_paper_scope, explore_grant_activity_codes")
     .eq("id", communityId)
     .maybeSingle();
 
@@ -1838,6 +1862,14 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
 
   const sources = resolveExploreSources(config.explore_sources as string[] | null);
   const topics = ((config.explore_topics as string[] | null) ?? []).map((t) => t.trim()).filter(Boolean);
+  // Audience-scope options — forwarded to the backend as `options`, read
+  // only by kind="paper"/"grant" there (see server.py's _SOURCE_DISPATCH).
+  // Built once here, reused for every (source, topic) fetch below.
+  const paperScope = (config.explore_paper_scope as string | null) ?? "all";
+  const grantActivityCodes = (config.explore_grant_activity_codes as string[] | null) ?? [];
+  const sourceOptions: Record<string, unknown> = {};
+  if (paperScope === "clinical") sourceOptions.clinical_scope = true;
+  if (grantActivityCodes.length > 0) sourceOptions.activity_codes = grantActivityCodes;
 
   type FeedRow = {
     community_id: string;
@@ -1861,7 +1893,12 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
           const res = await fetch(`${EXPLORE_API_URL}/api/explore-source`, {
             method: "POST",
             headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({ kind, query: topic, limit: FEED_PER_TOPIC_LIMIT }),
+            body: JSON.stringify({
+              kind,
+              query: topic,
+              limit: FEED_PER_TOPIC_LIMIT,
+              options: sourceOptions,
+            }),
           });
 
           // A non-2xx here (401 from a missing/wrong EXPLORE_API_TOKEN,

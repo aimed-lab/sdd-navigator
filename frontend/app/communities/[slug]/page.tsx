@@ -339,6 +339,8 @@ export default async function CommunityDetailPage({
               sources={resolveExploreSources(community.explore_sources)}
               topics={community.explore_topics}
               refreshedAt={community.explore_refreshed_at}
+              paperScope={community.explore_paper_scope}
+              grantActivityCodes={community.explore_grant_activity_codes}
             />
 
             <div className="flex flex-col gap-3 border-t border-outline-variant/20 pt-8">

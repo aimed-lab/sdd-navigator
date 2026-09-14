@@ -41,16 +41,29 @@ export default function ExploreFeedEditor({
   sources,
   topics,
   refreshedAt,
+  paperScope,
+  grantActivityCodes,
 }: {
   communityId: string;
   slug: string;
   sources: ExploreSourceKind[];
   topics: string[];
   refreshedAt: string | null;
+  /** 'all' (default) or 'clinical' — narrows the Papers source to health-
+   *  services/clinical literature instead of unrestricted biomedical text
+   *  search. See sources/pubmed.py's own comment for what this actually
+   *  does; a bare keyword topic can't express it, which is why this is a
+   *  separate control rather than something to write into Topics. */
+  paperScope: "all" | "clinical";
+  /** NIH activity codes (e.g. ["K99","R00","K23","K01"]) the Grants source
+   *  should keep — empty means no career-stage filter. */
+  grantActivityCodes: string[];
 }) {
   const router = useRouter();
   const [localSources, setLocalSources] = useState<ExploreSourceKind[]>(sources);
   const [topicsText, setTopicsText] = useState(topics.join("\n"));
+  const [localPaperScope, setLocalPaperScope] = useState<"all" | "clinical">(paperScope);
+  const [activityCodesText, setActivityCodesText] = useState(grantActivityCodes.join(", "));
   const [dirty, setDirty] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -85,7 +98,18 @@ export default function ExploreFeedEditor({
       .split("\n")
       .map((t) => t.trim())
       .filter(Boolean);
-    const res = await updateCommunityExploreConfigAction(communityId, localSources, topicsList, slug);
+    const activityCodesList = activityCodesText
+      .split(/[,\n]/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const res = await updateCommunityExploreConfigAction(
+      communityId,
+      localSources,
+      topicsList,
+      slug,
+      localPaperScope,
+      activityCodesList
+    );
     setSaving(false);
     if (res.ok) {
       setSaved(true);
@@ -161,6 +185,50 @@ export default function ExploreFeedEditor({
           }}
           rows={3}
           placeholder={"e.g. PHGDH\nglioblastoma metabolism"}
+          className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary/40"
+        />
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={localPaperScope === "clinical"}
+            onChange={(e) => {
+              setLocalPaperScope(e.target.checked ? "clinical" : "all");
+              setDirty(true);
+              setSaved(false);
+            }}
+            className="w-4 h-4 accent-primary cursor-pointer"
+          />
+          <span className="font-body-sm text-body-sm text-on-background">
+            Prioritize clinical / health-services literature over basic science
+          </span>
+        </label>
+        <p className="font-body-sm text-body-sm text-secondary mt-1 ml-6">
+          For a topic like the same disease name, a plain keyword search can&apos;t tell a
+          mechanism paper from a health-services one — this narrows Papers to
+          clinical/health-services literature specifically.
+        </p>
+      </div>
+
+      <div>
+        <label className="font-label-sm text-label-sm text-on-background mb-2 block">
+          Grant career stage (optional)
+        </label>
+        <p className="font-body-sm text-body-sm text-secondary mb-2">
+          NIH activity codes this community is eligible for (e.g. K99, R00, K23, K01, R03).
+          Comma-separated. Leave blank to show every stage, including R01/U01 — the default.
+        </p>
+        <input
+          type="text"
+          value={activityCodesText}
+          onChange={(e) => {
+            setActivityCodesText(e.target.value);
+            setDirty(true);
+            setSaved(false);
+          }}
+          placeholder="e.g. K99, R00, K23, K01, R03"
           className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
       </div>

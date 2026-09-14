@@ -112,15 +112,19 @@ def _rank_merge(items: list[Item]) -> list[Item]:
 
 
 async def search_papers_async(
-    query: str, limit: int = 20, since_year: int | None = None
+    query: str, limit: int = 20, since_year: int | None = None, clinical_scope: bool = False
 ) -> list[Item]:
     """Cached + single-flighted wrapper around the fan-out (see _fetch).
 
     `since_year`, when set, is folded into the cache key: a date-filtered
     search and an unfiltered one for the same query text are genuinely
-    different results and must never share a cache entry.
+    different results and must never share a cache entry. Same for
+    `clinical_scope` (see sources/pubmed.py's own comment on what it does
+    and why it's opt-in, not a ranking tweak) — a clinically-scoped search
+    and an unscoped one are different PubMed queries with different hits,
+    not two views of the same fetch.
     """
-    ranked = await _ranked_pool(query, limit, since_year)
+    ranked = await _ranked_pool(query, limit, since_year, clinical_scope)
     return _order_and_cap(ranked, limit, since_year)
 
 
@@ -144,15 +148,17 @@ async def search_papers_dual_async(
     return latest, key
 
 
-async def _ranked_pool(query: str, limit: int, since_year: int | None) -> list[Item]:
+async def _ranked_pool(
+    query: str, limit: int, since_year: int | None, clinical_scope: bool = False
+) -> list[Item]:
     """Cached + single-flighted: the merged/deduped/WINNER-ranked pool for
     `query`, UNCAPPED and in WINNER's own order — the shared input both
     search_papers_async (date view) and search_papers_dual_async (date +
     WINNER views) derive their final capped lists from, with exactly one
-    underlying fetch per (query, limit, since_year)."""
-    key = normalize_key(f"papers:{limit}:{since_year or ''}", query)
+    underlying fetch per (query, limit, since_year, clinical_scope)."""
+    key = normalize_key(f"papers:{limit}:{since_year or ''}:{'clin' if clinical_scope else ''}", query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit, since_year), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit, since_year, clinical_scope), TTL_SOURCE, STALE_SOURCE
     )
 
 
@@ -176,7 +182,9 @@ def _order_and_cap(ranked: list[Item], limit: int, since_year: int | None) -> li
     return ranked[:limit]
 
 
-async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[Item]:
+async def _fetch(
+    query: str, limit: int, since_year: int | None = None, clinical_scope: bool = False
+) -> list[Item]:
     """Async core: fan out, isolate failures, merge, dedupe, sort, WINNER-rank.
 
     Returns the ranked pool UNCAPPED, in WINNER's own order — capping/final
@@ -184,6 +192,13 @@ async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[
     slice for the WINNER view — see search_papers_async/search_papers_dual_async).
     `limit` still shapes the fetch (see fetch_cap below) even though it's no
     longer applied as a final cap here.
+
+    `clinical_scope` only ever reaches PubMed (sources/pubmed.py's own
+    comment on why) — OpenAlex and Crossref are fetched unscoped. PubMed
+    dominates the hit volume for a clinical/health-services topic in
+    practice, so this is where the fix earns its keep; OpenAlex/Crossref
+    scoping is a known, not-yet-closed gap, not an oversight — see this
+    file's PR notes / the diagnosis that motivated this parameter.
     """
     # Unconditional default: fetch a much larger per-source pool (see
     # _DEFAULT_POOL_SIZE) so a date-sort afterwards has recent candidates to
@@ -191,7 +206,7 @@ async def _fetch(query: str, limit: int, since_year: int | None = None) -> list[
     fetch_cap = _DEFAULT_POOL_SIZE if since_year is None else limit
     async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
         results = await asyncio.gather(
-            fetch_pubmed(client, query, fetch_cap, since_year=since_year),
+            fetch_pubmed(client, query, fetch_cap, since_year=since_year, clinical_scope=clinical_scope),
             # Relevance, not recency: a topic's important papers cite each other,
             # which is what gives WINNER a graph to rank (a recency-sorted set
             # has ~zero intra-set citations). search_news keeps the recency sort.
@@ -429,11 +444,18 @@ async def _multi_selected(
     return [item for item in ranked_global if item.dedupe_key in used]
 
 
-def search_papers(query: str, limit: int = 20, since_year: int | None = None) -> list[Item]:
+def search_papers(
+    query: str, limit: int = 20, since_year: int | None = None, clinical_scope: bool = False
+) -> list[Item]:
     """Synchronous entry point (the registered tool signature).
 
     Search PubMed, OpenAlex and Crossref for papers relevant to `query` and return
     up to `limit` deduped Items, best-ranked first. `since_year`, when given,
     restricts to papers published on/after that year (see sources/*.py).
+    `clinical_scope`, when True, narrows PubMed to health-services/clinical
+    literature (MeSH Major Topic + publication-type qualifiers) instead of
+    unrestricted biomedical text search — see sources/pubmed.py's own
+    comment for what this does and why it's a query-construction fix, not a
+    ranking tweak.
     """
-    return asyncio.run(search_papers_async(query, limit, since_year))
+    return asyncio.run(search_papers_async(query, limit, since_year, clinical_scope))

@@ -825,18 +825,39 @@ async def github_repo_http(request):
 # rather than handing everything to explore()'s LLM router. Keys match
 # ExploreItem.kind (frontend/types/explore.ts) exactly, "episode" (podcast)
 # included, so the caller never has to translate.
+# Every dispatch entry takes (query, limit, options) uniformly — `options`
+# is whatever extra dict the caller sent, {} when it sent none. Only
+# "paper" and "grant" currently read anything out of it (clinical_scope,
+# activity_codes — see explore_source_http's own docstring); every other
+# entry ignores it, same as before this parameter existed.
 _SOURCE_DISPATCH = {
-    "paper": lambda query, limit: search_papers_async(query, limit),
-    "news": lambda query, limit: search_news_async(query, limit),
-    "trial": lambda query, limit: search_trials_async(query, limit),
-    "grant": lambda query, limit: search_grants_async(query, limit),
-    "tool": lambda query, limit: search_tools_async(query, limit),
-    "dataset": lambda query, limit: search_datasets_async(query, limit),
-    "geneset": lambda query, limit: search_pager_async(query, limit),
-    "compound": lambda query, limit: search_chembl_async(query, limit),
-    "target": lambda query, limit: search_opentargets_async(query, limit),
-    "episode": lambda query, limit: asyncio.to_thread(_search_wiki, query, limit),
+    "paper": lambda query, limit, options: search_papers_async(
+        query, limit, clinical_scope=bool(options.get("clinical_scope"))
+    ),
+    "news": lambda query, limit, options: search_news_async(query, limit),
+    "trial": lambda query, limit, options: search_trials_async(query, limit),
+    "grant": lambda query, limit, options: search_grants_async(
+        query, limit, activity_codes=_activity_codes_option(options)
+    ),
+    "tool": lambda query, limit, options: search_tools_async(query, limit),
+    "dataset": lambda query, limit, options: search_datasets_async(query, limit),
+    "geneset": lambda query, limit, options: search_pager_async(query, limit),
+    "compound": lambda query, limit, options: search_chembl_async(query, limit),
+    "target": lambda query, limit, options: search_opentargets_async(query, limit),
+    "episode": lambda query, limit, options: asyncio.to_thread(_search_wiki, query, limit),
 }
+
+
+def _activity_codes_option(options: dict) -> tuple[str, ...] | None:
+    """`options["activity_codes"]` -> a tuple of non-empty strings, or None
+    when absent/empty — search_grants_async treats None and an empty tuple
+    identically (no filter), but a tuple is what its cache-key builder
+    expects to `sorted()`, not an arbitrary JSON value from the request."""
+    raw = options.get("activity_codes")
+    if not isinstance(raw, list):
+        return None
+    codes = tuple(str(c).strip() for c in raw if str(c).strip())
+    return codes or None
 
 
 @mcp.custom_route("/api/explore-source", methods=["POST"])
@@ -851,8 +872,24 @@ async def explore_source_http(request):
 
       POST { "kind": "paper"|"news"|"trial"|"grant"|"tool"|"dataset"|
                      "geneset"|"compound"|"target"|"episode",
-             "query": "<text>", "limit": <n> }
+             "query": "<text>", "limit": <n>,
+             "options": {
+                 "clinical_scope": <bool>,     # kind="paper" only
+                 "activity_codes": [<str>...]  # kind="grant" only
+             } }
       -> { kind, query, items: [Item, ...] }
+
+    `options` is entirely OPTIONAL and additive — every existing caller
+    that never sends it gets byte-for-byte the same behavior as before
+    these two fields existed (see _SOURCE_DISPATCH's own comment: every
+    kind but "paper"/"grant" ignores it outright, and those two treat a
+    missing/false/empty value as "no scoping", same as today). Added for
+    the community feed (lib/server/communities.ts's refreshCommunityFeed) —
+    an audience of career-development-award applicants in health services
+    research needs PubMed narrowed to clinical/health-services literature
+    and Grants.gov narrowed to K-series-eligible opportunities, neither of
+    which a bare keyword topic can express; see sources/pubmed.py and
+    sources/grants_gov.py for what each option actually does.
 
     Never 500s the caller: an unknown kind, empty query, or upstream failure
     all return the empty-items shape with HTTP 200, same resilience posture
@@ -870,6 +907,8 @@ async def explore_source_http(request):
         limit = max(1, min(int(raw_limit), MAX_LIMIT if kind != "episode" else MAX_WIKI_LIMIT))
     except (TypeError, ValueError):
         limit = 20
+    raw_options = body.get("options") if isinstance(body, dict) else None
+    options = raw_options if isinstance(raw_options, dict) else {}
 
     fn = _SOURCE_DISPATCH.get(kind)
     if fn is None:
@@ -878,7 +917,7 @@ async def explore_source_http(request):
         return JSONResponse({"kind": kind, "query": query, "items": []})
 
     try:
-        items = await fn(query, limit)
+        items = await fn(query, limit, options)
         return JSONResponse(
             {"kind": kind, "query": query, "items": trim_items([i.model_dump() for i in items])}
         )
