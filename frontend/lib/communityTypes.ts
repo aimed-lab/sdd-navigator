@@ -62,21 +62,46 @@ export const PUBLIC_PREVIEW_LABEL: Record<PublicPreviewLevel, string> = {
  *  editor (sections IS NULL) shows it in exactly the same place it always
  *  has. */
 // Resource types for the Resources section
-// (database/migrations/2026-09-03_community_resources.sql). Split out here
-// rather than living only in lib/server/communities.ts for the same reason
-// as everything else in this file: a client component (ResourcesSection's
-// type dropdown) needs COMMUNITY_RESOURCE_TYPES as a VALUE, and any
-// non-type-only import from lib/server/communities.ts drags in
-// supabaseServer.ts -> supabaseRoute.ts -> next/headers, which breaks the
-// client bundle. lib/server/communities.ts imports these from here rather
-// than redeclaring them, so there is exactly one list to keep in sync with
-// the DB's CHECK constraint.
-export type CommunityResourceType = "tool" | "paper" | "dataset" | "link" | "podcast" | "other";
+// (database/migrations/2026-09-03_community_resources.sql, extended by
+// database/migrations/2026-09-22_community_resource_types_expand.sql).
+// Split out here rather than living only in lib/server/communities.ts for
+// the same reason as everything else in this file: a client component
+// (ResourcesSection's type dropdown) needs COMMUNITY_RESOURCE_TYPES as a
+// VALUE, and any non-type-only import from lib/server/communities.ts drags
+// in supabaseServer.ts -> supabaseRoute.ts -> next/headers, which breaks
+// the client bundle. lib/server/communities.ts imports these from here
+// rather than redeclaring them, so there is exactly one list to keep in
+// sync with the DB's CHECK constraint.
+//
+// slides/notes/folder/template were added after the original six (tool,
+// paper, dataset, link, podcast, other) turned out to skew toward a drug
+// discovery reading list — a session deck or a meeting-notes doc had
+// nowhere to go but "other". ORDER here is also the grouping order
+// ResourcesSection renders in (TYPE_ORDER = this array) — the four new
+// ones are placed next to the existing type each is closest to in kind
+// (slides next to paper/dataset; notes and folder next to tool/link),
+// not appended at the end, so the section reads as one coherent list
+// rather than "the original six, then whatever came later".
+export type CommunityResourceType =
+  | "tool"
+  | "paper"
+  | "dataset"
+  | "slides"
+  | "notes"
+  | "folder"
+  | "template"
+  | "link"
+  | "podcast"
+  | "other";
 
 export const COMMUNITY_RESOURCE_TYPES: CommunityResourceType[] = [
   "tool",
   "paper",
   "dataset",
+  "slides",
+  "notes",
+  "folder",
+  "template",
   "link",
   "podcast",
   "other",

@@ -71,70 +71,86 @@ const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024;
 const RESOURCE_FILE_ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
-/** Attach/remove files on one resource — admin-only, embedded in
- *  ResourceForm. Only rendered once a resourceId exists: for "Add
- *  resource", that means only after the text fields have been saved once
- *  (a resource is created in one shot, not as a lazy draft the way a
- *  Promote article is — see ResourceForm's own comment); for "Edit", the
- *  resourceId is there from the start, so this appears immediately.
- *  Mirrors components/promote/MediaUploader.tsx's upload/remove logic
- *  (same accept list, same 50 MB cap, same client-side pre-check before the
- *  round trip), simplified since there's no lazy-id resolution to do here. */
-function ResourceFileUploader({
-  communityId,
-  resourceId,
-  initialFiles,
+/** The files field inside ResourceForm — a slim "Add a file" trigger, not
+ *  a large dropzone, so the form stays compact for the common title-only
+ *  case (see ResourceForm's own comment on why files are picked up front
+ *  now, not uploaded eagerly). Two kinds of rows can show once something's
+ *  attached:
+ *   - EXISTING files (only possible when editing) — already uploaded,
+ *     already have a signed url; Remove here calls
+ *     removeCommunityResourceFileAction immediately, same as any other
+ *     destructive action elsewhere in this app that doesn't get its own
+ *     confirm dialog.
+ *   - PENDING files — chosen but not yet uploaded, held as plain File
+ *     objects in the parent's state; Remove here is purely local (splice
+ *     out of the array), no network call, since nothing has been sent yet.
+ *  Validates size/type on pick (the bucket's own limits are the real gate,
+ *  same belt-and-suspenders posture as MediaUploader.tsx). */
+function ResourceFilesField({
+  pendingFiles,
+  onAddPending,
+  onRemovePending,
+  existingFiles,
+  onRemoveExisting,
+  removingExistingId,
 }: {
-  communityId: string;
-  resourceId: string;
-  initialFiles: CommunityResourceFile[];
+  pendingFiles: File[];
+  onAddPending: (files: File[]) => void;
+  onRemovePending: (index: number) => void;
+  existingFiles: CommunityResourceFile[];
+  onRemoveExisting: (fileId: string) => void;
+  removingExistingId: string | null;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [files, setFiles] = useState<CommunityResourceFile[]>(initialFiles);
-  const [uploading, setUploading] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
 
-  const uploadFile = async (file: File) => {
-    setFileError(null);
-    if (file.size > MAX_RESOURCE_FILE_BYTES) {
-      setFileError(`"${file.name}" is over 50 MB.`);
+  const pick = (fileList: FileList | null) => {
+    setPickError(null);
+    const picked = Array.from(fileList ?? []);
+    const tooBig = picked.find((f) => f.size > MAX_RESOURCE_FILE_BYTES);
+    if (tooBig) {
+      setPickError(`"${tooBig.name}" is over 50 MB.`);
       return;
     }
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.set("communityId", communityId);
-      fd.set("resourceId", resourceId);
-      fd.set("file", file);
-      const res = await addCommunityResourceFileAction(fd);
-      if (res.ok) setFiles((f) => [...f, res.file]);
-      else setFileError(res.error);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const uploadFiles = async (fileList: FileList | null) => {
-    for (const file of Array.from(fileList ?? [])) await uploadFile(file);
+    if (picked.length > 0) onAddPending(picked);
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const removeFile = async (fileId: string) => {
-    setFileError(null);
-    const res = await removeCommunityResourceFileAction(communityId, resourceId, fileId);
-    if (res.ok) setFiles((f) => f.filter((x) => x.id !== fileId));
-    else setFileError(res.error);
-  };
+  const hasAny = existingFiles.length > 0 || pendingFiles.length > 0;
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="font-label-sm text-label-sm text-secondary">
-        Files — PNG, JPEG, WebP, GIF, PDF or PPTX, up to 50 MB each.
-      </span>
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-label-sm text-label-sm text-secondary">
+          Files (optional) — PNG, JPEG, WebP, GIF, PDF or PPTX, up to 50 MB each.
+        </span>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="shrink-0 inline-flex items-center gap-1 font-label-sm text-label-sm text-primary hover:underline"
+        >
+          <span className="material-symbols-outlined text-base">attach_file</span>
+          Add a file
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept={RESOURCE_FILE_ACCEPT}
+          multiple
+          onChange={(e) => pick(e.target.files)}
+          className="sr-only"
+        />
+      </div>
 
-      {files.length > 0 && (
+      {pickError && (
+        <p className="font-body-sm text-body-sm text-error" role="alert">
+          {pickError}
+        </p>
+      )}
+
+      {hasAny && (
         <ul className="space-y-1.5">
-          {files.map((f) => (
+          {existingFiles.map((f) => (
             <li
               key={f.id}
               className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2"
@@ -152,7 +168,32 @@ function ResourceFileUploader({
               </span>
               <button
                 type="button"
-                onClick={() => removeFile(f.id)}
+                onClick={() => onRemoveExisting(f.id)}
+                disabled={removingExistingId === f.id}
+                className="shrink-0 font-label-sm text-label-sm text-error hover:underline disabled:opacity-50"
+              >
+                {removingExistingId === f.id ? "Removing…" : "Remove"}
+              </button>
+            </li>
+          ))}
+          {pendingFiles.map((f, i) => (
+            <li
+              key={`pending-${i}-${f.name}`}
+              className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-outline-variant/50 bg-surface-container-lowest px-3 py-2"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-secondary text-base shrink-0">draft</span>
+                <span className="font-body-sm text-body-sm text-on-background truncate">{f.name}</span>
+                <span className="font-label-sm text-label-sm text-secondary shrink-0">
+                  {(f.size / 1024 / 1024).toFixed(1)} MB
+                </span>
+                <span className="font-label-sm text-label-sm text-secondary/60 shrink-0 italic">
+                  not yet saved
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onRemovePending(i)}
                 className="shrink-0 font-label-sm text-label-sm text-error hover:underline"
               >
                 Remove
@@ -161,30 +202,6 @@ function ResourceFileUploader({
           ))}
         </ul>
       )}
-
-      {fileError && (
-        <p className="font-body-sm text-body-sm text-error" role="alert">
-          {fileError}
-        </p>
-      )}
-
-      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-outline-variant/50 rounded-lg py-4 cursor-pointer hover:bg-surface-container-low transition-all">
-        <span className="material-symbols-outlined text-lg text-primary">
-          {uploading ? "hourglass_top" : "upload"}
-        </span>
-        <span className="font-label-sm text-label-sm text-on-background">
-          {uploading ? "Uploading…" : "Add a file"}
-        </span>
-        <input
-          ref={fileRef}
-          type="file"
-          accept={RESOURCE_FILE_ACCEPT}
-          multiple
-          disabled={uploading}
-          onChange={(e) => uploadFiles(e.target.files)}
-          className="sr-only"
-        />
-      </label>
     </div>
   );
 }
@@ -193,6 +210,10 @@ const TYPE_LABEL: Record<CommunityResourceType, string> = {
   tool: "Tools",
   paper: "Papers",
   dataset: "Datasets",
+  slides: "Slides & decks",
+  notes: "Meeting notes",
+  folder: "Shared folders",
+  template: "Templates & forms",
   link: "Links",
   podcast: "Podcasts",
   other: "Other",
@@ -205,10 +226,23 @@ const TYPE_LABEL: Record<CommunityResourceType, string> = {
 // a broadcast/waveform mark). "other" reuses ShowcaseCard's own
 // DEFAULT_SHOWCASE_TYPE_ICON value (auto_awesome) rather than picking a
 // fresh generic icon — same fallback meaning, same glyph.
+//
+// slides/notes/folder/template added alongside the original six — a
+// deck/protocol/agenda used to have nowhere to go but "other", which is
+// exactly the gap that pushed a file-upload request through "other" in the
+// first place. Same reasoning as showcase's own MEDIA_MIME_KIND "slides"
+// glyph (slideshow) reused verbatim here for the same concept; notes gets
+// a note glyph, a shared folder/drive gets a folder glyph, a template or
+// form gets an assignment glyph — each reads unambiguously on its own,
+// same bar as every other type here.
 const TYPE_ICON: Record<CommunityResourceType, string> = {
   tool: "science",
   paper: "article",
   dataset: "dataset",
+  slides: "slideshow",
+  notes: "note_alt",
+  folder: "folder_shared",
+  template: "assignment",
   link: "link",
   podcast: "podcasts",
   other: "auto_awesome",
@@ -223,32 +257,39 @@ const TYPE_ICON: Record<CommunityResourceType, string> = {
 // secondary/10, tool=secondary-container/60) rather than pretending there
 // are six distinct hues. Same trick here, and the SAME literal classes
 // where the type already has a showcase equivalent:
-//   green (primary):    paper (light — identical to showcase's own
-//                        "paper" entry) / dataset (stronger tint, same
-//                        primary/20 intensity showcase uses for "award")
-//   secondary:          link (plain secondary/10, same as showcase's
-//                        "talk") / tool (secondary-container/60, same
-//                        exact entry showcase already uses for ITS "tool")
-//   tertiary:           podcast (tertiary/10, same treatment as showcase's
-//                        "poster") — alone in this family, since 5 real
-//                        types don't split evenly into 3 pairs
-//   neutral (no hue):   other — same surface-container-high/
-//                        on-surface-variant treatment as showcase's own
-//                        "other"
+//   green (primary):    paper / dataset / slides — the "things people
+//                        read or watch" cluster
+//   secondary:          link / tool / notes — the "things people click
+//                        into or work from" cluster
+//   tertiary:           podcast / folder — the "ongoing stream or store"
+//                        cluster
+//   neutral (no hue):   other / template — neither reads as belonging to
+//                        one of the three real hue families more than the
+//                        others, so both stay neutral; the icon (not the
+//                        colour) is what actually tells them apart, same
+//                        as the original six's own comment on this.
 // `bar` is now a LEFT edge accent (border-l, not the earlier top bar — see
 // ResourceItem's own comment on why), one flat colour per kind. `chipBg`/
 // `chipText` fill the icon's circle badge, same hue.
 const TYPE_COLOR: Record<CommunityResourceType, { bar: string; chipBg: string; chipText: string }> = {
   paper: { bar: "border-l-primary", chipBg: "bg-primary/10", chipText: "text-primary" },
   dataset: { bar: "border-l-primary", chipBg: "bg-primary/20", chipText: "text-primary" },
+  slides: { bar: "border-l-primary", chipBg: "bg-primary/15", chipText: "text-primary" },
   link: { bar: "border-l-secondary", chipBg: "bg-secondary/10", chipText: "text-secondary" },
   tool: {
     bar: "border-l-secondary",
     chipBg: "bg-secondary-container/60",
     chipText: "text-on-secondary-container",
   },
+  notes: { bar: "border-l-secondary", chipBg: "bg-secondary/20", chipText: "text-secondary" },
   podcast: { bar: "border-l-tertiary", chipBg: "bg-tertiary/10", chipText: "text-tertiary" },
+  folder: { bar: "border-l-tertiary", chipBg: "bg-tertiary/20", chipText: "text-tertiary" },
   other: {
+    bar: "border-l-outline-variant",
+    chipBg: "bg-surface-container-high",
+    chipText: "text-on-surface-variant",
+  },
+  template: {
     bar: "border-l-outline-variant",
     chipBg: "bg-surface-container-high",
     chipText: "text-on-surface-variant",
@@ -265,16 +306,27 @@ const TYPE_ORDER: CommunityResourceType[] = COMMUNITY_RESOURCE_TYPES;
  *  server-side in lib/server/communities.ts's safeResourceUrl, this is only
  *  the input type, not a bypassable gate).
  *
- *  FILE ATTACHMENT: a resource is created in one shot (title + type + url +
- *  description together), not as a lazy draft row the way a Promote
- *  article is — so there is no resource_id to attach a file to until that
- *  first save succeeds. For "Edit" (resourceId passed in from the start),
- *  the file uploader is available immediately. For "Add resource"
- *  (resourceId undefined), the Add button saves the text fields as before,
- *  but instead of closing, the form then shows the file uploader against
- *  the row it just created (createdResourceId) and swaps its own submit
- *  button for "Done" — resubmitting the text fields a second time makes no
- *  sense once the row exists, so submit is guarded against firing again. */
+ *  FILE ATTACHMENT: files are picked up front, alongside every other
+ *  field — ResourceFilesField above holds them as plain File objects in
+ *  `pendingFiles`, not uploaded yet. The first version of this form only
+ *  showed the uploader AFTER the resource had already been created, which
+ *  reads as "there's no way to attach a file" to anyone who opens the form
+ *  and sees title/link/description with nothing else — that's what
+ *  actually happened the first time this shipped. Unlike Promote's manual
+ *  submit flow (which lazily creates a draft row the moment a file is
+ *  picked, because its title is genuinely optional at that point), a
+ *  community resource's title is required up front by this same form
+ *  either way — so there's no benefit to a lazy draft row here; it's
+ *  simpler to just hold the files until Save/Add succeeds, then upload
+ *  them against the id that returns.
+ *
+ *  `savedResourceId` exists only to make a RETRY safe: if the resource
+ *  itself saves but a later file upload fails (mid-way through
+ *  `pendingFiles`), the text fields are already persisted — pressing
+ *  Save/Add again must not create (or re-update) that row a second time,
+ *  it should just resume uploading whatever's still pending. For "Edit",
+ *  resourceId is already known, so this only ever matters on "Add
+ *  resource". */
 function ResourceForm({
   communityId,
   resourceId,
@@ -290,7 +342,7 @@ function ResourceForm({
 }: {
   communityId: string;
   /** Set only when editing a resource that already exists. Undefined for
-   *  "Add resource" until the first save succeeds. */
+   *  "Add resource". */
   resourceId?: string;
   initialTitle?: string;
   initialType?: CommunityResourceType;
@@ -314,47 +366,84 @@ function ResourceForm({
   const [description, setDescription] = useState(initialDescription);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Only ever set on the "Add resource" path, once the row has been
-  // created — see the function comment above.
-  const [createdResourceId, setCreatedResourceId] = useState<string | null>(null);
 
-  const effectiveResourceId = resourceId ?? createdResourceId;
-  const fieldsLocked = !resourceId && createdResourceId !== null;
+  const [existingFiles, setExistingFiles] = useState<CommunityResourceFile[]>(initialFiles);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [removingExistingId, setRemovingExistingId] = useState<string | null>(null);
+  // See the function comment above — only ever set on the "Add resource"
+  // path, and only if a retry is needed after a partial failure.
+  const [savedResourceId, setSavedResourceId] = useState<string | null>(null);
+
+  const removeExisting = async (fileId: string) => {
+    setError(null);
+    setRemovingExistingId(fileId);
+    const res = await removeCommunityResourceFileAction(communityId, resourceId ?? savedResourceId ?? "", fileId);
+    if (res.ok) setExistingFiles((f) => f.filter((x) => x.id !== fileId));
+    else setError(res.error);
+    setRemovingExistingId(null);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving || !title.trim() || fieldsLocked) return;
+    if (saving || !title.trim()) return;
 
     setSaving(true);
     setError(null);
-    const res = await onSubmit({
-      title: title.trim(),
-      resource_type: resourceType,
-      url: url.trim(),
-      description: description.trim(),
-    });
-    if (res.ok) {
-      if (resourceId) {
-        // Editing an existing row — done immediately, same as before.
-        router.refresh();
-        onCancel();
-      } else if (res.id) {
-        // Just created — keep the form open so files can be attached.
-        setCreatedResourceId(res.id);
-        setSaving(false);
-      } else {
-        // Defensive: createCommunityResourceAction should always return an
-        // id on success. If it somehow doesn't, don't leave the form stuck.
-        router.refresh();
-        onCancel();
-      }
-    } else {
-      setError(res.error);
-      setSaving(false);
-    }
-  };
 
-  const finish = () => {
+    let id = resourceId ?? savedResourceId;
+    if (!id || resourceId) {
+      // Either this is the very first save (no row yet), or it's an edit —
+      // both call onSubmit; a retry on "Add" after the row already exists
+      // (savedResourceId set, resourceId still undefined) skips this,
+      // since the text fields were already persisted by the first call.
+      const res = await onSubmit({
+        title: title.trim(),
+        resource_type: resourceType,
+        url: url.trim(),
+        description: description.trim(),
+      });
+      if (!res.ok) {
+        setError(res.error);
+        setSaving(false);
+        return;
+      }
+      id = resourceId ?? res.id ?? null;
+      if (!resourceId && id) setSavedResourceId(id);
+    }
+
+    if (!id) {
+      // Defensive: createCommunityResourceAction should always return an
+      // id on success. Don't leave the admin stuck if it somehow doesn't.
+      setError("Couldn't save the resource. Please try again.");
+      setSaving(false);
+      return;
+    }
+
+    const stillPending: File[] = [];
+    let uploadError: string | null = null;
+    for (const file of pendingFiles) {
+      if (uploadError) {
+        stillPending.push(file);
+        continue;
+      }
+      const fd = new FormData();
+      fd.set("communityId", communityId);
+      fd.set("resourceId", id);
+      fd.set("file", file);
+      const res = await addCommunityResourceFileAction(fd);
+      if (!res.ok) {
+        uploadError = res.error;
+        stillPending.push(file);
+      }
+    }
+    setPendingFiles(stillPending);
+
+    if (uploadError) {
+      setError(`Saved, but couldn't attach every file — ${uploadError}`);
+      setSaving(false);
+      return; // keep the form open so the remaining file(s) can be retried or removed
+    }
+
     router.refresh();
     onCancel();
   };
@@ -368,15 +457,13 @@ function ResourceForm({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
           aria-label="Resource title"
-          disabled={fieldsLocked}
-          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
         />
         <select
           value={resourceType}
           onChange={(e) => setResourceType(e.target.value as CommunityResourceType)}
           aria-label="Resource type"
-          disabled={fieldsLocked}
-          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
         >
           {TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
@@ -391,26 +478,26 @@ function ResourceForm({
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https:// link (optional)"
         aria-label="Resource URL"
-        disabled={fieldsLocked}
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
       />
+
+      <ResourceFilesField
+        pendingFiles={pendingFiles}
+        onAddPending={(files) => setPendingFiles((f) => [...f, ...files])}
+        onRemovePending={(index) => setPendingFiles((f) => f.filter((_, i) => i !== index))}
+        existingFiles={existingFiles}
+        onRemoveExisting={removeExisting}
+        removingExistingId={removingExistingId}
+      />
+
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         placeholder="Description (optional)"
         aria-label="Resource description"
-        rows={3}
-        disabled={fieldsLocked}
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y disabled:opacity-60"
+        rows={2}
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
       />
-
-      {effectiveResourceId && (
-        <ResourceFileUploader
-          communityId={communityId}
-          resourceId={effectiveResourceId}
-          initialFiles={initialFiles}
-        />
-      )}
 
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
@@ -418,33 +505,21 @@ function ResourceForm({
         </p>
       )}
       <div className="flex items-center justify-end gap-3">
-        {fieldsLocked ? (
-          <button
-            type="button"
-            onClick={finish}
-            className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm"
-          >
-            Done
-          </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={saving}
-              className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving || !title.trim()}
-              className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
-            >
-              {saving ? busyLabel : submitLabel}
-            </button>
-          </>
-        )}
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={saving || !title.trim()}
+          className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+        >
+          {saving ? busyLabel : submitLabel}
+        </button>
       </div>
     </form>
   );
