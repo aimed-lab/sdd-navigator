@@ -47,19 +47,147 @@
 // This is a browsing surface; Edit/Delete at the same visual weight as the
 // title and description read as an admin table, not a card someone reads.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
+  addCommunityResourceFileAction,
   createCommunityResourceAction,
   deleteCommunityResourceAction,
+  removeCommunityResourceFileAction,
   updateCommunityResourceAction,
 } from "@/app/communities/actions";
-import type { CommunityResource } from "@/lib/server/communities";
+import type { CommunityResource, CommunityResourceFile } from "@/lib/server/communities";
 import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType } from "@/lib/communityTypes";
 import CollapsibleSection from "./CollapsibleSection";
 
-type ActionResult = { ok: true } | { ok: false; error: string };
+// id is optional here specifically so this one type covers both
+// createCommunityResourceAction's result (carries the new row's id, needed
+// so ResourceForm can attach files to a resource it just created) and
+// updateCommunityResourceAction's (no id — the resource already had one).
+type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
+
+const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024;
+const RESOURCE_FILE_ACCEPT =
+  "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+/** Attach/remove files on one resource — admin-only, embedded in
+ *  ResourceForm. Only rendered once a resourceId exists: for "Add
+ *  resource", that means only after the text fields have been saved once
+ *  (a resource is created in one shot, not as a lazy draft the way a
+ *  Promote article is — see ResourceForm's own comment); for "Edit", the
+ *  resourceId is there from the start, so this appears immediately.
+ *  Mirrors components/promote/MediaUploader.tsx's upload/remove logic
+ *  (same accept list, same 50 MB cap, same client-side pre-check before the
+ *  round trip), simplified since there's no lazy-id resolution to do here. */
+function ResourceFileUploader({
+  communityId,
+  resourceId,
+  initialFiles,
+}: {
+  communityId: string;
+  resourceId: string;
+  initialFiles: CommunityResourceFile[];
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [files, setFiles] = useState<CommunityResourceFile[]>(initialFiles);
+  const [uploading, setUploading] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const uploadFile = async (file: File) => {
+    setFileError(null);
+    if (file.size > MAX_RESOURCE_FILE_BYTES) {
+      setFileError(`"${file.name}" is over 50 MB.`);
+      return;
+    }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.set("communityId", communityId);
+      fd.set("resourceId", resourceId);
+      fd.set("file", file);
+      const res = await addCommunityResourceFileAction(fd);
+      if (res.ok) setFiles((f) => [...f, res.file]);
+      else setFileError(res.error);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const uploadFiles = async (fileList: FileList | null) => {
+    for (const file of Array.from(fileList ?? [])) await uploadFile(file);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const removeFile = async (fileId: string) => {
+    setFileError(null);
+    const res = await removeCommunityResourceFileAction(communityId, resourceId, fileId);
+    if (res.ok) setFiles((f) => f.filter((x) => x.id !== fileId));
+    else setFileError(res.error);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="font-label-sm text-label-sm text-secondary">
+        Files — PNG, JPEG, WebP, GIF, PDF or PPTX, up to 50 MB each.
+      </span>
+
+      {files.length > 0 && (
+        <ul className="space-y-1.5">
+          {files.map((f) => (
+            <li
+              key={f.id}
+              className="flex items-center justify-between gap-3 rounded-lg border border-outline-variant/40 bg-surface-container-lowest px-3 py-2"
+            >
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-primary text-base shrink-0">
+                  description
+                </span>
+                <span className="font-body-sm text-body-sm text-on-background truncate">
+                  {f.filename}
+                </span>
+                <span className="font-label-sm text-label-sm text-secondary shrink-0">
+                  {(f.sizeBytes / 1024 / 1024).toFixed(1)} MB
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => removeFile(f.id)}
+                className="shrink-0 font-label-sm text-label-sm text-error hover:underline"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {fileError && (
+        <p className="font-body-sm text-body-sm text-error" role="alert">
+          {fileError}
+        </p>
+      )}
+
+      <label className="flex items-center justify-center gap-2 border-2 border-dashed border-outline-variant/50 rounded-lg py-4 cursor-pointer hover:bg-surface-container-low transition-all">
+        <span className="material-symbols-outlined text-lg text-primary">
+          {uploading ? "hourglass_top" : "upload"}
+        </span>
+        <span className="font-label-sm text-label-sm text-on-background">
+          {uploading ? "Uploading…" : "Add a file"}
+        </span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept={RESOURCE_FILE_ACCEPT}
+          multiple
+          disabled={uploading}
+          onChange={(e) => uploadFiles(e.target.files)}
+          className="sr-only"
+        />
+      </label>
+    </div>
+  );
+}
 
 const TYPE_LABEL: Record<CommunityResourceType, string> = {
   tool: "Tools",
@@ -135,21 +263,40 @@ const TYPE_ORDER: CommunityResourceType[] = COMMUNITY_RESOURCE_TYPES;
 /** Shared by both "Add resource" and "Edit" — same fields, same validation
  *  (title required; url optional but must be http(s) if given — re-checked
  *  server-side in lib/server/communities.ts's safeResourceUrl, this is only
- *  the input type, not a bypassable gate). */
+ *  the input type, not a bypassable gate).
+ *
+ *  FILE ATTACHMENT: a resource is created in one shot (title + type + url +
+ *  description together), not as a lazy draft row the way a Promote
+ *  article is — so there is no resource_id to attach a file to until that
+ *  first save succeeds. For "Edit" (resourceId passed in from the start),
+ *  the file uploader is available immediately. For "Add resource"
+ *  (resourceId undefined), the Add button saves the text fields as before,
+ *  but instead of closing, the form then shows the file uploader against
+ *  the row it just created (createdResourceId) and swaps its own submit
+ *  button for "Done" — resubmitting the text fields a second time makes no
+ *  sense once the row exists, so submit is guarded against firing again. */
 function ResourceForm({
+  communityId,
+  resourceId,
   initialTitle = "",
   initialType = "tool",
   initialUrl = "",
   initialDescription = "",
+  initialFiles = [],
   busyLabel,
   submitLabel,
   onCancel,
   onSubmit,
 }: {
+  communityId: string;
+  /** Set only when editing a resource that already exists. Undefined for
+   *  "Add resource" until the first save succeeds. */
+  resourceId?: string;
   initialTitle?: string;
   initialType?: CommunityResourceType;
   initialUrl?: string;
   initialDescription?: string;
+  initialFiles?: CommunityResourceFile[];
   busyLabel: string;
   submitLabel: string;
   onCancel: () => void;
@@ -167,10 +314,16 @@ function ResourceForm({
   const [description, setDescription] = useState(initialDescription);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Only ever set on the "Add resource" path, once the row has been
+  // created — see the function comment above.
+  const [createdResourceId, setCreatedResourceId] = useState<string | null>(null);
+
+  const effectiveResourceId = resourceId ?? createdResourceId;
+  const fieldsLocked = !resourceId && createdResourceId !== null;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (saving || !title.trim()) return;
+    if (saving || !title.trim() || fieldsLocked) return;
 
     setSaving(true);
     setError(null);
@@ -181,12 +334,29 @@ function ResourceForm({
       description: description.trim(),
     });
     if (res.ok) {
-      router.refresh();
-      onCancel();
+      if (resourceId) {
+        // Editing an existing row — done immediately, same as before.
+        router.refresh();
+        onCancel();
+      } else if (res.id) {
+        // Just created — keep the form open so files can be attached.
+        setCreatedResourceId(res.id);
+        setSaving(false);
+      } else {
+        // Defensive: createCommunityResourceAction should always return an
+        // id on success. If it somehow doesn't, don't leave the form stuck.
+        router.refresh();
+        onCancel();
+      }
     } else {
       setError(res.error);
       setSaving(false);
     }
+  };
+
+  const finish = () => {
+    router.refresh();
+    onCancel();
   };
 
   return (
@@ -198,13 +368,15 @@ function ResourceForm({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
           aria-label="Resource title"
-          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+          disabled={fieldsLocked}
+          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
         />
         <select
           value={resourceType}
           onChange={(e) => setResourceType(e.target.value as CommunityResourceType)}
           aria-label="Resource type"
-          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          disabled={fieldsLocked}
+          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
         >
           {TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
@@ -219,7 +391,8 @@ function ResourceForm({
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https:// link (optional)"
         aria-label="Resource URL"
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+        disabled={fieldsLocked}
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 disabled:opacity-60"
       />
       <textarea
         value={description}
@@ -227,29 +400,51 @@ function ResourceForm({
         placeholder="Description (optional)"
         aria-label="Resource description"
         rows={3}
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+        disabled={fieldsLocked}
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y disabled:opacity-60"
       />
+
+      {effectiveResourceId && (
+        <ResourceFileUploader
+          communityId={communityId}
+          resourceId={effectiveResourceId}
+          initialFiles={initialFiles}
+        />
+      )}
+
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
           {error}
         </p>
       )}
       <div className="flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          disabled={saving || !title.trim()}
-          className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
-        >
-          {saving ? busyLabel : submitLabel}
-        </button>
+        {fieldsLocked ? (
+          <button
+            type="button"
+            onClick={finish}
+            className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm"
+          >
+            Done
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving}
+              className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !title.trim()}
+              className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm disabled:opacity-50"
+            >
+              {saving ? busyLabel : submitLabel}
+            </button>
+          </>
+        )}
       </div>
     </form>
   );
@@ -364,10 +559,13 @@ function ResourceItem({
   if (editing) {
     return (
       <ResourceForm
+        communityId={communityId}
+        resourceId={resource.id}
         initialTitle={resource.title}
         initialType={resource.resource_type}
         initialUrl={resource.url ?? ""}
         initialDescription={resource.description}
+        initialFiles={resource.files}
         busyLabel="Saving…"
         submitLabel="Save"
         onCancel={() => setEditing(false)}
@@ -515,6 +713,32 @@ function ResourceItem({
           </p>
         )}
 
+        {/* Attached files — download links, same filename+size shape as
+         *  MediaUploader's list, minted as signed URLs server-side
+         *  (listCommunityResources -> listCommunityResourceFilesForCommunity)
+         *  per request. Any active member can see and download these; only
+         *  an admin can attach/remove one (via Edit, above). */}
+        {resource.files.length > 0 && (
+          <ul className="flex flex-col gap-1">
+            {resource.files.map((f) => (
+              <li key={f.id}>
+                <a
+                  href={f.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 font-body-sm text-body-sm text-primary hover:underline min-w-0"
+                >
+                  <span className="material-symbols-outlined text-[16px] shrink-0">description</span>
+                  <span className="truncate">{f.filename}</span>
+                  <span className="text-secondary shrink-0">
+                    {(f.sizeBytes / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+
         {/* No "Added by <name>" here right now — removed, not just hidden.
          *  Every resource today is admin-added, so `resource.added_by` is
          *  the same one or two people on every card in a section; the
@@ -595,6 +819,7 @@ export default function ResourcesSection({
       <div className="flex flex-col gap-4">
         {isAdmin && adding && (
           <ResourceForm
+            communityId={communityId}
             busyLabel="Adding…"
             submitLabel="Add"
             onCancel={() => setAdding(false)}

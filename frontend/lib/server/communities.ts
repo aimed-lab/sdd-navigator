@@ -45,7 +45,7 @@
 //      fresh" intent explicit and independent of that).
 
 import { unstable_noStore as noStore } from "next/cache";
-import { getSession, requireCurrentUser } from "@/lib/auth";
+import { getSession, requireCurrentUser, type Db } from "@/lib/auth";
 import { getAnonServerClient } from "./supabaseServer";
 import {
   COMMUNITY_RESOURCE_TYPES,
@@ -1505,6 +1505,11 @@ export type CommunityResource = {
   description: string;
   created_at: string;
   updated_at: string;
+  /** Attached files — signed, short-lived URLs, resolved per request. See
+   *  the "resource files" section below. Always [] for a title-only
+   *  resource; a resource is still valid with a file, a url, both, or
+   *  neither. */
+  files: CommunityResourceFile[];
 };
 
 /** http(s) only, same rule and same reasoning as lib/server/projects.ts's
@@ -1549,7 +1554,12 @@ export async function listCommunityResources(communityId: string): Promise<Commu
     .order("title", { ascending: true });
 
   if (error || !data) return [];
-  return data as CommunityResource[];
+
+  const filesByResource = await listCommunityResourceFilesForCommunity(session.db, communityId);
+  return (data as Omit<CommunityResource, "files">[]).map((r) => ({
+    ...r,
+    files: filesByResource.get(r.id) ?? [],
+  }));
 }
 
 export type CreateCommunityResourceResult =
@@ -1711,6 +1721,180 @@ export async function deleteCommunityResource(
   }
 
   return { status: "ok" };
+}
+
+// ── Resource files ───────────────────────────────────────────────────────
+//
+// One or more files (session slides, decks, protocols, documents) attached
+// to a community_resources row — database/migrations/
+// 2026-09-21_community_resource_files.sql +
+// 2026-09-21_community_resource_files_storage.sql. Follows
+// lib/server/showcase.ts's media-attachment pattern exactly (private
+// bucket, signed URLs minted per request, 50 MB cap, same accepted mime
+// set), with the ownership model swapped from owner-gated to admin-gated:
+// a community resource is managed by any admin, not by whoever added it,
+// so every write here re-checks getMembership(communityId).isAdmin rather
+// than an owner_id match — RLS enforces the identical rule underneath (see
+// the migration's own comments).
+
+export const COMMUNITY_RESOURCE_FILES_BUCKET = "community-resource-files";
+
+const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, same cap as showcase-media
+const RESOURCE_FILE_ALLOWED_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
+]);
+
+const RESOURCE_FILE_SIGNED_URL_TTL_SECONDS = 60 * 10; // 10 minutes, matches showcase.ts's own TTL
+
+export type CommunityResourceFile = {
+  id: string;
+  filename: string;
+  sizeBytes: number;
+  /** A signed, short-lived URL — never a stable/public one, since the
+   *  community-resource-files bucket is private. Re-fetched per page load. */
+  url: string;
+};
+
+/** Mint a short-lived signed URL for one object path. Throws if the calling
+ *  client's role can't pass the bucket's SELECT policy for that path — RLS
+ *  (member-only, no anon path at all) is what actually decides this. */
+async function signCommunityResourceFilePath(db: Db, path: string): Promise<string> {
+  const { data, error } = await db.storage
+    .from(COMMUNITY_RESOURCE_FILES_BUCKET)
+    .createSignedUrl(path, RESOURCE_FILE_SIGNED_URL_TTL_SECONDS);
+  if (error || !data?.signedUrl) throw error ?? new Error("Couldn't sign the file URL.");
+  return data.signedUrl;
+}
+
+/** One query for every file attached to any resource in this community,
+ *  grouped by resource_id — used by listCommunityResources so the
+ *  Resources section can show each card's attached files without an N+1
+ *  query per resource. An unsignable/orphaned row is dropped, not fatal to
+ *  the list, same posture as listShowcaseMedia. */
+async function listCommunityResourceFilesForCommunity(
+  db: Db,
+  communityId: string
+): Promise<Map<string, CommunityResourceFile[]>> {
+  const { data, error } = await db
+    .from("community_resource_files")
+    .select("id, resource_id, filename, size_bytes, url")
+    .eq("community_id", communityId)
+    .order("created_at", { ascending: true });
+  if (error || !data) return new Map();
+
+  const signed = await Promise.all(
+    (data as Record<string, unknown>[]).map(async (row) => {
+      try {
+        return {
+          resourceId: row.resource_id as string,
+          file: {
+            id: row.id as string,
+            filename: row.filename as string,
+            sizeBytes: row.size_bytes as number,
+            url: await signCommunityResourceFilePath(db, row.url as string),
+          } as CommunityResourceFile,
+        };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const byResource = new Map<string, CommunityResourceFile[]>();
+  for (const entry of signed) {
+    if (!entry) continue;
+    const list = byResource.get(entry.resourceId) ?? [];
+    list.push(entry.file);
+    byResource.set(entry.resourceId, list);
+  }
+  return byResource;
+}
+
+/** Attach one file to a resource as a community admin. Validates type/size
+ *  in app code (belt-and-suspenders on top of the bucket's own
+ *  allowed_mime_types/file_size_limit) and throws with a message the
+ *  caller can show directly. */
+export async function addCommunityResourceFile(
+  communityId: string,
+  resourceId: string,
+  file: File
+): Promise<CommunityResourceFile> {
+  const { user, db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) throw new Error("Only a community admin can attach a file.");
+
+  if (!file || file.size === 0) throw new Error("No file selected.");
+  if (!RESOURCE_FILE_ALLOWED_MIME.has(file.type)) throw new Error("Use PNG, JPEG, WebP, GIF, PDF or PPTX.");
+  if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error("File must be under 50 MB.");
+
+  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const path = `${communityId}/${crypto.randomUUID()}.${ext || "bin"}`;
+
+  const { error: uploadError } = await db.storage
+    .from(COMMUNITY_RESOURCE_FILES_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data, error } = await db
+    .from("community_resource_files")
+    .insert({
+      resource_id: resourceId,
+      community_id: communityId,
+      added_by: user.id, // from the session, never the body
+      filename: file.name.slice(0, 200),
+      size_bytes: file.size,
+      url: path, // the storage PATH — see the field comment in the migration
+    })
+    .select("id, filename, size_bytes")
+    .single();
+
+  if (error || !data) {
+    // Roll back the just-uploaded object rather than leaving an orphan no
+    // one can ever see or remove (it has no DB row to list it by).
+    await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([path]);
+    throw error ?? new Error("Couldn't save the attachment. Please try again.");
+  }
+
+  return {
+    id: data.id as string,
+    filename: data.filename as string,
+    sizeBytes: data.size_bytes as number,
+    url: await signCommunityResourceFilePath(db, path),
+  };
+}
+
+/** Remove one attached file as a community admin. */
+export async function removeCommunityResourceFile(
+  communityId: string,
+  resourceId: string,
+  fileId: string
+): Promise<void> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) throw new Error("Only a community admin can remove a file.");
+
+  const { data, error } = await db
+    .from("community_resource_files")
+    .delete()
+    .eq("id", fileId)
+    .eq("resource_id", resourceId)
+    .eq("community_id", communityId)
+    .select("url")
+    .maybeSingle();
+  if (error) throw error;
+
+  const path = (data?.url as string) ?? null;
+  if (path) {
+    const { error: rmErr } = await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([path]);
+    if (rmErr) console.error("community resource file cleanup failed", rmErr, path);
+  }
 }
 
 // ── Explore feed ─────────────────────────────────────────────────────────

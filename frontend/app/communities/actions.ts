@@ -11,6 +11,7 @@ import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
 import {
   addCommunityMemberByEmail,
+  addCommunityResourceFile,
   approveMembership,
   changeCommunityMemberRole,
   createAnnouncement,
@@ -25,6 +26,7 @@ import {
   refreshCommunityFeed,
   rejectMembership,
   removeCommunityMember,
+  removeCommunityResourceFile,
   updateAnnouncement,
   updateCommunityExploreConfig,
   updateCommunityMemberDisplayName,
@@ -35,6 +37,7 @@ import {
   updateCommunitySections,
   updateMyCommunityFocus,
   updateMyCommunityHidden,
+  type CommunityResourceFile,
   type CommunityRole,
   type SourceOutcome,
 } from "@/lib/server/communities";
@@ -469,13 +472,19 @@ export async function deleteAnnouncementAction(
 
 // ── resources ────────────────────────────────────────────────────────────
 
+export type CreateResourceActionResult = { ok: true; id: string } | { ok: false; error: string };
+
 /** Add a resource. Admin-only — see createCommunityResource's own comment
- *  on the RLS gate and where added_by comes from. */
+ *  on the RLS gate and where added_by comes from. Returns the new row's id
+ *  so the caller (ResourcesSection's add form) can immediately attach
+ *  files to it — a resource is created in one shot, not as a lazy draft
+ *  the way a Promote article is, so file attachment only becomes possible
+ *  once this returns. */
 export async function createCommunityResourceAction(
   communityId: string,
   slug: string,
   input: { title: string; resource_type: string; url: string; description: string }
-): Promise<SimpleActionResult> {
+): Promise<CreateResourceActionResult> {
   if (!communityId) return { ok: false, error: "Missing community." };
 
   try {
@@ -483,7 +492,7 @@ export async function createCommunityResourceAction(
     if (result.status !== "ok") return { ok: false, error: result.error };
 
     revalidatePath(`/communities/${slug}`);
-    return { ok: true };
+    return { ok: true, id: result.id };
   } catch (e) {
     if (e instanceof UnauthorizedError) {
       return { ok: false, error: "Sign in first." };
@@ -539,6 +548,63 @@ export async function deleteCommunityResourceAction(
     }
     console.error("deleteCommunityResourceAction failed", e);
     return { ok: false, error: "Couldn't delete the resource. Please try again." };
+  }
+}
+
+// ── resource files ───────────────────────────────────────────────────────
+//
+// FormData (not JSON) is used here specifically because a File object can
+// only reach a Server Action that way — same reasoning as
+// app/promote/actions.ts's media actions.
+
+export type ResourceFileActionResult =
+  | { ok: true; file: CommunityResourceFile }
+  | { ok: false; error: string };
+
+/** Attach one file to a resource. Admin-only — see
+ *  addCommunityResourceFile's own comment on the RLS gate. */
+export async function addCommunityResourceFileAction(form: FormData): Promise<ResourceFileActionResult> {
+  const communityId = form.get("communityId");
+  const resourceId = form.get("resourceId");
+  const file = form.get("file");
+
+  if (typeof communityId !== "string" || !communityId) {
+    return { ok: false, error: "Missing community." };
+  }
+  if (typeof resourceId !== "string" || !resourceId) {
+    return { ok: false, error: "Missing resource." };
+  }
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "No file selected." };
+  }
+
+  try {
+    const attached = await addCommunityResourceFile(communityId, resourceId, file);
+    return { ok: true, file: attached };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to attach a file." };
+    const message = e instanceof Error ? e.message : "Couldn't attach that file. Please try again.";
+    console.error("addCommunityResourceFileAction failed", e);
+    return { ok: false, error: message };
+  }
+}
+
+/** Remove one attached file. Admin-only — see removeCommunityResourceFile's
+ *  own comment on the RLS gate. */
+export async function removeCommunityResourceFileAction(
+  communityId: string,
+  resourceId: string,
+  fileId: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !resourceId || !fileId) return { ok: false, error: "Missing file." };
+
+  try {
+    await removeCommunityResourceFile(communityId, resourceId, fileId);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to remove this file." };
+    console.error("removeCommunityResourceFileAction failed", e);
+    return { ok: false, error: "Couldn't remove that file. Please try again." };
   }
 }
 
