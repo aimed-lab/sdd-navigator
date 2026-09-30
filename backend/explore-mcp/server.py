@@ -99,6 +99,7 @@ from tools.find_provider import (
     find_providers_for_project_async,
 )
 from tools.go_deeper import go_deeper_async
+from tools.page_agent import run_page_agent_async
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
@@ -1389,6 +1390,65 @@ async def project_agent_status_http(request):
     # created_at (a monotonic clock float, meaningless off-process) is bookkeeping
     # for _prune_jobs() only — never shipped to the client.
     return JSONResponse({"status": job["status"], "stage": job["stage"], "result": job["result"]})
+
+
+@mcp.custom_route("/api/page-agent", methods=["POST"])
+async def page_agent_http(request):
+    """The PAGE agent — plain-HTTP only, no MCP tool, same trust level as
+    /api/project-agent. POST { topic: str } -> { summary, wiki_notes,
+    evidence_filings, unfiled_items, project_level_items,
+    missing_note_suggestions, candidates_found, tools_called, warnings,
+    search_failed }.
+
+    NEW ROUTE, ADDED ALONGSIDE the existing /api/project-agent routes — none
+    of those routes, or run_project_agent_async itself, are touched here.
+    See tools/page_agent.py's own module docstring for why this reuses
+    tools/wiki_agent.py's functions directly instead of duplicating them.
+
+    BLOCKING, ON PURPOSE: frontend/app/api/pages/route.ts (the Next.js
+    caller) has no login-gated polling UI the way the project agent's
+    start/status pair does — a topic-seeded page is created and returned in
+    one request/response, same shape as this service's own
+    /api/project-agent (the synchronous one, not /start+/status). No timeout
+    here for the same reason that route has none: this container has no
+    request timeout of its own.
+
+    `topic` is REQUIRED — same "cheapest reliable signal this is a genuine
+    call, not an empty probe" reasoning as _validate_project_agent_body,
+    just against a bare string field instead of `name`.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/page-agent: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    topic = body.get("topic")
+    if not isinstance(topic, str) or not topic.strip():
+        return JSONResponse({"error": "Missing required field: topic."}, status_code=400)
+
+    try:
+        result = await run_page_agent_async(topic)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/page-agent failed: topic=%r", topic)
+        return JSONResponse(
+            {
+                "summary": "The agent hit an unexpected error and could not complete this run.",
+                "wiki_notes": [],
+                "evidence_filings": {},
+                "unfiled_items": [],
+                "project_level_items": [],
+                "missing_note_suggestions": [],
+                "candidates_found": 0,
+                "tools_called": [],
+                "warnings": [str(exc)],
+                "search_failed": True,
+            },
+            status_code=200,
+        )
 
 
 def _serve() -> None:
