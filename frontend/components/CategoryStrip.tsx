@@ -22,25 +22,29 @@ export const CATEGORIES: {
   kind: string | null;
   /** When set, the chip always routes here instead of filtering in place. */
   href?: string;
+  /** Chip is not rendered in the strip. The kind stays in this list so
+   *  `?category=` deep links, labelForKind() and the pages' own lookups keep
+   *  working; remove the flag to bring the chip back. */
+  hidden?: boolean;
 }[] = [
   { label: "All", kind: null },
+  { label: "Papers", kind: "paper" },
+  { label: "Datasets", kind: "dataset" },
+  { label: "Tools", kind: "tool" },
+  { label: "News", kind: "news" },
+  { label: "Podcast", kind: "episode", href: "/explore/podcast" },
+  // Hidden for now (portal quick fixes) — code kept, chips not shown.
   // Not an ExploreItem.kind (communities aren't a backend/Explore source —
   // they live in Supabase, not the Python search backend) — a UI-only kind
   // value the two pages that render this strip special-case to render
-  // components/communities/CommunityCard instead of ItemCard. Placed right
-  // after "All": a community is somewhere to join, which is a different
-  // kind of ask than every content kind after it.
-  { label: "Communities", kind: "communities" },
-  { label: "Papers", kind: "paper" },
-  { label: "Datasets", kind: "dataset" },
-  { label: "Gene sets", kind: "geneset" },
-  { label: "Compounds", kind: "compound" },
-  { label: "Targets", kind: "target" },
-  { label: "Tools", kind: "tool" },
-  { label: "Trials", kind: "trial" },
-  { label: "Grants", kind: "grant" },
-  { label: "Podcast", kind: "episode", href: "/explore/podcast" },
-  { label: "People", kind: "person" },
+  // components/communities/CommunityCard instead of ItemCard.
+  { label: "Communities", kind: "communities", hidden: true },
+  { label: "Gene sets", kind: "geneset", hidden: true },
+  { label: "Compounds", kind: "compound", hidden: true },
+  { label: "Targets", kind: "target", hidden: true },
+  { label: "Trials", kind: "trial", hidden: true },
+  { label: "Grants", kind: "grant", hidden: true },
+  { label: "People", kind: "person", hidden: true },
 ];
 
 export const labelForKind = (kind: string | null) =>
@@ -76,7 +80,7 @@ export default function CategoryStrip({
 
   return (
     <div className="flex gap-3 mb-12 overflow-x-auto no-scrollbar pb-1">
-      {CATEGORIES.map((c) => {
+      {CATEGORIES.filter((c) => !c.hidden).map((c) => {
         // A chip with its own destination always links there.
         if (c.href) {
           return (

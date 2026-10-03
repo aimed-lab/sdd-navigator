@@ -43,6 +43,12 @@ const SECTION_TITLE: Record<string, string> = {
   resource: "Lab Resources",
   person: "People",
 };
+// Section kinds hidden from the feed for now (portal quick fixes). Hidden,
+// not removed: drop a kind from this set to bring its section back.
+const HIDDEN_SECTION_KINDS = new Set(["grant"]);
+const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
+  (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
+
 const titleFor = (kind: string) =>
   SECTION_TITLE[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 
@@ -215,7 +221,7 @@ function SearchResults() {
 
   // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
   const { fullSections, pooledItems } = useMemo(() => {
-    const withItems = (data?.sections ?? []).filter((s) => s.items.length > 0);
+    const withItems = visibleSections(data).filter((s) => s.items.length > 0);
     const full = withItems.filter((s) => s.items.length >= 3);
     const pooled = withItems
       .filter((s) => s.items.length >= 1 && s.items.length < 3)
@@ -313,7 +319,7 @@ function SearchResults() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             type="text"
-            placeholder="Search papers, tools, trials, grants, podcast, people…"
+            placeholder="Search papers, tools, trials, podcast, people…"
             className="w-full h-16 px-6 pr-16 bg-white border border-outline-variant/40 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm text-body-lg font-body-lg placeholder:text-secondary/50 transition-all"
           />
           <button
@@ -441,7 +447,7 @@ function SearchResults() {
             const activeSections =
               selected === null
                 ? fullSections
-                : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
+                : visibleSections(data).filter((s) => s.kind === selected && s.items.length > 0);
             const showPooled = selected === null && pooledItems.length > 0;
 
             // Selected category with no results -> the A+D invitation card.
@@ -452,7 +458,7 @@ function SearchResults() {
             // `.items` alone and drop `.error`, so look it up separately, straight
             // from the raw response, for whichever kind is selected.
             if (selected !== null && activeSections.length === 0) {
-              const failedSection = (data?.sections ?? []).find(
+              const failedSection = visibleSections(data).find(
                 (s) => s.kind === selected && !!s.error
               );
               return (

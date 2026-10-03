@@ -254,6 +254,7 @@ function formatDate(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (isNaN(d.getTime()) || d.getFullYear() < 2000) return null; // epoch/placeholder -> nothing
+  if (d.getTime() > Date.now()) return null; // after today -> no date shown
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 

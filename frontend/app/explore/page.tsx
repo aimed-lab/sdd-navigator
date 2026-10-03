@@ -35,6 +35,12 @@ const SECTION_TITLE: Record<string, string> = {
   person: "People",
 };
 
+// Section kinds hidden from the feed for now (portal quick fixes). Hidden,
+// not removed: drop a kind from this set to bring its section back.
+const HIDDEN_SECTION_KINDS = new Set(["grant"]);
+const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
+  (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
+
 const titleFor = (kind: string) =>
   SECTION_TITLE[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 
@@ -203,7 +209,7 @@ function ExploreFeed() {
   // A+B empty rule: 3+ items -> full grid section; 1-2 items -> pooled into
   // "Also Found"; 0 items -> hidden entirely.
   const { fullSections, pooledItems } = useMemo(() => {
-    const withItems = (data?.sections ?? []).filter((s) => s.items.length > 0);
+    const withItems = visibleSections(data).filter((s) => s.items.length > 0);
     const full = withItems.filter((s) => s.items.length >= 3);
     const pooled = withItems
       .filter((s) => s.items.length >= 1 && s.items.length < 3)
@@ -265,7 +271,7 @@ function ExploreFeed() {
       {/* Stat strip */}
       <div className="mb-6 py-3 border-y border-surface-variant/40 text-center">
         <p className="text-primary font-label-md text-label-md tracking-wide">
-          Live across 7+ sources · 64 podcast episodes · papers, datasets, news, tools, trials, grants, people
+          Live across 7+ sources · 64 podcast episodes · papers, datasets, news, tools, trials, people
         </p>
       </div>
 
@@ -353,7 +359,7 @@ function ExploreFeed() {
             const activeSections =
               selected === null
                 ? fullSections
-                : (data?.sections ?? []).filter((s) => s.kind === selected && s.items.length > 0);
+                : visibleSections(data).filter((s) => s.kind === selected && s.items.length > 0);
             const showPooled = selected === null && pooledItems.length > 0;
             const label = labelForKind(selected);
 
