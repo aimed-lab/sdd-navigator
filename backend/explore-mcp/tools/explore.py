@@ -820,7 +820,7 @@ def _dispatch(name: str, query: str):
 
 async def _execute(
     chosen: list[str], scope: dict, since_year: int | None = None,
-    status_filter: list[str] | None = None,
+    status_filter: list[str] | None = None, papers_include_methods: bool = False,
 ) -> list[dict]:
     tasks = []
     specs: list[tuple[str, str, str]] = []  # (tool, kind, display_query)
@@ -832,7 +832,15 @@ async def _execute(
             # with " | " purely for the section's own `query` field — the
             # UI/API transparency string — never re-parsed as a single query
             # anywhere.
-            queries = _entity_queries_for_papers(scope)
+            papers_scope = scope
+            if papers_include_methods:
+                # search_papers was forced in (the router skipped it). Its slice
+                # has no `methods`/`assets`, so a tool-name query ("AutoDock
+                # Vina") would search only the generic topic. Fold them into
+                # topics for this call only.
+                extra = list(scope.get("methods") or []) + list(scope.get("assets") or [])
+                papers_scope = {**scope, "topics": list(scope.get("topics") or []) + extra}
+            queries = _entity_queries_for_papers(papers_scope)
             papers_query_display = " | ".join(queries)
             tasks.append(
                 search_papers_multi_dual_async(
@@ -933,7 +941,16 @@ async def _explore_uncached(
         )
         chosen = list(chosen)
 
-    sections = await _execute(chosen, scope, since_year, status_filter)
+    # A typed search ALWAYS includes papers, whatever the router decided: it
+    # routed a tool-name query ("RDKit", "AutoDock Vina") to tools/resources/
+    # people only, so Explore showed no papers at all. The blank landing feed
+    # already includes search_papers via _DEFAULT_TOOLS.
+    forced_papers = False
+    if (input_text or "").strip() and "search_papers" not in chosen:
+        chosen.append("search_papers")
+        forced_papers = True
+
+    sections = await _execute(chosen, scope, since_year, status_filter, papers_include_methods=forced_papers)
     return {
         "input": input_text,
         "scope": scope,

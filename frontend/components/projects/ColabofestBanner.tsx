@@ -48,13 +48,10 @@ export default function ColabofestBanner() {
         >
           Start your ColaboFest project
         </Link>
-        {/* The landing page's #collabofest section (dates, proposal
-            outline, registration/info-session/announcement links, contact)
-            has no OTHER in-app entry point since the hero button there was
-            replaced with "Start project" — this is that entry point, per
-            the Stitch design's own spec for this banner. */}
+        {/* The ColaboFest community page — the landing page's own ColaboFest
+            section was removed, so this is now the in-app entry point. */}
         <Link
-          href="/#collabofest"
+          href="/communities/colabofest-2026"
           className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors whitespace-nowrap"
         >
           Learn more
