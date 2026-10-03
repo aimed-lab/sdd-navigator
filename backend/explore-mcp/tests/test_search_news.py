@@ -1,8 +1,6 @@
 """
-test_search_news — news = recency-first OpenAlex (kind="news") from a fixture.
-
-Asserts kind="news"/source="openalex", the citations Signal where present (else
-None), blank-title drop, referenced_works captured in raw, and newest-first order.
+test_search_news — news = real RSS headlines (sources/rss_news.py), cached for
+an hour, filtered by headline for typed searches. Fixture XML, no network.
 """
 
 from __future__ import annotations
@@ -10,129 +8,86 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sources.openalex import fetch_openalex  # noqa: E402
+from sources import rss_news  # noqa: E402
+from tools import search_news as sn  # noqa: E402
 
 
-class _FakeResponse:
-    def __init__(self, payload, status_code: int = 200):
-        self._payload = payload
-        # Real httpx.Response always has this; sources/base.py's get_json now
-        # reads it directly (no getattr fallback), so an unfaithful double
-        # fails loudly rather than silently reporting 200.
-        self.status_code = status_code
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        return self._payload
+def _rss(entries):
+    body = "".join(
+        f"<item><title>{t}</title><link>{l}</link><pubDate>{format_datetime(d)}</pubDate>"
+        f"<description>SHOULD NOT APPEAR</description></item>"
+        for t, l, d in entries
+    )
+    return f'<?xml version="1.0"?><rss version="2.0"><channel>{body}</channel></rss>'
 
 
-class _FakeClient:
-    def __init__(self, payload):
-        self._payload = payload
-
-    async def get(self, url, timeout=None, headers=None):
-        return _FakeResponse(self._payload)
+NOW = datetime.now(timezone.utc)
 
 
-def test_news_kind_and_signal_and_refs():
-    client = _FakeClient({"results": [
-        {
-            "id": "https://openalex.org/W100",
-            "title": "AI accelerates drug discovery pipelines",
-            "doi": "https://doi.org/10.1/news",
-            "publication_date": "2026-07-01",
-            "cited_by_count": 3,
-            "primary_location": {"source": {"display_name": "Nature Biotech"}},
-            "authorships": [{"author": {"display_name": "X Y"}}],
-            "referenced_works": ["https://openalex.org/W1"],
-        },
-        {"title": "", "cited_by_count": 0},  # blank title dropped
-    ]})
-    items = asyncio.run(fetch_openalex(client, "drug discovery", 10, kind="news"))
-
-    assert len(items) == 1
-    it = items[0]
-    assert it.kind == "news"
-    assert it.source == "openalex"
-    assert it.title == "AI accelerates drug discovery pipelines"
-    assert it.date_iso == "2026-07-01T00:00:00.000Z"
-    assert it.signal is not None and it.signal.metric == "citations" and it.signal.value == 3.0
-    assert it.doi == "10.1/news"
-    assert it.raw["referenced_works"] == ["https://openalex.org/W1"]
+def test_parse_feed_headline_source_date_link_only():
+    xml = _rss([("KRAS drug wins nod", "https://x.com/a?utm_source=rss#top", NOW)])
+    (it,) = rss_news.parse_feed(xml, "endpoints", "Endpoints News")
+    assert it.kind == "news" and it.title == "KRAS drug wins nod"
+    assert it.url == "https://x.com/a"            # tracking query + fragment stripped
+    assert it.summary == "Endpoints News"          # source name, never article text
+    assert "SHOULD NOT APPEAR" not in it.model_dump_json()
 
 
-def test_news_no_citation_is_none():
-    client = _FakeClient({"results": [
-        {"id": "https://openalex.org/W200", "title": "Drug candidate preprint", "publication_date": "2026-06-01"},
-    ]})
-    items = asyncio.run(fetch_openalex(client, "x", 10, kind="news"))
-    assert items[0].kind == "news"
-    assert items[0].signal is None   # no cited_by_count -> no fabricated signal
+def test_fetch_news_drops_old_dedupes_by_link_newest_first(monkeypatch):
+    feeds = {
+        "a": _rss([("Old story", "https://x.com/old", NOW - timedelta(days=45)),
+                   ("Newer", "https://x.com/n", NOW - timedelta(days=1)),
+                   ("Same link, first feed", "https://x.com/dup", NOW - timedelta(days=3))]),
+        "b": _rss([("Same link, second feed", "https://x.com/dup?ref=b", NOW - timedelta(days=3)),
+                   ("Newest", "https://x.com/newest", NOW - timedelta(hours=2))]),
+    }
+
+    async def fake_one(client, slug, name, url):
+        return rss_news.parse_feed(feeds[slug], slug, name)
+
+    monkeypatch.setattr(rss_news, "FEEDS", [("a", "A", "u"), ("b", "B", "u")])
+    monkeypatch.setattr(rss_news, "_fetch_one", fake_one)
+    items = asyncio.run(rss_news.fetch_news())
+    assert [i.title for i in items] == ["Newest", "Newer", "Same link, first feed"]
 
 
-def test_search_news_sorts_newest_first():
-    # search_news must guarantee date_iso descending regardless of API order.
-    from tools import search_news as sn
+def test_failing_feed_is_skipped(monkeypatch):
+    async def fake_one(client, slug, name, url):
+        if slug == "bad":
+            return []
+        return rss_news.parse_feed(_rss([("Good", "https://x.com/g", NOW)]), slug, name)
 
-    async def fake_fetch(client, term, cap, kind="paper", sort=None):
-        from models import Item
-        def mk(ext, date):
-            return Item(id=f"openalex:{ext}", kind=kind, title=ext, source="openalex",
-                        date_iso=date, dedupe_key=f"openalex:{ext}", raw={})
-        # deliberately out of order
-        return [mk("old", "2020-01-01T00:00:00.000Z"),
-                mk("new", "2026-05-01T00:00:00.000Z"),
-                mk("mid", "2023-01-01T00:00:00.000Z")]
-
-    orig = sn.fetch_openalex
-    sn.fetch_openalex = fake_fetch
-    try:
-        items = asyncio.run(sn.search_news_async("drug discovery", 10))
-    finally:
-        sn.fetch_openalex = orig
-
-    dates = [it.date_iso for it in items]
-    assert dates == sorted(dates, reverse=True)          # newest-first
-    assert [it.id for it in items] == ["openalex:new", "openalex:mid", "openalex:old"]
-    assert all(it.kind == "news" for it in items)
+    monkeypatch.setattr(rss_news, "FEEDS", [("bad", "Bad", "u"), ("ok", "OK", "u")])
+    monkeypatch.setattr(rss_news, "_fetch_one", fake_one)
+    assert [i.title for i in asyncio.run(rss_news.fetch_news())] == ["Good"]
 
 
-def test_search_news_requests_the_recency_sort():
-    """search_news's contract is recency. If it ever silently switched to
-    relevance (e.g. by inheriting a changed default) this catches it."""
-    from tools import search_news as sn
-    from sources.openalex import SORT_RECENT
-
-    captured = {}
-
-    async def fake_fetch(client, term, cap, kind="paper", sort=None):
-        captured["sort"] = sort
-        captured["kind"] = kind
-        return []
-
-    orig = sn.fetch_openalex
-    sn.fetch_openalex = fake_fetch
-    try:
-        asyncio.run(sn.search_news_async("drug discovery", 5))
-    finally:
-        sn.fetch_openalex = orig
-
-    assert captured["sort"] == SORT_RECENT
-    assert captured["kind"] == "news"
+def test_headline_matching_rules():
+    t = sn._terms
+    assert sn.matches("Amgen's KRAS inhibitor advances", t("KRAS"))
+    assert not sn.matches("Cancer drug news", t("KRAS"))
+    assert not sn.matches("Anything", t("RDKit"))
+    assert not sn.matches("The drug disease", t("the drug disease"))   # only stopwords -> no match
+    assert sn.matches("KRAS and SHP2 combo", t("KRAS SHP2"))
+    assert not sn.matches("KRAS only here", t("KRAS SHP2"))
 
 
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failures = 0
-    for fn in fns:
-        try:
-            fn(); print(f"PASS  {fn.__name__}")
-        except AssertionError as exc:
-            failures += 1; print(f"FAIL  {fn.__name__}: {exc}")
-    print(f"\n{len(fns) - failures}/{len(fns)} passed")
-    sys.exit(1 if failures else 0)
+def test_search_filters_but_landing_does_not(monkeypatch):
+    from models import Item
+
+    def item(title):
+        return Item(id=f"news:{title}", kind="news", title=title, url=f"https://x.com/{title}",
+                    source="s", date_iso="2026-10-01T00:00:00.000Z", dedupe_key=title)
+
+    async def fake_get(key, fn, ttl, stale):
+        return [item("KRAS win"), item("Other")]
+
+    monkeypatch.setattr(sn.cache, "get_or_compute", fake_get)
+    assert [i.title for i in asyncio.run(sn.search_news_async("KRAS", 10))] == ["KRAS win"]
+    assert asyncio.run(sn.search_news_async("RDKit", 10)) == []
+    assert len(asyncio.run(sn.search_news_async("drug discovery", 10, match=False))) == 2

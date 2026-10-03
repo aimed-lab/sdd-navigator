@@ -172,7 +172,7 @@ def _extract_scope(input_text: str) -> dict:
 # One-line descriptions the router reasons over. Order defines a stable listing.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_papers":        "live scientific literature — PubMed / OpenAlex / Crossref",
-    "search_news":          "recency-first industry news for the drug-discovery field (newest work first)",
+    "search_news":          "industry news headlines from biopharma RSS feeds (BioPharma Dive, STAT, Endpoints), newest first",
     "search_trials":        "clinical trials — ClinicalTrials.gov",
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
@@ -866,6 +866,14 @@ async def _execute(
                 if diseases:
                     disease_term = diseases[0].strip()
             tasks.append(search_opentargets_async(query, _NET_LIMIT, disease=disease_term))
+        elif name == "search_news":
+            # Landing/personalized feed: newest first across all sources, no
+            # filter. Typed search: headline must match the search terms.
+            # A name the scope extractor didn't classify ("Lilly") leaves the
+            # scope-built query empty; match the headline against what the
+            # user actually typed instead.
+            news_query = query or scope.get("_raw_input") or ""
+            tasks.append(search_news_async(news_query, _NET_LIMIT, match=not scope.get("is_default")))
         elif name == "search_trials" and status_filter:
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
@@ -949,8 +957,16 @@ async def _explore_uncached(
     if (input_text or "").strip() and "search_papers" not in chosen:
         chosen.append("search_papers")
         forced_papers = True
+    # Same for news: always look, it's a cheap filter over cached RSS feeds and
+    # returns nothing (section hidden) when no headline matches.
+    if (input_text or "").strip() and "search_news" not in chosen:
+        chosen.append("search_news")
 
-    sections = await _execute(chosen, scope, since_year, status_filter, papers_include_methods=forced_papers)
+    # Extra kwarg only when papers were forced in, so the normal call shape is
+    # unchanged for every other caller/test double of _execute.
+    extra = {"papers_include_methods": True} if forced_papers else {}
+    exec_scope = {**scope, "_raw_input": input_text} if (input_text or "").strip() else scope
+    sections = await _execute(chosen, exec_scope, since_year, status_filter, **extra)
     return {
         "input": input_text,
         "scope": scope,

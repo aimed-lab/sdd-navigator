@@ -7,7 +7,7 @@ datasets/tools, gene sets/pathways, internal resources, people, and podcast
 episodes):
 
   • search_papers        — live scientific literature (PubMed/OpenAlex/Crossref)
-  • search_news          — recency-first industry news for the field (OpenAlex, newest first)
+  • search_news          — industry news headlines from biopharma RSS feeds (newest first)
   • search_trials        — clinical trials (ClinicalTrials.gov)
   • search_grants        — federal funding opportunities (Grants.gov)
   • search_tools         — open-source software tools/repos (GitHub)
@@ -318,15 +318,16 @@ async def search_papers(query: str, limit: int = 20, since_year: int | None = No
 
 @mcp.tool()
 async def search_news(query: str, limit: int = 20) -> list[dict]:
-    """Recency-first industry news for the drug-discovery field.
+    """Industry news headlines from biopharma RSS feeds (BioPharma Dive, STAT
+    News, Endpoints News), newest first, last 30 days only.
 
-    Returns the most RECENT OpenAlex works matching `query`, newest first
-    (kind="news", source="openalex") — sorted by publication date, not relevance.
-    Use this for "what's new" / field-level updates rather than a targeted
-    literature search. Citations Signal is set where OpenAlex reports one, else null.
+    Each result is headline + source name + date + link to the original
+    article (kind="news"); no article text. Only headlines matching `query`
+    are returned; if none match the result is empty (never a fallback to
+    papers).
 
     Args:
-        query: A field/topic query, e.g. "drug discovery" or "AI in drug discovery".
+        query: Search terms matched against headlines, e.g. "KRAS" or "FDA approval".
         limit: Max items to return (default 20, capped at 50).
     """
     limit = _clamp_limit(limit, ceiling=MAX_LIMIT, default=20, tool="search_news")
