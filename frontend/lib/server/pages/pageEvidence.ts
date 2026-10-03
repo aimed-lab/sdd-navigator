@@ -42,7 +42,7 @@ export type PageEvidenceItemInput = {
   signal_as_of: string | null;
 };
 
-export type PageEvidenceFiling = { item: PageEvidenceItemInput; shared_terms: string[] };
+export type PageEvidenceFiling = { item: PageEvidenceItemInput; shared_terms: string[]; rationale?: string };
 
 // Keyed by note SLUG, not id — same reason as wikiEvidence.ts's own
 // EvidenceFilingsBySlug: tools/wiki_agent.py's file_evidence() (reused
@@ -118,13 +118,13 @@ export async function savePageEvidence(
       slugsNotFound.push(slug);
       continue;
     }
-    for (const { item, shared_terms } of list) {
+    for (const { item, shared_terms, rationale } of list) {
       const evidenceItemId = idByItemId.get(item.item_id);
       if (!evidenceItemId) continue;
       filingRows.push({
         note_id: noteId,
         evidence_item_id: evidenceItemId,
-        rationale: shared_terms.length > 0 ? `Shares "${shared_terms.join('", "')}" with this note.` : null,
+        rationale: rationale ?? (shared_terms.length > 0 ? `Shares "${shared_terms.join('", "')}" with this note.` : null),
       });
     }
   }

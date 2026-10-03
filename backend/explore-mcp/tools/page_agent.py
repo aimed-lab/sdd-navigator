@@ -29,7 +29,9 @@ from __future__ import annotations
 import logging
 
 from tools.explore import explore_async
-from tools.wiki_agent import build_wiki_notes, file_evidence, split_unfiled, suggest_missing_notes
+from tools.abstracts import enrich_abstracts
+from tools.page_notes import build_page_notes
+from tools.wiki_agent import curate_evidence_item, split_unfiled, suggest_missing_notes
 
 logger = logging.getLogger(__name__)
 
@@ -164,28 +166,32 @@ async def run_page_agent_async(topic: str) -> dict:
     if failed_tools:
         warnings.append(f"These sources didn't return results: {', '.join(failed_tools)}.")
 
-    # No relevance pass, no checklist — see this module's own docstring for
-    # why. `selected` is passed as [] to build_wiki_notes: that function's
-    # own vocabulary pool (_found_vocab) also reads `candidates` directly, so
-    # passing the full candidate pool there (not just an empty "selected"
-    # list) still gives note-writing real material to ground itself in.
-    wiki_notes: list[dict] = []
-    dropped_notes = 0
-    wiki_fallback = False
-    if candidates:
-        wiki_notes, wiki_fallback, dropped_notes = build_wiki_notes(
-            goal_summary, candidates, [], [], []
-        )
-        if wiki_fallback:
-            warnings.append("Couldn't write wiki notes for this topic this run.")
-        if dropped_notes:
-            warnings.append(
-                f"Dropped {dropped_notes} proposed note(s) that weren't grounded in anything "
-                "this run actually found."
-            )
+    # Fill in missing abstracts first (best-effort, never raises).
+    enrichment = await enrich_abstracts(candidates) if candidates else None
 
-    notes_by_slug = {n["slug"]: {"slug": n["slug"], "title": n["title"], "body": n["body"]} for n in wiki_notes}
-    evidence_filings, unfiled_all = file_evidence(candidates, list(notes_by_slug.values()))
+    # Numbered-citation note writing (tools/page_notes.py): the model only sees
+    # evidence with a title + abstract, cites it as [n], and a code check
+    # strips any [n] it wasn't given and drops notes left uncited. Evidence
+    # filing is derived from those citations, not from word overlap.
+    built = build_page_notes(goal_summary, candidates) if candidates else None
+    wiki_notes: list[dict] = built["notes"] if built else []
+    references: list[dict] = built["references"] if built else []
+    citation_report: dict = built["report"] if built else {"removed_citations": [], "dropped_notes": [], "removed_sentences": []}
+    if built and built["fallback"]:
+        warnings.append("Couldn't write wiki notes for this topic this run.")
+    if built and not built["evidence_given"]:
+        warnings.append("No retrieved item had both a title and an abstract, so no notes were written.")
+
+    evidence_filings: dict[str, list[dict]] = {}
+    cited_ids: set[str] = set()
+    for slug, cited in (built["cited_by_slug"] if built else {}).items():
+        evidence_filings[slug] = []
+        for n, item in cited:
+            cited_ids.add(item["id"])
+            evidence_filings[slug].append(
+                {"item": curate_evidence_item(item), "shared_terms": [], "rationale": f"Cited as [{n}]"}
+            )
+    unfiled_all = [curate_evidence_item(c) for c in candidates if c.get("id") not in cited_ids]
     unfiled_items, project_level_items = split_unfiled(unfiled_all)
     missing_note_suggestions = suggest_missing_notes(unfiled_items)
 
@@ -204,6 +210,10 @@ async def run_page_agent_async(topic: str) -> dict:
         "missing_note_suggestions": missing_note_suggestions,
         "candidates_found": candidates_found,
         "tools_called": explore_result.get("tools_called") or [],
+        "references": references,
+        "enrichment": enrichment,
+        "candidates_in_pool": len(candidates),
+        "citation_report": citation_report,
         "warnings": warnings,
         "search_failed": search_failed,
     }

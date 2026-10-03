@@ -145,6 +145,8 @@ export async function POST(req: Request) {
     project_level_items?: PageEvidenceItemInput[];
     search_failed?: boolean;
     warnings?: string[];
+    references?: { n: number; item_id: string; title: string }[];
+    citation_report?: unknown;
   };
   try {
     const res = await fetch(`${EXPLORE_API_URL}/api/page-agent`, {
@@ -187,5 +189,7 @@ export async function POST(req: Request) {
     pageId,
     notes: savedNotes.saved,
     evidence: savedEvidence.itemsUpserted,
+    references: agentResult.references ?? [],
+    citationCheck: agentResult.citation_report ?? null,
   });
 }
