@@ -1,6 +1,8 @@
 // Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
 // an open network where researchers build projects and industry partners with
-// them. The centerpiece is the clickable DiscoveryMap. Uses the shared design
+// them. The hero is the PHGDH-in-Alzheimer's case study (Prof. Chen's Basel
+// talk), drawn as a route on the clickable DiscoveryMap; its links all live in
+// lib/phgdhRoute.ts. Uses the shared design
 // tokens (tailwind.config.ts) and the .btn-primary class from globals.css. Nav
 // + Footer come from the root layout.
 //
@@ -18,6 +20,8 @@
 
 import Link from "next/link";
 import DiscoveryMap from "@/components/DiscoveryMap";
+import PhgdhRouteList from "@/components/PhgdhRouteList";
+import { PHGDH_LINKS } from "@/lib/phgdhRoute";
 import NewsTile from "@/components/explore/NewsTile";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
@@ -82,76 +86,82 @@ export default async function Home() {
 
   return (
     <>
-      {/* a. Hero + map */}
-      <section className="bg-gradient-to-b from-white to-surface-container-low">
+      {/* a. Hero: the PHGDH case study, drawn as a route on the map */}
+      <section className="bg-[var(--explore-bg)]">
         <div className={`${WRAP} pt-12 md:pt-16 pb-12 md:pb-16`}>
           <div className="max-w-3xl mx-auto text-center space-y-4">
-            <p className="font-label-md text-label-md uppercase tracking-wide text-primary">
-              Open source drug discovery · UAB SPARC
+            <p className="font-label-md text-label-md uppercase tracking-wide text-[#C2410C]">
+              Case study · PHGDH in Alzheimer&apos;s
             </p>
-            <h1 className="font-display-lg text-display-lg md:text-[56px] md:leading-[1.1] text-on-background">
-              Open source drug discovery starts here.
+            <h1 className="font-title text-[40px] md:text-[56px] leading-[1.1] font-medium text-on-background">
+              From paper to patent, in the open.
             </h1>
             <p className="font-body-lg text-body-lg text-secondary">
-              Papers, data, tools, projects and people, on one map. Click any stop.
+              Follow PHGDH from the first Alzheimer&apos;s papers to an open patent pilot, all
+              through one hub.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-              <Link
-                href="/invite"
+              <a
+                href={PHGDH_LINKS.join}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="btn-primary px-8 py-3 rounded-lg font-label-md text-lg text-center"
               >
-                Request invite code
-              </Link>
+                Join the PHGDH call ↗
+              </a>
               <Link
-                href="/industry"
+                href="/explore"
                 className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-primary/10 transition-colors"
               >
-                For industry
+                Explore on your own →
               </Link>
             </div>
           </div>
           <div className="mt-10">
             <DiscoveryMap />
           </div>
+          <PhgdhRouteList />
         </div>
       </section>
 
-      {/* b. Live on the network today */}
-      {(news.length > 0 || showEpisodes) && (
-        <section className={`${WRAP} py-14 md:py-16`}>
-          <div className="flex items-center justify-between gap-3 mb-6">
-            <h2 className="font-headline-lg text-headline-lg text-on-background">
-              Live on the network today
+      {/* b. Not here for PHGDH? Start exploring */}
+      <section className="bg-[var(--explore-bg)]">
+        <div className={`${WRAP} py-14 md:py-16 border-t border-[#e7e4dc]`}>
+          <div className="flex items-end justify-between gap-3 mb-6">
+            <h2 className="font-title text-[28px] leading-tight font-medium text-on-background">
+              Not here for PHGDH? Start exploring
             </h2>
             <Link
               href="/explore"
-              className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0"
+              className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0 pb-1"
             >
-              Explore everything
+              Open Explore →
             </Link>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-stretch">
-            {news.map((item) => (
-              <NewsTile key={item.id} item={item} />
-            ))}
-            {showEpisodes && (
-              <Link
-                href="/explore/podcast"
-                className="tile flex flex-col justify-center gap-1 p-6"
-                style={{ background: TYPE_STYLES.podcast.bg }}
-              >
-                <p className="type-label" style={{ color: TYPE_STYLES.podcast.fg }}>
-                  Podcast
-                </p>
-                <p className="mt-2 font-title text-[44px] leading-none font-medium text-on-background">
-                  {episodes}
-                </p>
-                <p className="font-body-md text-body-md text-on-background/70">episodes</p>
-              </Link>
-            )}
-          </div>
-        </section>
-      )}
+          {(news.length > 0 || showEpisodes) && (
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-stretch">
+              {news.map((item) => (
+                <NewsTile key={item.id} item={item} />
+              ))}
+              {showEpisodes && (
+                <Link
+                  href="/explore/podcast"
+                  className="tile flex flex-col justify-center gap-1 p-6"
+                  style={{ background: TYPE_STYLES.podcast.bg }}
+                >
+                  <p className="type-label" style={{ color: TYPE_STYLES.podcast.fg }}>
+                    Podcast
+                  </p>
+                  <p className="mt-2 font-title text-[44px] leading-none font-medium text-on-background">
+                    {episodes}
+                  </p>
+                  <p className="font-body-md text-body-md text-on-background/70">episodes</p>
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
 
       {/* c. Two audiences */}
       <section className="bg-surface-container-low">

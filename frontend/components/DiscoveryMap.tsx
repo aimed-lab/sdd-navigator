@@ -13,9 +13,16 @@
 //   * Every bend is 45°. Stations sit on straight segments, never on a bend.
 //   * Labels go on the free side of their line: above for Papers and Projects,
 //     below for People, left for Data, right for Tools.
+//   * The PHGDH case-study route (lib/phgdhRoute.ts) is a sixth, thicker line in
+//     coral. It rises through the free corridor between the Data and Tools
+//     verticals (x = 600), so it crosses no other line. Stations 1-3 sit on its
+//     bottom-left run (labels below), stations 4-6 on its top-right run (labels
+//     above). By default it is full color and the five lines fade to 25%; a
+//     toggle under the map swaps that.
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { isExternal, PHGDH_STEPS } from "@/lib/phgdhRoute";
 
 type Side = "above" | "below" | "left" | "right";
 
@@ -26,6 +33,8 @@ interface Station {
   side: Side;
   href: string;
   locked?: boolean;
+  /** Opens in a new tab (the label then shows a ↗). */
+  external?: boolean;
 }
 
 interface MapLine {
@@ -164,8 +173,42 @@ const LINES: MapLine[] = [
   },
 ];
 
+const ROUTE_ID = "phgdh";
+const ROUTE_COLOR = "#C2410C";
+
+// Station positions along the route, by step key (lib/phgdhRoute.ts).
+const ROUTE_POS: Record<string, { x: number; y: number; side: Side }> = {
+  papers: { x: 120, y: 745, side: "below" },
+  alert: { x: 280, y: 745, side: "below" },
+  collection: { x: 440, y: 745, side: "below" },
+  analysis: { x: 800, y: 37, side: "above" },
+  patent: { x: 960, y: 37, side: "above" },
+  join: { x: 1120, y: 37, side: "above" },
+};
+
+const ROUTE: MapLine = {
+  id: ROUTE_ID,
+  name: "PHGDH route",
+  color: ROUTE_COLOR,
+  path: "M120 745 H535 L600 680 V105 L668 37 H1120",
+  stations: PHGDH_STEPS.map((step) => {
+    const external = isExternal(step.href);
+    return {
+      label: [external ? `${step.station} ↗` : step.station],
+      ...ROUTE_POS[step.key],
+      href: step.href,
+      locked: step.locked,
+      external,
+    };
+  }),
+};
+
+const ALL_LINES: MapLine[] = [...LINES, ROUTE];
+
 const VIEW_X = -20;
 const VIEW_W = 1300;
+const VIEW_Y = -10;
+const VIEW_H = 810;
 const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
 const LABEL_GAP = 24;
@@ -185,6 +228,11 @@ function labelPlacement(s: Station) {
   }
 }
 
+// Plain anchor for stations that leave the site: new tab, no opener.
+function ExternalLink(props: React.ComponentProps<"a">) {
+  return <a {...props} target="_blank" rel="noopener noreferrer" />;
+}
+
 function StationNode({
   station,
   color,
@@ -199,8 +247,9 @@ function StationNode({
   const [grow, setGrow] = useState(false);
   const p = labelPlacement(station);
   const name = station.label.join(" ");
+  const Wrapper = station.external ? ExternalLink : Link;
   return (
-    <Link
+    <Wrapper
       href={station.href}
       aria-label={station.locked ? `${name} (invite code required)` : name}
       onMouseEnter={() => {
@@ -267,12 +316,15 @@ function StationNode({
           </tspan>
         ))}
       </text>
-    </Link>
+    </Wrapper>
   );
 }
 
 export default function DiscoveryMap() {
   const [hover, setHover] = useState<string | null>(null);
+  // Which lines are emphasised: the PHGDH route (default) or the five network lines.
+  const [mode, setMode] = useState<"route" | "network">("route");
+  const emphasised = (id: string) => (mode === "route" ? id === ROUTE_ID : id !== ROUTE_ID);
   const boxRef = useRef<HTMLDivElement>(null);
 
   // When the box is narrower than the map (phones), open scrolled so the
@@ -291,32 +343,36 @@ export default function DiscoveryMap() {
         className="rounded-2xl border border-outline-variant/60 bg-white shadow-sm overflow-x-auto max-w-full"
       >
         <svg
-          viewBox={`${VIEW_X} 70 ${VIEW_W} 660`}
+          viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
           role="group"
-          aria-label="Drug discovery map: five lines, Papers, Data, Tools, Projects and People, meeting at SmartDrugDiscovery"
+          aria-label="Drug discovery map: the PHGDH route and five lines, Papers, Data, Tools, Projects and People, all meeting at SmartDrugDiscovery"
           className="block w-full min-w-[1000px] h-auto"
         >
-          {/* Lines */}
-          {LINES.map((line) => (
-            <path
-              key={line.id}
-              d={line.path}
-              fill="none"
-              stroke={line.color}
-              strokeWidth={hover === line.id ? 14 : 10}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={hover && hover !== line.id ? 0.3 : 1}
-              style={{ transition: "stroke-width 150ms ease, opacity 150ms ease" }}
-            />
-          ))}
+          {/* Lines (the route last, so it sits on top where it matters) */}
+          {ALL_LINES.map((line) => {
+            const isRoute = line.id === ROUTE_ID;
+            const on = hover === line.id;
+            return (
+              <path
+                key={line.id}
+                d={line.path}
+                fill="none"
+                stroke={line.color}
+                strokeWidth={(isRoute ? 13 : 10) + (on ? 4 : 0)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity={on || emphasised(line.id) ? 1 : 0.25}
+                style={{ transition: "stroke-width 150ms ease, opacity 200ms ease" }}
+              />
+            );
+          })}
 
-          {/* Stations (dim with their line) */}
-          {LINES.map((line) => (
+          {/* Stations and labels: faded lines keep readable (and clickable) stops */}
+          {ALL_LINES.map((line) => (
             <g
               key={line.id}
-              opacity={hover && hover !== line.id ? 0.45 : 1}
-              style={{ transition: "opacity 150ms ease" }}
+              opacity={hover === line.id || emphasised(line.id) ? 1 : 0.45}
+              style={{ transition: "opacity 200ms ease" }}
             >
               {line.stations.map((s) => (
                 <StationNode
@@ -358,6 +414,16 @@ export default function DiscoveryMap() {
         </svg>
       </div>
 
+      <div className="mt-3 text-center">
+        <button
+          type="button"
+          onClick={() => setMode((m) => (m === "route" ? "network" : "route"))}
+          className="font-label-md text-label-md text-primary hover:underline underline-offset-4"
+        >
+          {mode === "route" ? "Show the full network" : "Show the PHGDH route"} ⇄
+        </button>
+      </div>
+
       <p className="md:hidden mt-2 text-center font-label-sm text-label-sm text-secondary">
         <span className="material-symbols-outlined align-middle text-base mr-1">swipe</span>
         Swipe to explore the map
@@ -365,7 +431,7 @@ export default function DiscoveryMap() {
 
       {/* Legend */}
       <ul className="mt-4 flex flex-wrap justify-center gap-x-6 gap-y-2">
-        {LINES.map((line) => (
+        {ALL_LINES.map((line) => (
           <li
             key={line.id}
             className="flex items-center gap-2 font-label-md text-label-md text-on-surface"
