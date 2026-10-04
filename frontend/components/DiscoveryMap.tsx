@@ -13,12 +13,13 @@
 //   * Every bend is 45°. Stations sit on straight segments, never on a bend.
 //   * Labels go on the free side of their line: above for Papers and Projects,
 //     below for People, left for Data, right for Tools.
-//   * The PHGDH case-study route (lib/phgdhRoute.ts) is a sixth, thicker line in
-//     coral. It rises through the free corridor between the Data and Tools
-//     verticals (x = 600), so it crosses no other line. Stations 1-3 sit on its
-//     bottom-left run (labels below), stations 4-6 on its top-right run (labels
-//     above). By default it is full color and the five lines fade to 25%; a
-//     toggle under the map swaps that.
+//   * The PHGDH case (lib/phgdhRoute.ts) is a sixth, thicker line in coral,
+//     drawn on top of the full network. It rises through the free corridor
+//     between the Data and Tools verticals (x = 600), so it crosses no other
+//     line. Stations 1-3 sit on its bottom-left run (labels below), stations
+//     4-6 on its top-right run (labels above), each numbered like the step list
+//     under the map. Default: everything at full strength. The toggle under the
+//     map fades the other lines to 15% and hides their labels.
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -35,6 +36,8 @@ interface Station {
   locked?: boolean;
   /** Opens in a new tab (the label then shows a ↗). */
   external?: boolean;
+  /** Route step number, drawn on the station. */
+  number?: number;
 }
 
 interface MapLine {
@@ -178,20 +181,20 @@ const ROUTE_COLOR = "#C2410C";
 
 // Station positions along the route, by step key (lib/phgdhRoute.ts).
 const ROUTE_POS: Record<string, { x: number; y: number; side: Side }> = {
-  papers: { x: 120, y: 745, side: "below" },
-  alert: { x: 280, y: 745, side: "below" },
-  collection: { x: 440, y: 745, side: "below" },
-  analysis: { x: 800, y: 37, side: "above" },
-  patent: { x: 960, y: 37, side: "above" },
-  join: { x: 1120, y: 37, side: "above" },
+  papers: { x: 120, y: 735, side: "below" },
+  alert: { x: 280, y: 735, side: "below" },
+  collection: { x: 440, y: 735, side: "below" },
+  analysis: { x: 800, y: 45, side: "above" },
+  patent: { x: 960, y: 45, side: "above" },
+  join: { x: 1120, y: 45, side: "above" },
 };
 
 const ROUTE: MapLine = {
   id: ROUTE_ID,
   name: "PHGDH route",
   color: ROUTE_COLOR,
-  path: "M120 745 H535 L600 680 V105 L668 37 H1120",
-  stations: PHGDH_STEPS.map((step) => {
+  path: "M120 735 H535 L600 670 V100 L655 45 H1120",
+  stations: PHGDH_STEPS.map((step, i) => {
     const external = isExternal(step.href);
     return {
       label: [external ? `${step.station} ↗` : step.station],
@@ -199,6 +202,7 @@ const ROUTE: MapLine = {
       href: step.href,
       locked: step.locked,
       external,
+      number: i + 1,
     };
   }),
 };
@@ -207,8 +211,8 @@ const ALL_LINES: MapLine[] = [...LINES, ROUTE];
 
 const VIEW_X = -20;
 const VIEW_W = 1300;
-const VIEW_Y = -10;
-const VIEW_H = 810;
+const VIEW_Y = 0;
+const VIEW_H = 785;
 const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
 const LABEL_GAP = 24;
@@ -238,11 +242,14 @@ function StationNode({
   color,
   lineId,
   setHover,
+  hideLabel,
 }: {
   station: Station;
   color: string;
   lineId: string;
   setHover: (id: string | null) => void;
+  /** Hide the text label (the stop stays, and stays clickable). */
+  hideLabel?: boolean;
 }) {
   const [grow, setGrow] = useState(false);
   const p = labelPlacement(station);
@@ -299,6 +306,37 @@ function StationNode({
             <rect x="0.8" y="5" width="8.4" height="6.2" rx="1.2" fill="#6b7280" />
           </g>
         )}
+        {station.number !== undefined &&
+          (station.locked ? (
+            // The lock fills the stop, so the number sits beside it.
+            <g style={{ pointerEvents: "none" }}>
+              <circle cx={station.x + 15} cy={station.y - 15} r={8} fill={color} />
+              <text
+                x={station.x + 15}
+                y={station.y - 11.5}
+                textAnchor="middle"
+                fontSize={10}
+                fontWeight={700}
+                fill="#fff"
+                className="font-label-md"
+              >
+                {station.number}
+              </text>
+            </g>
+          ) : (
+            <text
+              x={station.x}
+              y={station.y + 4.2}
+              textAnchor="middle"
+              fontSize={12}
+              fontWeight={700}
+              fill={color}
+              className="font-label-md"
+              style={{ pointerEvents: "none" }}
+            >
+              {station.number}
+            </text>
+          ))}
       </g>
       <text
         textAnchor={p.anchor}
@@ -308,7 +346,7 @@ function StationNode({
         fontSize={16}
         fontWeight={station.locked ? 500 : 600}
         fill={station.locked ? "#6b7280" : "#191c1e"}
-        style={{ pointerEvents: "none" }}
+        style={{ pointerEvents: "none", display: hideLabel ? "none" : undefined }}
       >
         {station.label.map((l, i) => (
           <tspan key={l} x={p.x} dy={i === 0 ? 0 : 17} fontSize={i === 0 ? 16 : 14}>
@@ -322,9 +360,11 @@ function StationNode({
 
 export default function DiscoveryMap() {
   const [hover, setHover] = useState<string | null>(null);
-  // Which lines are emphasised: the PHGDH route (default) or the five network lines.
-  const [mode, setMode] = useState<"route" | "network">("route");
-  const emphasised = (id: string) => (mode === "route" ? id === ROUTE_ID : id !== ROUTE_ID);
+  // "full": every line at full strength, the PHGDH route on top (default).
+  // "case": only the PHGDH route at full strength; the others fade to 15% and
+  // lose their labels (hovering one brings it back).
+  const [mode, setMode] = useState<"full" | "case">("full");
+  const faded = (id: string) => mode === "case" && id !== ROUTE_ID && hover !== id;
   const boxRef = useRef<HTMLDivElement>(null);
 
   // When the box is narrower than the map (phones), open scrolled so the
@@ -345,8 +385,8 @@ export default function DiscoveryMap() {
         <svg
           viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_W} ${VIEW_H}`}
           role="group"
-          aria-label="Drug discovery map: the PHGDH route and five lines, Papers, Data, Tools, Projects and People, all meeting at SmartDrugDiscovery"
-          className="block w-full min-w-[1000px] h-auto"
+          aria-label="Drug discovery map: five lines, Papers, Data, Tools, Projects and People, and the numbered PHGDH route, all meeting at SmartDrugDiscovery"
+          className="block w-full min-w-[1000px] h-auto md:max-h-[calc(100vh-165px)]"
         >
           {/* Lines (the route last, so it sits on top where it matters) */}
           {ALL_LINES.map((line) => {
@@ -361,7 +401,7 @@ export default function DiscoveryMap() {
                 strokeWidth={(isRoute ? 13 : 10) + (on ? 4 : 0)}
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                opacity={on || emphasised(line.id) ? 1 : 0.25}
+                opacity={faded(line.id) ? 0.15 : 1}
                 style={{ transition: "stroke-width 150ms ease, opacity 200ms ease" }}
               />
             );
@@ -371,7 +411,7 @@ export default function DiscoveryMap() {
           {ALL_LINES.map((line) => (
             <g
               key={line.id}
-              opacity={hover === line.id || emphasised(line.id) ? 1 : 0.45}
+              opacity={faded(line.id) ? 0.15 : 1}
               style={{ transition: "opacity 200ms ease" }}
             >
               {line.stations.map((s) => (
@@ -381,6 +421,7 @@ export default function DiscoveryMap() {
                   color={line.color}
                   lineId={line.id}
                   setHover={setHover}
+                  hideLabel={faded(line.id)}
                 />
               ))}
             </g>
@@ -417,10 +458,10 @@ export default function DiscoveryMap() {
       <div className="mt-3 text-center">
         <button
           type="button"
-          onClick={() => setMode((m) => (m === "route" ? "network" : "route"))}
+          onClick={() => setMode((m) => (m === "full" ? "case" : "full"))}
           className="font-label-md text-label-md text-primary hover:underline underline-offset-4"
         >
-          {mode === "route" ? "Show the full network" : "Show the PHGDH route"} ⇄
+          {mode === "full" ? "Highlight the PHGDH case" : "Show everything"} ⇄
         </button>
       </div>
 

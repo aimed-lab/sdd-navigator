@@ -1,8 +1,9 @@
 // Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
 // an open network where researchers build projects and industry partners with
-// them. The hero is the PHGDH-in-Alzheimer's case study (Prof. Chen's Basel
-// talk), drawn as a route on the clickable DiscoveryMap; its links all live in
-// lib/phgdhRoute.ts. Uses the shared design
+// them. The hero presents the hub and its three functions (Explore, Collaborate,
+// Promote, same words as the nav). PHGDH in Alzheimer's is the worked example:
+// the coral route on the clickable DiscoveryMap plus the grouped step list under
+// it; its links all live in lib/phgdhRoute.ts. Uses the shared design
 // tokens (tailwind.config.ts) and the .btn-primary class from globals.css. Nav
 // + Footer come from the root layout.
 //
@@ -21,7 +22,6 @@
 import Link from "next/link";
 import DiscoveryMap from "@/components/DiscoveryMap";
 import PhgdhRouteList from "@/components/PhgdhRouteList";
-import { PHGDH_LINKS } from "@/lib/phgdhRoute";
 import NewsTile from "@/components/explore/NewsTile";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
@@ -86,50 +86,57 @@ export default async function Home() {
 
   return (
     <>
-      {/* a. Hero: the PHGDH case study, drawn as a route on the map */}
-      <section id="phgdh-route" className="bg-[var(--explore-bg)] scroll-mt-16">
-        <div className={`${WRAP} pt-12 md:pt-16 pb-12 md:pb-16`}>
-          <div className="max-w-3xl mx-auto text-center space-y-4">
-            <p className="font-label-md text-label-md uppercase tracking-wide text-[#C2410C]">
-              Case study · PHGDH in Alzheimer&apos;s
-            </p>
+      {/* a. Hero: the hub and its three functions */}
+      <section className="bg-[var(--explore-bg)]">
+        <div className={`${WRAP} pt-12 md:pt-16 pb-10 md:pb-12`}>
+          <div className="max-w-4xl mx-auto text-center space-y-4">
             <h1 className="font-title text-[40px] md:text-[56px] leading-[1.1] font-medium text-on-background">
-              From paper to patent, in the open.
+              Explore. Collaborate. Promote. Open drug discovery in one hub.
             </h1>
             <p className="font-body-lg text-body-lg text-secondary">
-              Follow PHGDH from the first Alzheimer&apos;s papers to an open patent pilot, all
-              through one hub.
+              Papers, data, tools and people in one place. See how it works with a real case:
+              PHGDH in Alzheimer&apos;s, from first papers to an open patent pilot.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-              <a
-                href={PHGDH_LINKS.join}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary px-8 py-3 rounded-lg font-label-md text-lg text-center"
-              >
-                Join the PHGDH call ↗
-              </a>
               <Link
                 href="/explore"
+                className="btn-primary px-8 py-3 rounded-lg font-label-md text-lg text-center"
+              >
+                Start exploring →
+              </Link>
+              <a
+                href="#phgdh-route"
                 className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-primary/10 transition-colors"
               >
-                Explore on your own →
-              </Link>
+                Follow the PHGDH case ↓
+              </a>
             </div>
           </div>
-          <div className="mt-10">
-            <DiscoveryMap />
+        </div>
+      </section>
+
+      {/* a2. How it works: the PHGDH case, on the map */}
+      <section id="phgdh-route" className="bg-[var(--explore-bg)] scroll-mt-16">
+        <div className={`${WRAP} pb-12 md:pb-16`}>
+          <div className="max-w-3xl mx-auto text-center mb-4">
+            <h2 className="font-title text-[28px] md:text-[30px] leading-tight font-medium text-on-background">
+              How it works: the PHGDH case
+            </h2>
+            <p className="mt-2 font-body-md text-body-md text-secondary">
+              Every line runs through the hub. The coral line is one real journey: PHGDH.
+            </p>
           </div>
+          <DiscoveryMap />
           <PhgdhRouteList />
         </div>
       </section>
 
-      {/* b. Not here for PHGDH? Start exploring */}
+      {/* b. Explore on your own */}
       <section className="bg-[var(--explore-bg)]">
         <div className={`${WRAP} py-14 md:py-16 border-t border-[#e7e4dc]`}>
           <div className="flex items-end justify-between gap-3 mb-6">
             <h2 className="font-title text-[28px] leading-tight font-medium text-on-background">
-              Not here for PHGDH? Start exploring
+              Explore on your own
             </h2>
             <Link
               href="/explore"
