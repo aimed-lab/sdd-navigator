@@ -132,7 +132,7 @@ export default async function Home() {
               Explore everything
             </Link>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-start [&_.glass-card]:min-h-0">
             {news.map((item) => (
               <ItemCard key={item.id} item={item} />
             ))}

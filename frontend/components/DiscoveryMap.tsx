@@ -15,7 +15,7 @@
 //     below for People, left for Data, right for Tools.
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Side = "above" | "below" | "left" | "right";
 
@@ -160,6 +160,9 @@ const LINES: MapLine[] = [
   },
 ];
 
+const VIEW_X = -20;
+const VIEW_W = 1300;
+const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
 const LABEL_GAP = 24;
 
@@ -266,12 +269,25 @@ function StationNode({
 
 export default function DiscoveryMap() {
   const [hover, setHover] = useState<string | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // When the box is narrower than the map (phones), open scrolled so the
+  // central hub is centered. A no-op on desktop, where nothing scrolls.
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box || box.scrollWidth <= box.clientWidth) return;
+    const hubFraction = (HUB_X - VIEW_X) / VIEW_W;
+    box.scrollLeft = hubFraction * box.scrollWidth - box.clientWidth / 2;
+  }, []);
 
   return (
     <div>
-      <div className="rounded-2xl border border-outline-variant/60 bg-white shadow-sm overflow-x-auto max-w-full">
+      <div
+        ref={boxRef}
+        className="rounded-2xl border border-outline-variant/60 bg-white shadow-sm overflow-x-auto max-w-full"
+      >
         <svg
-          viewBox="-20 70 1300 660"
+          viewBox={`${VIEW_X} 70 ${VIEW_W} 660`}
           role="group"
           aria-label="Drug discovery map: five lines, Papers, Data, Tools, Projects and People, meeting at SmartDrugDiscovery"
           className="block w-full min-w-[1000px] h-auto"
