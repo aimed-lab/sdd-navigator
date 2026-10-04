@@ -55,7 +55,7 @@ function spanClass(index: number): string {
 function Tile({ tile, index }: { tile: BentoTile; index: number }) {
   const large = index === 0;
   const t = TYPE_STYLES[typeKeyForKind(tile.kind)];
-  const monogram = (tile.name.trim()[0] ?? "?").toUpperCase();
+  const tags = tile.tags.slice(0, 2);
 
   const inner = (
     <>
@@ -66,29 +66,22 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
         <SaveButton />
       </div>
 
-      <div className={"flex items-center gap-2.5 " + (large ? "mt-5" : "mt-2")}>
-        <span
-          aria-hidden
-          className="shrink-0 w-6 h-6 rounded-md bg-white/60 flex items-center justify-center text-[13px] font-semibold"
-          style={{ color: t.fg }}
-        >
-          {monogram}
-        </span>
-        <h3
-          className={
-            "font-title font-medium text-on-background leading-tight " +
-            (large ? "text-[30px] line-clamp-3" : "text-[18px] truncate")
-          }
-        >
-          {tile.name}
-        </h3>
-      </div>
+      <h3
+        className={
+          "font-title font-medium text-on-background leading-tight " +
+          (large ? "mt-4 text-[30px]" : "mt-1.5 text-[18px] truncate")
+        }
+      >
+        {tile.name}
+      </h3>
 
       {tile.description && (
         <p
           className={
-            "mt-1.5 text-on-background/70 " +
-            (large ? "text-[15px] leading-relaxed line-clamp-6 mt-3" : "text-[13px] truncate")
+            "text-on-background/70 " +
+            (large
+              ? "mt-3 text-[15px] leading-relaxed"
+              : "mt-1 text-[13px] leading-[1.3] line-clamp-2")
           }
         >
           {tile.description}
@@ -99,9 +92,9 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
         <p className="mt-3 text-[13px] text-on-background/60">{tile.meta}</p>
       )}
 
-      {tile.tags.length > 0 && (
-        <div className="mt-auto pt-2 flex gap-1.5 overflow-hidden">
-          {tile.tags.slice(0, 2).map((tag) => (
+      {tags.length > 0 && (
+        <div className={"flex gap-1.5 overflow-hidden " + (large ? "mt-4" : "mt-auto pt-1.5")}>
+          {tags.map((tag) => (
             <span
               key={tag}
               className="px-2 py-0.5 rounded-full bg-white/55 text-[11px] whitespace-nowrap"
@@ -112,11 +105,20 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
           ))}
         </div>
       )}
+
+      {large && tile.url && (
+        <p
+          className="mt-auto pt-5 font-label-md text-label-md group-hover:underline underline-offset-4"
+          style={{ color: t.fg }}
+        >
+          Open ↗
+        </p>
+      )}
     </>
   );
 
   const cls =
-    "tile group flex flex-col p-4 min-h-[140px] min-w-0 overflow-hidden " +
+    "tile group flex flex-col p-3.5 min-h-[140px] min-w-0 overflow-hidden " +
     (large ? "md:p-6 " : "") +
     spanClass(index);
   return tile.url ? (
@@ -139,7 +141,7 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
 export default function ResourceBento({ tiles }: { tiles: BentoTile[] }) {
   if (tiles.length === 0) return null;
   return (
-    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:auto-rows-[140px] md:[grid-auto-flow:dense]">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:auto-rows-[minmax(140px,auto)] md:[grid-auto-flow:dense]">
       {tiles.map((tile, i) => (
         <Tile key={tile.id} tile={tile} index={i} />
       ))}

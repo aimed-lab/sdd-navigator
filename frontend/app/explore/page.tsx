@@ -22,6 +22,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
+import CommunityTiles from "@/components/explore/CommunityTiles";
 import HandPickedRow from "@/components/explore/HandPickedRow";
 import NewsFront from "@/components/explore/NewsFront";
 import PaperList from "@/components/explore/PaperList";
@@ -386,7 +387,7 @@ function ExploreFeed() {
             )}
 
             {/* Communities: a place to join, not a document to read. */}
-            <CommunitiesResultsSection items={communities} />
+            <CommunityTiles items={communities} />
 
             {/* 5. Anything else the backend returned */}
             {otherSections(remaining)}

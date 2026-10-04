@@ -4,6 +4,7 @@
 // list. Stacks on phones. In the All view the list is capped at 5 with an
 // "All news" link; in the News chip view (`expanded`) it runs longer.
 
+import { withBestLead } from "@/lib/newsLead";
 import NewsTile from "@/components/explore/NewsTile";
 import SaveButton from "@/components/explore/SaveButton";
 import { newsSource, relativeTime } from "@/lib/typeStyles";
@@ -23,13 +24,13 @@ export default function NewsFront({
   onAllNews?: () => void;
 }) {
   if (items.length === 0) return null;
-  const [lead, ...rest] = items;
+  const [lead, ...rest] = withBestLead(items);
   const list = rest.slice(0, expanded ? EXPANDED_MAX : COMPACT_MAX);
 
   return (
     <div>
-      <div className="grid grid-cols-1 md:grid-cols-[1.35fr_1fr] gap-6 items-stretch">
-        <NewsTile item={lead} large className="md:min-h-[260px]" />
+      <div className="grid grid-cols-1 md:grid-cols-[1.35fr_1fr] gap-6 items-start">
+        <NewsTile item={lead} large />
 
         {list.length > 0 && (
           <ul className="divide-y divide-[#e7e4dc]">

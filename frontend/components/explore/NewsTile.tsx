@@ -29,7 +29,7 @@ export default function NewsTile({
         className={
           "font-title font-medium text-on-background " +
           (large
-            ? "mt-4 text-[28px] leading-[1.2] line-clamp-5"
+            ? "mt-4 text-[28px] md:text-[32px] leading-[1.2]"
             : "mt-3 text-[20px] leading-[1.25] line-clamp-4")
         }
       >
@@ -38,6 +38,11 @@ export default function NewsTile({
       {summary && (
         <p className="mt-3 font-body-md text-body-md text-on-background/70 line-clamp-2">
           {summary}
+        </p>
+      )}
+      {large && !summary && item.url && (
+        <p className="mt-6 font-label-md text-label-md text-primary group-hover:underline underline-offset-4">
+          {source ? `Read on ${source} ↗` : "Read the story ↗"}
         </p>
       )}
     </>
