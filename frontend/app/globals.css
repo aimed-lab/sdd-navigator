@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Editorial type tints (see lib/typeStyles.ts). bg = tile tint, fg = label color. */
+:root {
+  --explore-bg: #fbfaf7;
+  --type-paper-bg: #e6edf7;     --type-paper-fg: #28579a;
+  --type-dataset-bg: #e6f1ef;   --type-dataset-fg: #0b6e69;
+  --type-tool-bg: #eeeaf6;      --type-tool-fg: #5e4596;
+  --type-news-bg: #f8ecdd;      --type-news-fg: #9a4c0e;
+  --type-podcast-bg: #f3efdd;   --type-podcast-fg: #6a5c1e;
+  --type-community-bg: #e4f0e6; --type-community-fg: #1f6b3a;
+  --type-other-bg: #eeece6;     --type-other-fg: #4a4740;
+}
+
 @layer base {
   html {
     color-scheme: light;
@@ -38,6 +50,25 @@
     background: rgba(255, 255, 255, 0.7);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(224, 227, 229, 0.5);
+  }
+
+  /* Editorial tile: no border, 14px radius, small lift on hover. */
+  .tile {
+    border-radius: 14px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(40, 36, 28, 0.1);
+  }
+
+  /* Small uppercase type label (color comes from the type's fg). */
+  .type-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    line-height: 1.2;
   }
 
   /* Primary CTA — Research Green */

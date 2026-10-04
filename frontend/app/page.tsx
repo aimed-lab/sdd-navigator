@@ -6,8 +6,7 @@
 //
 // No reveal-on-scroll animation, and no backdrop-filter on cards (glass cards
 // rendered blank on phones until scrolled past): everything is visible on first
-// paint. The wrapper below forces solid backgrounds on any .glass-card /
-// .glass-panel rendered inside, including ItemCard's.
+// paint. The news row uses the same tinted tiles as Explore (NewsTile).
 //
 // SERVER component. Two live reads, both degrade to "not shown" on failure:
 //   * the 3 newest Industry News headlines, from the explore-mcp landing feed
@@ -19,9 +18,10 @@
 
 import Link from "next/link";
 import DiscoveryMap from "@/components/DiscoveryMap";
-import ItemCard from "@/components/ItemCard";
+import NewsTile from "@/components/explore/NewsTile";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { TYPE_STYLES } from "@/lib/typeStyles";
 import { listEpisodes } from "@/lib/server/wiki";
 import type { ExploreItem, ExploreResponse } from "@/types/explore";
 
@@ -81,7 +81,7 @@ export default async function Home() {
   const showEpisodes = episodes !== null && episodes >= MIN_COUNT_TO_SHOW;
 
   return (
-    <div className="[&_.glass-card]:bg-white [&_.glass-card]:backdrop-blur-none [&_.glass-panel]:bg-white [&_.glass-panel]:backdrop-blur-none">
+    <>
       {/* a. Hero + map */}
       <section className="bg-gradient-to-b from-white to-surface-container-low">
         <div className={`${WRAP} pt-12 md:pt-16 pb-12 md:pb-16`}>
@@ -130,19 +130,23 @@ export default async function Home() {
               Explore everything
             </Link>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-start [&_.glass-card]:min-h-0">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter items-stretch">
             {news.map((item) => (
-              <ItemCard key={item.id} item={item} />
+              <NewsTile key={item.id} item={item} />
             ))}
             {showEpisodes && (
               <Link
                 href="/explore/podcast"
-                className="glass-card rounded-xl p-6 flex flex-col justify-center gap-1"
+                className="tile flex flex-col justify-center gap-1 p-6"
+                style={{ background: TYPE_STYLES.podcast.bg }}
               >
-                <p className="font-headline-lg text-headline-lg text-on-background leading-none">
+                <p className="type-label" style={{ color: TYPE_STYLES.podcast.fg }}>
+                  Podcast
+                </p>
+                <p className="mt-2 font-title text-[44px] leading-none font-medium text-on-background">
                   {episodes}
                 </p>
-                <p className="font-body-md text-body-md text-secondary">podcast episodes</p>
+                <p className="font-body-md text-body-md text-on-background/70">episodes</p>
               </Link>
             )}
           </div>
@@ -202,6 +206,6 @@ export default async function Home() {
           </Link>
         </div>
       </section>
-    </div>
+    </>
   );
 }

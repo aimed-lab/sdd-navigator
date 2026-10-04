@@ -72,6 +72,7 @@ const config: Config = {
         "body-md": ["Inter", "sans-serif"],
         "body-sm": ["Inter", "sans-serif"],
         sans: ["Inter", "sans-serif"],
+        title: ["var(--font-title)", "Newsreader", "Georgia", "serif"],
       },
       fontSize: {
         "display-lg": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
