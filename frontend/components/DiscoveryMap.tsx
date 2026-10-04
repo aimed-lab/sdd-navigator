@@ -37,6 +37,10 @@ interface MapLine {
 }
 
 const LOCKED_HREF = "/invite";
+// Tools and Data stations open the Explore feed filtered to that chip, which
+// leads with the hand-picked list (lib/curated.ts).
+const TOOLS_HREF = "/explore?category=tool";
+const DATASETS_HREF = "/explore?category=dataset";
 const LOCKED_GREY = "#9ca3af";
 
 const LINES: MapLine[] = [
@@ -69,7 +73,7 @@ const LINES: MapLine[] = [
         x: 465,
         y: 110,
         side: "left",
-        href: "/explore/RNA-seq%20dataset",
+        href: DATASETS_HREF,
       },
       { label: ["Target evidence"], x: 545, y: 300, side: "left", href: "/explore/PHGDH" },
       {
@@ -89,22 +93,22 @@ const LINES: MapLine[] = [
     color: "#16a34a",
     path: "M735 110 V180 L655 260 V540 L735 620 V690",
     stations: [
-      { label: ["RDKit"], x: 735, y: 110, side: "right", href: "/explore/RDKit" },
+      { label: ["RDKit"], x: 735, y: 110, side: "right", href: TOOLS_HREF },
       {
         label: ["AutoDock Vina"],
         x: 655,
         y: 300,
         side: "right",
-        href: "/explore/AutoDock%20Vina",
+        href: TOOLS_HREF,
       },
       {
         label: ["Single cell models"],
         x: 655,
         y: 500,
         side: "right",
-        href: "/explore/single%20cell%20foundation%20model",
+        href: TOOLS_HREF,
       },
-      { label: ["PAGER"], x: 735, y: 690, side: "right", href: "/explore/PAGER" },
+      { label: ["PAGER"], x: 735, y: 690, side: "right", href: TOOLS_HREF },
     ],
   },
   {

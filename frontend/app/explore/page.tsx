@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ItemCard, { SkeletonCard } from "@/components/ItemCard";
 import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
+import HandPickedRow from "@/components/explore/HandPickedRow";
 import ScopeChips from "@/components/ScopeChips";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
@@ -300,6 +301,10 @@ function ExploreFeed() {
           </div>
         </div>
       )}
+
+      {/* Hand-picked curated row (lib/curated.ts) — above the live results, and
+          independent of their loading/error state. */}
+      {(selected === "tool" || selected === "dataset") && <HandPickedRow kind={selected} />}
 
       {/* Communities chip — its own view, independent of the explore-backend
           loading/error/data state above: communities never came from that
