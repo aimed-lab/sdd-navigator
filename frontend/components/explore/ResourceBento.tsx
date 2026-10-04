@@ -64,11 +64,13 @@ function Tile({
   tile,
   index,
   flat,
+  descLines,
   projectId,
 }: {
   tile: BentoTile;
   index: number;
   flat: boolean;
+  descLines: 2 | 3;
   projectId?: string;
 }) {
   const large = !flat && index === 0;
@@ -81,7 +83,7 @@ function Tile({
         <span className="type-label" style={{ color: t.fg }}>
           {tile.label ?? t.label}
         </span>
-        <SaveButton item={tile.item} projectId={projectId} />
+        {tile.item && <SaveButton item={tile.item} projectId={projectId} />}
       </div>
 
       <h3
@@ -100,7 +102,7 @@ function Tile({
             "text-on-background/70 " +
             (large
               ? "mt-3 text-[15px] leading-relaxed"
-              : "mt-1 text-[13px] leading-[1.3] line-clamp-2")
+              : `mt-1 text-[13px] leading-[1.3] ${descLines === 3 ? "line-clamp-3" : "line-clamp-2"}`)
           }
         >
           {tile.description}
@@ -160,18 +162,21 @@ function Tile({
 export default function ResourceBento({
   tiles,
   flat = false,
+  descLines = 2,
   projectId,
 }: {
   tiles: BentoTile[];
   /** No spans: uniform tiles (for short lists such as reference links). */
   flat?: boolean;
+  /** Lines of description shown on a small tile (the rest is on the source page). */
+  descLines?: 2 | 3;
   projectId?: string;
 }) {
   if (tiles.length === 0) return null;
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:auto-rows-[minmax(140px,auto)] md:[grid-auto-flow:dense]">
       {tiles.map((tile, i) => (
-        <Tile key={tile.id} tile={tile} index={i} flat={flat} projectId={projectId} />
+        <Tile key={tile.id} tile={tile} index={i} flat={flat} descLines={descLines} projectId={projectId} />
       ))}
     </div>
   );

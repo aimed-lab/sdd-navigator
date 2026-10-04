@@ -5,7 +5,9 @@
 // shared PaperList / ResourceBento / SectionHeading components.
 //
 // Live sections (papers, datasets, clinical trials) come from the explore
-// backend and hide when empty or when the backend is down. The reference and
+// backend and hide when empty or when the backend is down. Papers and datasets
+// are filtered to items whose own text mentions PHGDH (lib/phgdhFilter.ts), so
+// the page never pads with unrelated results. The reference and
 // lab-project tiles are static links, so the page still has substance without
 // the backend. Gene sets are deliberately not shown here.
 //
@@ -22,12 +24,21 @@ import ResourceBento, { liveTile, type BentoTile } from "@/components/explore/Re
 import { TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton } from "@/components/explore/Skeletons";
+import SaveButton from "@/components/explore/SaveButton";
+import {
+  mentionsPhgdh,
+  mergeUnique,
+  pickKeyFinding,
+  rankByNeuroThenDate,
+} from "@/lib/phgdhFilter";
 import { PHGDH_LINKS } from "@/lib/phgdhRoute";
+import { TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
 import type { ExploreItem, ExploreResponse } from "@/types/explore";
 
 const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 const MAX_PAPERS = 8;
-const MIN_ALZHEIMER_PAPERS = 3;
+const MAX_DATASETS = 6;
+const MIN_PAPERS_BEFORE_MORE_LINK = 3;
 
 const REFERENCE_TILES: BentoTile[] = [
   {
@@ -111,6 +122,46 @@ const LAB_TILES: BentoTile[] = [
   tags: [],
 }));
 
+// The single best paper or dataset whose title names PHGDH and Alzheimer's or
+// amyloid. Only its own title and text are shown; no claims are written for it.
+function KeyFinding({ item }: { item: ExploreItem }) {
+  const t = TYPE_STYLES[typeKeyForKind(item.kind)];
+  const summary = item.summary?.trim();
+  const inner = (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="type-label" style={{ color: t.fg }}>
+          Key finding
+        </span>
+        <SaveButton item={item} />
+      </div>
+      <h2 className="mt-4 font-title text-[26px] md:text-[30px] leading-[1.2] font-medium text-on-background">
+        {item.title}
+      </h2>
+      {summary && (
+        <p className="mt-3 text-[15px] leading-relaxed text-on-background/70 line-clamp-3 max-w-3xl">
+          {summary}
+        </p>
+      )}
+      {item.url && (
+        <p className="mt-5 font-label-md text-label-md group-hover:underline underline-offset-4" style={{ color: t.fg }}>
+          Open ↗
+        </p>
+      )}
+    </>
+  );
+  const cls = "tile group block p-6 md:p-8";
+  return item.url ? (
+    <a href={item.url} target="_blank" rel="noopener noreferrer" className={cls} style={{ background: t.bg }}>
+      {inner}
+    </a>
+  ) : (
+    <div className={cls} style={{ background: t.bg }}>
+      {inner}
+    </div>
+  );
+}
+
 async function search(input: string): Promise<ExploreResponse | null> {
   try {
     const res = await fetch("/api/explore", {
@@ -132,6 +183,7 @@ export default function PhgdhCollectionPage() {
   const [papers, setPapers] = useState<ExploreItem[]>([]);
   const [datasets, setDatasets] = useState<ExploreItem[]>([]);
   const [trials, setTrials] = useState<ExploreItem[]>([]);
+  const [keyFinding, setKeyFinding] = useState<ExploreItem | null>(null);
   const [liveFailed, setLiveFailed] = useState(false);
 
   useEffect(() => {
@@ -139,14 +191,23 @@ export default function PhgdhCollectionPage() {
     (async () => {
       const [specific, broad] = await Promise.all([search("PHGDH Alzheimer"), search("PHGDH")]);
       if (cancelled) return;
-      const specificPapers = itemsOf(specific, "paper");
-      setPapers(
-        (specificPapers.length >= MIN_ALZHEIMER_PAPERS ? specificPapers : itemsOf(broad, "paper")).slice(
-          0,
-          MAX_PAPERS
-        )
+
+      // Merge both queries, drop repeats, keep only what actually mentions PHGDH.
+      const relevantPapers = mergeUnique(itemsOf(specific, "paper"), itemsOf(broad, "paper")).filter(
+        mentionsPhgdh
       );
-      setDatasets(itemsOf(broad, "dataset"));
+      const relevantDatasets = mergeUnique(
+        itemsOf(specific, "dataset"),
+        itemsOf(broad, "dataset")
+      ).filter(mentionsPhgdh);
+
+      // One featured item, shown under the header and not repeated in the lists.
+      const featured = pickKeyFinding([...relevantPapers, ...relevantDatasets]);
+      const notFeatured = (i: ExploreItem) => i !== featured;
+
+      setKeyFinding(featured);
+      setPapers(rankByNeuroThenDate(relevantPapers.filter(notFeatured)).slice(0, MAX_PAPERS));
+      setDatasets(rankByNeuroThenDate(relevantDatasets.filter(notFeatured)).slice(0, MAX_DATASETS));
       setTrials(itemsOf(broad, "trial"));
       setLiveFailed(!specific && !broad);
       setLoading(false);
@@ -189,18 +250,35 @@ export default function PhgdhCollectionPage() {
           </Link>
         </header>
 
+        {/* Key finding, directly under the header */}
+        {!loading && keyFinding && (
+          <div className="-mt-6 mb-14">
+            <KeyFinding item={keyFinding} />
+          </div>
+        )}
+
         <div className="space-y-16">
-          {/* Papers */}
+          {/* Papers: only ones that mention PHGDH. A short list is never padded. */}
           {loading ? (
             <section>
               <SectionHeading title="Papers" />
               <BlockSkeleton className="h-48" />
             </section>
           ) : (
-            papers.length > 0 && (
+            (papers.length > 0 || !liveFailed) && (
               <section>
                 <SectionHeading title="Papers" />
                 <PaperList items={papers} />
+                {papers.length < MIN_PAPERS_BEFORE_MORE_LINK && (
+                  <p className={papers.length > 0 ? "mt-4" : ""}>
+                    <Link
+                      href="/explore/PHGDH"
+                      className="text-sm text-secondary hover:text-primary hover:underline underline-offset-4"
+                    >
+                      More PHGDH papers →
+                    </Link>
+                  </p>
+                )}
               </section>
             )
           )}
@@ -226,7 +304,7 @@ export default function PhgdhCollectionPage() {
           {!loading && datasets.length > 0 && (
             <section>
               <SectionHeading title="Datasets" />
-              <ResourceBento tiles={datasets.map(liveTile)} />
+              <ResourceBento tiles={datasets.map(liveTile)} flat descLines={3} />
             </section>
           )}
 
