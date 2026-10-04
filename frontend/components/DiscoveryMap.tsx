@@ -77,7 +77,7 @@ const LINES: MapLine[] = [
   {
     id: "data",
     name: "Data",
-    color: "#f97316",
+    color: "#CA8A04",
     path: "M465 110 V180 L545 260 V540 L465 620 V690",
     stations: [
       {
@@ -215,6 +215,7 @@ const VIEW_Y = 0;
 const VIEW_H = 785;
 const HUB_X = 600; // centre of the interchange pill
 const R = 12; // station radius
+const BADGE_R = 13; // numbered route stop / badge radius (about 22px across at 1440px)
 const LABEL_GAP = 24;
 
 function labelPlacement(s: Station) {
@@ -286,15 +287,28 @@ function StationNode({
           transition: "transform 150ms ease",
         }}
       >
-        <circle
-          cx={station.x}
-          cy={station.y}
-          r={R}
-          fill="#fff"
-          stroke={station.locked ? LOCKED_GREY : color}
-          strokeWidth={5}
-          strokeDasharray={station.locked ? "5 3.5" : undefined}
-        />
+        {station.number !== undefined && !station.locked ? (
+          // Numbered route stop: a filled disc (about 22px across at desktop
+          // width) holding a white number, with a white edge to lift it off the line.
+          <circle
+            cx={station.x}
+            cy={station.y}
+            r={BADGE_R}
+            fill={color}
+            stroke="#fff"
+            strokeWidth={2.5}
+          />
+        ) : (
+          <circle
+            cx={station.x}
+            cy={station.y}
+            r={R}
+            fill="#fff"
+            stroke={station.locked ? LOCKED_GREY : color}
+            strokeWidth={5}
+            strokeDasharray={station.locked ? "5 3.5" : undefined}
+          />
+        )}
         {station.locked && (
           <g
             transform={`translate(${station.x - 5} ${station.y - 6})`}
@@ -308,14 +322,21 @@ function StationNode({
         )}
         {station.number !== undefined &&
           (station.locked ? (
-            // The lock fills the stop, so the number sits beside it.
+            // The lock fills the stop, so the same badge sits beside it.
             <g style={{ pointerEvents: "none" }}>
-              <circle cx={station.x + 15} cy={station.y - 15} r={8} fill={color} />
+              <circle
+                cx={station.x + 20}
+                cy={station.y - 20}
+                r={BADGE_R}
+                fill={color}
+                stroke="#fff"
+                strokeWidth={2.5}
+              />
               <text
-                x={station.x + 15}
-                y={station.y - 11.5}
+                x={station.x + 20}
+                y={station.y - 20 + 5.2}
                 textAnchor="middle"
-                fontSize={10}
+                fontSize={15}
                 fontWeight={700}
                 fill="#fff"
                 className="font-label-md"
@@ -326,11 +347,11 @@ function StationNode({
           ) : (
             <text
               x={station.x}
-              y={station.y + 4.2}
+              y={station.y + 5.2}
               textAnchor="middle"
-              fontSize={12}
+              fontSize={15}
               fontWeight={700}
-              fill={color}
+              fill="#fff"
               className="font-label-md"
               style={{ pointerEvents: "none" }}
             >

@@ -91,7 +91,9 @@ export default async function Home() {
         <div className={`${WRAP} pt-12 md:pt-16 pb-10 md:pb-12`}>
           <div className="max-w-4xl mx-auto text-center space-y-4">
             <h1 className="font-title text-[40px] md:text-[56px] leading-[1.1] font-medium text-on-background">
-              Explore. Collaborate. Promote. Open drug discovery in one hub.
+              Explore. Collaborate. Promote.{" "}
+              <br className="hidden sm:block" />
+              Open drug discovery in one hub.
             </h1>
             <p className="font-body-lg text-body-lg text-secondary">
               Papers, data, tools and people in one place. See how it works with a real case:
