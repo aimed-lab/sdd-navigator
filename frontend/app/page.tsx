@@ -1,238 +1,341 @@
-// Landing page ("/") — layout follows
-// design/stitch/smartdrugdiscovery_landing_page/code.html, using the shared
-// design tokens (tailwind.config.ts) and the .glass-card / .btn-primary /
-// .btn-outline component classes from globals.css. Nav + Footer come from the
-// root layout, which also owns the pt-16 offset for the fixed nav.
+// Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
+// an open network where researchers build projects and industry partners with
+// them. Uses the shared design tokens (tailwind.config.ts) and the
+// .glass-card / .btn-primary / .btn-outline classes from globals.css. Nav +
+// Footer come from the root layout.
 //
-// SERVER component — fetches live Communities and Showcase data directly via
-// lib/server/communities.ts / lib/server/showcase.ts, the same way any other
-// server-rendered page in this app does (e.g. app/collaborate/page.tsx).
-// Explore's own communities widget (components/explore/CommunitiesResultsSection.tsx)
-// goes through /api/communities-summary only because Explore is "use client"
-// and needs something fetchable from the browser — that API route is not a
-// required intermediary for a server component, which can call these
-// functions directly, same as this file's own getCurrentUser() already did
-// before this rebuild.
-//
-// BOTH live sections degrade to NOTHING (not an error, not an empty
-// placeholder) on failure or an empty result — same contract Explore's
-// communities widget already has (see CommunitiesResultsSection's own "renders
-// null when items.length === 0" comment): listCommunities()/listMyMemberships()
-// already self-degrade to [] / {} internally on a Supabase error, and
-// listShowcase() (which CAN throw ServerConfigError) is wrapped in its own
-// try/catch here for the same reason. Either way, a failed or empty section
-// just isn't rendered — the page below it is unaffected.
-//
-// NOTE: the hero used to have a second button ("Start project") — dropped
-// along with the getCurrentUser() session read that built its href, since
-// Projects is no longer a nav destination and the hero is now one primary
-// action (Explore) under the tagline, not two competing ones.
+// SERVER component. Two live reads, both degrade to "not shown" on failure:
+//   * the 3 newest Industry News headlines, from the explore-mcp landing feed
+//     (the same RSS-backed news section Explore's News chip shows);
+//   * the podcast episode count, from the same wiki_pages read /explore/podcast
+//     uses.
+// HONESTY RULE: a number is only rendered when it came from one of those reads
+// AND is at least MIN_COUNT_TO_SHOW. Nothing here is a typed-in statistic
+// (the one number in the copy, "8 academic projects", is the brief's own text —
+// see the Project pipeline card).
 
 import Link from "next/link";
-import { Fragment } from "react";
-import CommunityCard from "@/components/communities/CommunityCard";
-import ShowcaseCard from "@/components/promote/ShowcaseCard";
-import { listCommunities, listMyMemberships, type CommunitySummaryItem } from "@/lib/server/communities";
-import { listShowcase } from "@/lib/server/showcase";
-import type { ShowcaseEntry } from "@/lib/showcaseTypes";
+import ItemCard from "@/components/ItemCard";
+import Locked from "@/components/Locked";
+import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { listEpisodes } from "@/lib/server/wiki";
+import type { ExploreItem, ExploreResponse } from "@/types/explore";
 
-const PILLARS = [
+const MIN_COUNT_TO_SHOW = 10;
+
+async function getLatestNews(): Promise<ExploreItem[]> {
+  try {
+    const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
+      method: "POST",
+      headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ input: "" }),
+      next: { revalidate: 1800 },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as ExploreResponse;
+    const news = (data.sections ?? []).find((s) => s.kind === "news");
+    return (news?.items ?? []).slice(0, 3);
+  } catch (e) {
+    console.error("Home: news fetch failed", e);
+    return [];
+  }
+}
+
+async function getEpisodeCount(): Promise<number | null> {
+  try {
+    const result = await listEpisodes();
+    return result.status === "ok" ? result.episodes.length : null;
+  } catch {
+    return null;
+  }
+}
+
+const STEPS = [
+  "Researchers explore, collaborate and promote their work",
+  "A network of people and a pipeline of real projects grows",
+  "Industry partners with teams and sponsors challenges on hard problems",
+] as const;
+
+const COMING = [
   {
-    title: "Explore",
-    href: "/explore",
-    icon: "travel_explore",
-    body: "Discover papers, tools, trials, grants, and podcasts across drug discovery — all in one searchable place.",
-    cta: "Explore Resources",
+    icon: "account_tree",
+    title: "Project pipeline",
+    body: "8 academic projects from the 2026 SPARC ColaboFest, ready for partners.",
+    href: "/communities/colabofest-2026",
   },
   {
-    title: "Collaborate",
-    href: "/collaborate",
-    icon: "handshake",
-    body: "Share what your lab offers and find researchers to work with.",
-    cta: "Find Partners",
+    icon: "hub",
+    title: "The network",
+    body: "Who works on what, from their published work, plus a directory of service providers and CROs.",
   },
   {
-    title: "Promote",
-    href: "/promote",
-    icon: "campaign",
-    body: "Showcase your papers and work to the community.",
-    cta: "Share Your Work",
+    icon: "neurology",
+    title: "Foundation models",
+    body: "Curated models and datasets, including virtual cell, in a protected space.",
   },
 ] as const;
 
-const HOW_IT_WORKS = [
-  "Explore resources",
-  "Collaborate with researchers",
-  "Promote your work",
+const CAPABILITIES = [
+  {
+    icon: "medical_information",
+    title: "OneFlorida+ patient data",
+    body: "Real patient records for cohort finding and clinical study design.",
+    cta: "Request access",
+    href: "/invite",
+  },
+  {
+    icon: "groups",
+    title: "Synthetic patients",
+    body: "Realistic synthetic patient data when real data can't be shared.",
+    cta: "Request access",
+    href: "/invite",
+  },
+  {
+    icon: "biotech",
+    title: "Network biology tools",
+    body: "PAGER, HAPPI, BEERE and the AI.MED lab's informatics tools.",
+    cta: "See tools",
+    href: "/explore/PAGER",
+  },
+  {
+    icon: "smart_toy",
+    title: "Connect your AI",
+    body: "Plug your own AI assistant into our drug discovery search through MCP.",
+    cta: "Request access",
+    href: "/invite",
+  },
 ] as const;
+
+const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
+const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 
 export default async function Home() {
-  // Up to 4, newest-name-first (listCommunities()' own order — no "recent"
-  // concept on a community). Membership merged in the SAME shape
-  // app/api/communities-summary/route.ts builds for Explore's own
-  // Communities category, so CommunityCard's badge (Admin/Member/Pending/
-  // nothing) renders identically here. listCommunities()/listMyMemberships()
-  // already self-degrade to []/{} on a Supabase error (see their own
-  // comments) — the try/catch is only a backstop for something neither
-  // anticipates, e.g. getSession() itself throwing.
-  let communities: CommunitySummaryItem[] = [];
-  try {
-    const [all, memberships] = await Promise.all([listCommunities(), listMyMemberships()]);
-    communities = all.slice(0, 4).map((community) => {
-      const m = memberships[community.id];
-      const member = m?.status === "active";
-      return { community, member, role: member ? m.role : null, pending: m?.status === "pending" };
-    });
-  } catch (e) {
-    console.error("Home: listCommunities/listMyMemberships failed", e);
-    communities = [];
-  }
-
-  // Up to 3 published entries, newest first (listShowcase()'s own default
-  // order/filter — published=true, no type restriction). Unlike
-  // listCommunities(), listShowcase() DOES throw (ServerConfigError when
-  // getDb() can't build a client) rather than self-degrading, so this needs
-  // its own try/catch to keep the "never an error, just nothing" contract.
-  let showcaseEntries: ShowcaseEntry[] = [];
-  try {
-    showcaseEntries = (await listShowcase()).slice(0, 3);
-  } catch (e) {
-    console.error("Home: listShowcase failed", e);
-    showcaseEntries = [];
-  }
+  const [news, episodes] = await Promise.all([getLatestNews(), getEpisodeCount()]);
+  const showEpisodes = episodes !== null && episodes >= MIN_COUNT_TO_SHOW;
 
   return (
     <>
-      {/* Hero — the tagline (Chen's own wording) IS the headline now, not a
-          restatement of the nav. One sentence under it, one primary action
-          (Explore) — the second button ("Start project") is gone along with
-          the session read it needed, since Projects isn't a nav destination
-          any more and a landing hero pointing at two different next steps is
-          weaker than one. */}
-      <section className="relative flex flex-col items-center justify-center text-center px-margin-mobile md:px-margin-desktop py-24 md:py-32 overflow-hidden">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-primary-fixed/20 via-transparent to-transparent" />
-        <div className="max-w-4xl mx-auto space-y-8">
-          <h1 className="font-display-lg text-display-lg md:text-[64px] md:leading-[1.1] text-on-background">
-            Innovator-driven, community-based drug discovery.
-          </h1>
-          <p className="font-body-lg text-body-lg text-secondary max-w-2xl mx-auto">
-            Researchers form communities, find what they need, and share what
-            they publish.
-          </p>
-          <div className="flex items-center justify-center pt-4">
-            <Link
-              href="/explore"
-              className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg w-full md:w-auto text-center"
-            >
-              Start Exploring
-            </Link>
+      {/* 1. Hero */}
+      <section className={DARK}>
+        <div className={`${WRAP} py-20 md:py-32`}>
+          <div className="max-w-3xl space-y-6">
+            <p className="font-label-md text-label-md uppercase tracking-wide text-primary-fixed-dim">
+              Open source drug discovery · UAB SPARC
+            </p>
+            <h1 className="font-display-lg text-display-lg md:text-[64px] md:leading-[1.1]">
+              Open source drug discovery starts here.
+            </h1>
+            <p className="font-body-lg text-body-lg text-white/85">
+              The tools, the data and the people, in one open network. Researchers build projects
+              here. Industry brings its hardest problems.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 pt-4">
+              <Link
+                href="/invite"
+                className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center"
+              >
+                Request invite code
+              </Link>
+              <Link
+                href="/industry"
+                className="px-8 py-4 rounded-lg font-label-md text-lg text-center border border-white/60 text-white hover:bg-white/10 transition-colors"
+              >
+                For industry
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Communities — live, up to 4. What the platform is actually built
-          around, and previously not mentioned anywhere on this page. Same
-          CommunityCard Explore's own Communities category renders (see
-          components/explore/CommunitiesResultsSection.tsx) — not a second
-          card style for the home page. Renders nothing (no heading, no
-          empty state) when there are zero communities. */}
-      {communities.length > 0 && (
-        <section className="px-margin-mobile md:px-margin-desktop py-16 md:py-20 max-w-container-max mx-auto">
-          <div className="flex items-center justify-between gap-3 mb-8">
-            <h2 className="font-headline-lg text-headline-lg text-on-background">Communities</h2>
-            <Link
-              href="/communities"
-              className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0"
-            >
-              All communities
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
-            {communities.map((c) => (
-              <CommunityCard
-                key={c.community.id}
-                community={c.community}
-                member={c.member}
-                role={c.role ?? undefined}
-                pending={c.pending}
-                memberCount={c.community.member_count ?? 0}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Showcase — live, up to 3 published entries. Real work rather than a
-          description of a "Promote" pillar. Same ShowcaseCard /promote
-          itself renders (non-featured variant — this is a preview row, not
-          a second showcase page). Renders nothing when there are zero
-          published entries. */}
-      {showcaseEntries.length > 0 && (
-        <section className="px-margin-mobile md:px-margin-desktop py-16 md:py-20 max-w-container-max mx-auto">
-          <div className="flex items-center justify-between gap-3 mb-8">
-            <h2 className="font-headline-lg text-headline-lg text-on-background">
-              From the community
-            </h2>
-            <Link
-              href="/promote"
-              className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0"
-            >
-              View all
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
-            {showcaseEntries.map((entry) => (
-              <ShowcaseCard key={entry.id} entry={entry} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Explore / Collaborate / Promote — moved below the live content.
-          These used to appear three times before anything real: the nav,
-          the hero headline, and here. Now it's twice (nav, here), and only
-          after Communities/Showcase/ColaboFest have already shown what the
-          platform actually is. */}
-      <section className="px-margin-mobile md:px-margin-desktop py-16 md:py-20 max-w-container-max mx-auto">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-          {PILLARS.map((p) => (
-            <Link
-              key={p.href}
-              href={p.href}
-              className="glass-card p-8 rounded-xl flex flex-col gap-6 group"
-            >
-              <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined text-3xl">{p.icon}</span>
-              </div>
-              <div>
-                <h2 className="font-headline-md text-headline-md text-on-background mb-3">
-                  {p.title}
-                </h2>
-                <p className="font-body-md text-body-md text-secondary">{p.body}</p>
-              </div>
-              <div className="mt-auto pt-4 flex items-center text-primary font-label-md text-label-md group-hover:translate-x-2 transition-transform">
-                {p.cta}
-                <span className="material-symbols-outlined ml-2">arrow_forward</span>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="py-12 border-t border-surface-variant/30 px-margin-mobile md:px-margin-desktop">
-        <div className="max-w-container-max mx-auto flex flex-col md:flex-row items-center justify-center gap-6 md:gap-12 font-label-md text-label-md text-secondary">
-          {HOW_IT_WORKS.map((step, i) => (
-            <Fragment key={step}>
-              {i > 0 && <div className="hidden md:block w-12 h-px bg-outline-variant" />}
-              <div className="flex items-center gap-3">
-                <span className="w-8 h-8 shrink-0 rounded-full bg-primary text-on-primary flex items-center justify-center font-label-sm text-label-sm">
+      {/* 2. How it works */}
+      <section className={`${WRAP} py-16 md:py-20`}>
+        <h2 className="font-headline-lg text-headline-lg text-on-background mb-10">How it works</h2>
+        <ol className="flex flex-col md:flex-row md:items-stretch gap-4 md:gap-3">
+          {STEPS.map((step, i) => (
+            <li key={step} className="contents">
+              {i > 0 && (
+                <span
+                  aria-hidden
+                  className="material-symbols-outlined text-primary self-center text-3xl shrink-0 rotate-90 md:rotate-0"
+                >
+                  arrow_forward
+                </span>
+              )}
+              <div className="glass-panel rounded-xl p-6 flex-1 flex flex-col gap-4">
+                <span className="w-9 h-9 rounded-full bg-primary text-on-primary flex items-center justify-center font-label-md text-label-md">
                   {i + 1}
                 </span>
-                <span>{step}</span>
+                <p className="font-body-lg text-body-lg text-on-background">{step}</p>
               </div>
-            </Fragment>
+            </li>
           ))}
+        </ol>
+        <p className="mt-6 font-label-md text-label-md text-secondary">
+          Nonprofit and pre-competitive. Built at UAB SPARC.
+        </p>
+      </section>
+
+      {/* 3. Choose your path */}
+      <section className="bg-surface-container-low">
+        <div className={`${WRAP} py-16 md:py-20`}>
+          <h2 className="font-headline-lg text-headline-lg text-on-background mb-10">
+            Choose your path
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter">
+            <div className="glass-panel rounded-xl p-8 md:p-10 flex flex-col gap-6 bg-white">
+              <span className="material-symbols-outlined text-primary text-4xl">science</span>
+              <div>
+                <h3 className="font-headline-md text-headline-md text-on-background mb-3">
+                  For researchers
+                </h3>
+                <p className="font-body-lg text-body-lg text-secondary">
+                  Explore papers, data and tools. Collaborate on projects. Promote your work.
+                </p>
+              </div>
+              <div className="mt-auto flex flex-wrap gap-3 pt-2">
+                {[
+                  ["Explore", "/explore"],
+                  ["Collaborate", "/collaborate"],
+                  ["Promote", "/promote"],
+                ].map(([label, href]) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="px-5 py-2 rounded-full bg-primary/10 text-primary font-label-md text-label-md hover:bg-primary/20 transition-colors"
+                  >
+                    {label}
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            <div className="glass-panel rounded-xl p-8 md:p-10 flex flex-col gap-6 bg-white">
+              <span className="material-symbols-outlined text-primary text-4xl">domain</span>
+              <div>
+                <h3 className="font-headline-md text-headline-md text-on-background mb-3">
+                  For industry
+                </h3>
+                <p className="font-body-lg text-body-lg text-secondary">
+                  See the project pipeline, find expertise, and sponsor challenges.
+                </p>
+              </div>
+              <div className="mt-auto pt-2">
+                <Link
+                  href="/industry"
+                  className="btn-primary inline-block px-6 py-3 rounded-lg font-label-md text-label-md text-center"
+                >
+                  See what&apos;s here for you
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 4. Updated every day */}
+      <section className={`${WRAP} py-16 md:py-20`}>
+        <div className="flex items-center justify-between gap-3 mb-8">
+          <h2 className="font-headline-lg text-headline-lg text-on-background">Updated every day</h2>
+          <Link
+            href="/explore"
+            className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0"
+          >
+            Explore everything
+          </Link>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-gutter">
+          {news.map((item) => (
+            <ItemCard key={item.id} item={item} />
+          ))}
+          <div className="glass-panel rounded-xl p-6 flex flex-col gap-4 justify-center">
+            <p className="font-label-md text-label-md uppercase tracking-wide text-primary">
+              What&apos;s live
+            </p>
+            {showEpisodes && (
+              <div>
+                <p className="font-headline-lg text-headline-lg text-on-background leading-none">
+                  {episodes}
+                </p>
+                <p className="font-body-md text-body-md text-secondary mt-1">podcast episodes</p>
+              </div>
+            )}
+            <p className="font-body-md text-body-md text-secondary">
+              Live search across papers, datasets, tools, trials and industry news from BioPharma
+              Dive, STAT and Endpoints.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. Coming into view */}
+      <section className="bg-surface-container-low">
+        <div className={`${WRAP} py-16 md:py-20`}>
+          <h2 className="font-headline-lg text-headline-lg text-on-background mb-2">
+            Coming into view
+          </h2>
+          <p className="font-body-md text-body-md text-secondary mb-10">
+            What&apos;s real now, and what unlocks next.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+            {COMING.map((c) => (
+              <div key={c.title} className="glass-panel rounded-xl p-6 bg-white flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="material-symbols-outlined text-primary text-3xl">{c.icon}</span>
+                  <Locked />
+                </div>
+                <h3 className="font-headline-md text-headline-md text-on-background">{c.title}</h3>
+                <p className="font-body-md text-body-md text-secondary">{c.body}</p>
+                {"href" in c && (
+                  <Link
+                    href={c.href}
+                    className="mt-auto font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                  >
+                    See the ColaboFest projects →
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* 6. SPARC capabilities */}
+      <section className={`${WRAP} py-16 md:py-20`}>
+        <h2 className="font-headline-lg text-headline-lg text-on-background mb-10">
+          SPARC capabilities
+        </h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
+          {CAPABILITIES.map((c) => (
+            <div key={c.title} className="glass-card rounded-xl p-6 flex flex-col gap-3">
+              <span className="material-symbols-outlined text-primary text-3xl">{c.icon}</span>
+              <h3 className="font-headline-md text-lg leading-tight text-on-background">
+                {c.title}
+              </h3>
+              <p className="font-body-md text-body-md text-secondary">{c.body}</p>
+              <Link
+                href={c.href}
+                className="mt-auto pt-2 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+              >
+                {c.cta} →
+              </Link>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* 7. Closing band */}
+      <section className={DARK}>
+        <div className={`${WRAP} py-16 md:py-20 flex flex-col md:flex-row md:items-center md:justify-between gap-8`}>
+          <h2 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight">
+            Bring us your hardest problem.
+          </h2>
+          <Link
+            href="/industry"
+            className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center md:shrink-0"
+          >
+            For industry
+          </Link>
         </div>
       </section>
     </>
