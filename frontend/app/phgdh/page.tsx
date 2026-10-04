@@ -26,10 +26,13 @@ import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton } from "@/components/explore/Skeletons";
 import SaveButton from "@/components/explore/SaveButton";
 import {
+  isNotice,
   mentionsPhgdh,
+  mergeDatasets,
   mergeUnique,
   pickKeyFinding,
   rankByNeuroThenDate,
+  rankDatasets,
 } from "@/lib/phgdhFilter";
 import { PHGDH_LINKS } from "@/lib/phgdhRoute";
 import { TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
@@ -192,22 +195,25 @@ export default function PhgdhCollectionPage() {
       const [specific, broad] = await Promise.all([search("PHGDH Alzheimer"), search("PHGDH")]);
       if (cancelled) return;
 
-      // Merge both queries, drop repeats, keep only what actually mentions PHGDH.
+      // Merge both queries, drop repeats, drop notices (corrections, retractions,
+      // ...), and keep only what actually mentions PHGDH.
+      const keep = (i: ExploreItem) => mentionsPhgdh(i) && !isNotice(i);
       const relevantPapers = mergeUnique(itemsOf(specific, "paper"), itemsOf(broad, "paper")).filter(
-        mentionsPhgdh
+        keep
       );
-      const relevantDatasets = mergeUnique(
+      const relevantDatasets = mergeDatasets(
         itemsOf(specific, "dataset"),
         itemsOf(broad, "dataset")
-      ).filter(mentionsPhgdh);
+      ).filter(keep);
 
-      // One featured item, shown under the header and not repeated in the lists.
+      // One featured item (a paper OR a dataset), shown under the header and not
+      // repeated in the lists.
       const featured = pickKeyFinding([...relevantPapers, ...relevantDatasets]);
       const notFeatured = (i: ExploreItem) => i !== featured;
 
       setKeyFinding(featured);
       setPapers(rankByNeuroThenDate(relevantPapers.filter(notFeatured)).slice(0, MAX_PAPERS));
-      setDatasets(rankByNeuroThenDate(relevantDatasets.filter(notFeatured)).slice(0, MAX_DATASETS));
+      setDatasets(rankDatasets(relevantDatasets.filter(notFeatured)).slice(0, MAX_DATASETS));
       setTrials(itemsOf(broad, "trial"));
       setLiveFailed(!specific && !broad);
       setLoading(false);
