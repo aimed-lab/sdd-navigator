@@ -35,14 +35,14 @@ const CAPABILITIES = [
     title: "Patient cohorts",
     body: "Real patient records through OneFlorida+ for cohort finding and trial design.",
     cta: "Request access",
-    href: "/invite",
+    href: "/invite?interest=cohorts",
   },
   {
     icon: "groups",
     title: "Synthetic patients",
     body: "Realistic synthetic patient data when real data can't be shared.",
     cta: "Request access",
-    href: "/invite",
+    href: "/invite?interest=synthetic",
   },
   {
     icon: "gavel",
@@ -54,7 +54,7 @@ const CAPABILITIES = [
     title: "AI access through MCP",
     body: "Connect your own AI tools to our drug discovery search.",
     cta: "Request access",
-    href: "/invite",
+    href: "/invite?interest=mcp",
   },
 ] as const;
 
