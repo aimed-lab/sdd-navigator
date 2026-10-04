@@ -55,9 +55,9 @@ export default function CategoryEmptyCard({
 
   if (failed) {
     return (
-      <div className="glass-card rounded-xl max-w-xl mx-auto text-center px-8 py-14">
+      <div className="rounded-[14px] bg-[#eeece6] max-w-xl mx-auto text-center px-8 py-14">
         <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
-        <h3 className="mt-4 font-headline-md text-headline-md text-on-background">
+        <h3 className="mt-4 font-title text-[24px] font-medium text-on-background">
           Couldn&apos;t search {lower} right now
         </h3>
         <p className="mt-2 text-secondary font-body-md">
@@ -70,14 +70,14 @@ export default function CategoryEmptyCard({
   }
 
   return (
-    <div className="glass-card rounded-xl max-w-xl mx-auto text-center px-8 py-14">
+    <div className="rounded-[14px] bg-[#eeece6] max-w-xl mx-auto text-center px-8 py-14">
       <span className="material-symbols-outlined text-5xl text-primary/70">
         {internal ? "group_add" : "search_off"}
       </span>
 
       {internal ? (
         <>
-          <h3 className="mt-4 font-headline-md text-headline-md text-on-background">
+          <h3 className="mt-4 font-title text-[24px] font-medium text-on-background">
             No {lower} for &ldquo;{query}&rdquo; registered yet
           </h3>
           <p className="mt-2 text-secondary font-body-md">
@@ -98,7 +98,7 @@ export default function CategoryEmptyCard({
         </>
       ) : (
         <>
-          <h3 className="mt-4 font-headline-md text-headline-md text-on-background">
+          <h3 className="mt-4 font-title text-[24px] font-medium text-on-background">
             No {lower} found for &ldquo;{query}&rdquo;
           </h3>
           <p className="mt-2 text-secondary font-body-md">

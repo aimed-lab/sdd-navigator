@@ -9,7 +9,7 @@
 export const PHGDH_LINKS = {
   papers: "/explore/Alzheimer's%20disease",
   alert: "/invite?interest=alerts", // locked
-  collection: "/explore/PHGDH",
+  collection: "/phgdh",
   analysis: "https://wiki.smartdrugdiscovery.org/PHGDH-Allosteric-RBD-Binder/Project-Dashboard",
   patent: "https://www.smartdrugdiscovery.org/post/phgdh2025",
   join: "https://www.smartdrugdiscovery.org/open-ip-gating",

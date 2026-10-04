@@ -87,7 +87,7 @@ export default async function Home() {
   return (
     <>
       {/* a. Hero: the PHGDH case study, drawn as a route on the map */}
-      <section className="bg-[var(--explore-bg)]">
+      <section id="phgdh-route" className="bg-[var(--explore-bg)] scroll-mt-16">
         <div className={`${WRAP} pt-12 md:pt-16 pb-12 md:pb-16`}>
           <div className="max-w-3xl mx-auto text-center space-y-4">
             <p className="font-label-md text-label-md uppercase tracking-wide text-[#C2410C]">

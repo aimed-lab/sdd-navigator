@@ -12,11 +12,14 @@ export default function PaperList({
   items,
   limit,
   onMore,
+  projectId,
 }: {
   items: ExploreItem[];
   /** All view: show at most this many, then a "More papers" link. */
   limit?: number;
   onMore?: () => void;
+  /** Saves into this project instead of a local toggle. */
+  projectId?: string;
 }) {
   if (items.length === 0) return null;
   const shown = limit ? items.slice(0, limit) : items;
@@ -57,7 +60,7 @@ export default function PaperList({
                     {right}
                   </span>
                 )}
-                <SaveButton />
+                <SaveButton item={item} projectId={projectId} />
               </div>
               {right && (
                 <p className="md:hidden col-start-1 text-xs text-secondary truncate">{right}</p>

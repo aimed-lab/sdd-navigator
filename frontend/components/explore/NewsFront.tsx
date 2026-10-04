@@ -17,11 +17,13 @@ export default function NewsFront({
   items,
   expanded = false,
   onAllNews,
+  projectId,
 }: {
   items: ExploreItem[];
   expanded?: boolean;
   /** All view only: selects the News chip. */
   onAllNews?: () => void;
+  projectId?: string;
 }) {
   if (items.length === 0) return null;
   const [lead, ...rest] = withBestLead(items);
@@ -69,7 +71,7 @@ export default function NewsFront({
                   ) : (
                     <div className={rowCls}>{row}</div>
                   )}
-                  <SaveButton />
+                  <SaveButton item={item} projectId={projectId} />
                 </li>
               );
             })}

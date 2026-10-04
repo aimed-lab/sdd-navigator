@@ -20,6 +20,12 @@ export type BentoTile = {
   tags: string[];
   /** Extra line shown on the large tile only, e.g. "Cheminformatics · BSD-3-Clause". */
   meta?: string | null;
+  /** Overrides the type label (e.g. "Reference"). Tint still follows `kind`. */
+  label?: string;
+  /** The underlying result, so the bookmark can save it into a project. */
+  item?: ExploreItem;
+  /** Marks a link that leaves the site: shows a ↗ after the name. */
+  external?: boolean;
 };
 
 export function curatedTile(item: CuratedItem, kind: "tool" | "dataset"): BentoTile {
@@ -32,6 +38,7 @@ export function curatedTile(item: CuratedItem, kind: "tool" | "dataset"): BentoT
     url: item.url,
     tags: item.tags,
     meta: [item.category, item.license].filter(Boolean).join(" · ") || null,
+    item: e,
   };
 }
 
@@ -43,6 +50,7 @@ export function liveTile(item: ExploreItem): BentoTile {
     description: item.summary?.trim() || null,
     url: item.url,
     tags: [],
+    item,
   };
 }
 
@@ -52,8 +60,18 @@ function spanClass(index: number): string {
   return "";
 }
 
-function Tile({ tile, index }: { tile: BentoTile; index: number }) {
-  const large = index === 0;
+function Tile({
+  tile,
+  index,
+  flat,
+  projectId,
+}: {
+  tile: BentoTile;
+  index: number;
+  flat: boolean;
+  projectId?: string;
+}) {
+  const large = !flat && index === 0;
   const t = TYPE_STYLES[typeKeyForKind(tile.kind)];
   const tags = tile.tags.slice(0, 2);
 
@@ -61,9 +79,9 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
     <>
       <div className="flex items-center justify-between gap-2">
         <span className="type-label" style={{ color: t.fg }}>
-          {t.label}
+          {tile.label ?? t.label}
         </span>
-        <SaveButton />
+        <SaveButton item={tile.item} projectId={projectId} />
       </div>
 
       <h3
@@ -73,6 +91,7 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
         }
       >
         {tile.name}
+        {tile.external && <span aria-hidden> ↗</span>}
       </h3>
 
       {tile.description && (
@@ -120,7 +139,7 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
   const cls =
     "tile group flex flex-col p-3.5 min-h-[140px] min-w-0 overflow-hidden " +
     (large ? "md:p-6 " : "") +
-    spanClass(index);
+    (flat ? "" : spanClass(index));
   return tile.url ? (
     <a
       href={tile.url}
@@ -138,12 +157,21 @@ function Tile({ tile, index }: { tile: BentoTile; index: number }) {
   );
 }
 
-export default function ResourceBento({ tiles }: { tiles: BentoTile[] }) {
+export default function ResourceBento({
+  tiles,
+  flat = false,
+  projectId,
+}: {
+  tiles: BentoTile[];
+  /** No spans: uniform tiles (for short lists such as reference links). */
+  flat?: boolean;
+  projectId?: string;
+}) {
   if (tiles.length === 0) return null;
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4 md:auto-rows-[minmax(140px,auto)] md:[grid-auto-flow:dense]">
       {tiles.map((tile, i) => (
-        <Tile key={tile.id} tile={tile} index={i} />
+        <Tile key={tile.id} tile={tile} index={i} flat={flat} projectId={projectId} />
       ))}
     </div>
   );

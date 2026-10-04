@@ -19,29 +19,21 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import ItemCard, { SkeletonCard } from "@/components/ItemCard";
-import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
 import CommunityTiles from "@/components/explore/CommunityTiles";
+import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
 import HandPickedRow from "@/components/explore/HandPickedRow";
 import NewsFront from "@/components/explore/NewsFront";
+import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
 import PodcastFeature from "@/components/explore/PodcastFeature";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import SectionHeading from "@/components/explore/SectionHeading";
+import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import ScopeChips from "@/components/ScopeChips";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
-
-const SECTION_TITLE: Record<string, string> = {
-  geneset: "Gene sets",
-  compound: "Compounds",
-  target: "Target-Disease Evidence",
-  trial: "Clinical Trials",
-  grant: "Funding & Grants",
-  resource: "Lab Resources",
-  person: "People",
-};
 
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
 // not removed: drop a kind from this set to bring its section back.
@@ -53,10 +45,6 @@ const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
 // the detailed ItemCard grid (trial status, compound facts, ... live there).
 const EDITORIAL_KINDS = new Set(["news", "paper", "tool", "dataset", "episode"]);
 
-const titleFor = (kind: string) =>
-  SECTION_TITLE[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
-
-const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6";
 const PAPERS_IN_ALL_VIEW = 6;
 // Same honesty rule as the homepage: a count is only shown when it is real and
 // at least this big.
@@ -103,18 +91,6 @@ function TrialStatusControl({
       })}
     </div>
   );
-}
-
-// Open Targets' association score aggregates evidence across source types
-// (genetic association, literature, animal model, ...) via a weighted
-// harmonic mean — it is not a biological-importance ranking, so a pair
-// with many evidence types can outscore one with strong-but-narrow
-// evidence. One short line here, not a card-level essay.
-const TARGET_SECTION_NOTE =
-  "Open Targets' association score reflects breadth of evidence sources, not biological importance.";
-
-function BlockSkeleton({ className = "h-64" }: { className?: string }) {
-  return <div className={`rounded-[14px] bg-[#eeece6] animate-pulse ${className}`} />;
 }
 
 function FeedError() {
@@ -319,21 +295,6 @@ function ExploreFeed() {
     );
   };
 
-  const otherSections = (kinds: ExploreSection[]) =>
-    kinds.map((section) => (
-      <section key={section.tool}>
-        <SectionHeading
-          title={titleFor(section.kind)}
-          subtitle={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
-        />
-        <div className={GRID}>
-          {section.items.map((item) => (
-            <ItemCard key={item.id} item={item} />
-          ))}
-        </div>
-      </section>
-    ));
-
   const allView = () => {
     const news = itemsOf("news");
     const papers = itemsOf("paper");
@@ -390,7 +351,7 @@ function ExploreFeed() {
             <CommunityTiles items={communities} />
 
             {/* 5. Anything else the backend returned */}
-            {otherSections(remaining)}
+            <OtherSections sections={remaining} />
           </>
         )}
       </div>
@@ -448,94 +409,61 @@ function ExploreFeed() {
         </p>
       );
     }
-    return <div className="space-y-14">{otherSections([section])}</div>;
+    return <div className="space-y-14">
+        <OtherSections sections={[section]} />
+      </div>;
   };
 
+  const statsLine = [
+    "Live across 7+ sources",
+    episodeCount !== null && episodeCount >= MIN_EPISODES_TO_SHOW
+      ? `${episodeCount} podcast episodes`
+      : null,
+    "updated daily",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div className="bg-[var(--explore-bg)] min-h-[calc(100vh-4rem)]">
-      <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-10 pb-32">
-        {/* Page heading */}
-        <header className="max-w-3xl mb-8">
-          <h1 className="font-title text-[34px] md:text-[44px] leading-[1.1] font-medium text-on-background">
-            What&apos;s happening in drug discovery
-          </h1>
-          <p className="mt-3 font-body-lg text-body-lg text-secondary">
-            Curated tools, live news and new research, updated daily.
-          </p>
-          <p className="mt-2 text-sm text-secondary/80">
-            {[
-              "Live across 7+ sources",
-              episodeCount !== null && episodeCount >= MIN_EPISODES_TO_SHOW
-                ? `${episodeCount} podcast episodes`
-                : null,
-              "updated daily",
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
-        </header>
-
-        {/* Search */}
-        <section className="max-w-3xl mb-8">
-          <form onSubmit={submit} className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              type="text"
-              placeholder="What are you working on? e.g. PHGDH in Alzheimer's, pancreatic cancer, CRISPR screening"
-              className="w-full h-14 px-5 pr-16 bg-white border border-outline-variant/40 rounded-[14px] focus:ring-2 focus:ring-primary/20 focus:border-primary text-body-md font-body-md placeholder:text-secondary/50 transition-all"
-            />
-            <button
-              type="submit"
-              aria-label="Search"
-              className="absolute right-2.5 top-2.5 bottom-2.5 btn-primary px-5 rounded-lg flex items-center justify-center"
-            >
-              <span className="material-symbols-outlined">search</span>
-            </button>
-          </form>
-        </section>
-
-        {/* Scope chips — the interests this feed was built from (personalized only) */}
-        <ScopeChips terms={scopeTerms} onEdit={editScope} />
-
-        {/* Category strip — shared switcher; horizontal scroll on mobile. The
-            Podcast chip routes to /explore/podcast rather than filtering inline. */}
-        <div className="mt-6">
-          <CategoryStrip selected={selected} onSelect={select} query={query} />
-        </div>
-
-        {/* Trial status filter, only on the Trials view (see earlier notes: the
-            URL/state is kept when switching away, only visibility changes). */}
-        {selected === "trial" && (
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
-            <div>
-              <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
-              <TrialStatusControl
-                value={trialStatusParam ?? ""}
-                onChange={onTrialStatusChange}
-              />
-            </div>
+    <ExplorePageFrame
+      title="What's happening in drug discovery"
+      subtitle="Curated tools, live news and new research, updated daily."
+      statsLine={statsLine}
+      search={{
+        value: query,
+        onChange: setQuery,
+        onSubmit: submit,
+        placeholder:
+          "What are you working on? e.g. PHGDH in Alzheimer's, pancreatic cancer, CRISPR screening",
+      }}
+      scopeChips={<ScopeChips terms={scopeTerms} onEdit={editScope} />}
+      chips={{ selected, onSelect: select, query }}
+    >
+      {/* Trial status filter, only on the Trials view (the URL/state is kept when
+          switching away, only visibility changes). */}
+      {selected === "trial" && (
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
+          <div>
+            <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
+            <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Communities chip — its own view, independent of the explore-backend
-            state: communities never came from that backend, so a slow or failed
-            Python backend must never block or error out this view. */}
-        {selected === "communities" ? (
-          communities.length === 0 ? (
-            <div className="text-center py-20 text-secondary font-body-md">
-              No communities found.
-            </div>
-          ) : (
-            <CommunitiesResultsSection items={communities} />
-          )
-        ) : selected === null ? (
-          allView()
+      {/* Communities chip: its own view, independent of the explore-backend
+          state (communities never came from that backend). */}
+      {selected === "communities" ? (
+        communities.length === 0 ? (
+          <div className="text-center py-20 text-secondary font-body-md">No communities found.</div>
         ) : (
-          selectedView(selected)
-        )}
-      </div>
-    </div>
+          <CommunityTiles items={communities} />
+        )
+      ) : selected === null ? (
+        allView()
+      ) : (
+        selectedView(selected)
+      )}
+    </ExplorePageFrame>
   );
 }
 
@@ -543,15 +471,7 @@ function ExploreFeed() {
 export default function ExplorePage() {
   return (
     <Suspense
-      fallback={
-        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
-          <div className={GRID}>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonCard key={i} />
-            ))}
-          </div>
-        </div>
-      }
+      fallback={<PageSkeleton />}
     >
       <ExploreFeed />
     </Suspense>

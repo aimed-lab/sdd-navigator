@@ -22,6 +22,22 @@ export const TYPE_STYLES: Record<TypeKey, { label: string; bg: string; fg: strin
   other: { label: "Resource", bg: "var(--type-other-bg)", fg: "var(--type-other-fg)" },
 };
 
+/** Short label for a result's type, including the niche kinds that share the
+ *  neutral tint. */
+const KIND_LABELS: Record<string, string> = {
+  geneset: "Gene set",
+  compound: "Compound",
+  target: "Target evidence",
+  trial: "Clinical trial",
+  person: "Person",
+  resource: "Lab resource",
+  grant: "Grant",
+};
+
+export function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? TYPE_STYLES[typeKeyForKind(kind)].label;
+}
+
 /** Maps an ExploreItem.kind to its visual type. */
 export function typeKeyForKind(kind: string): TypeKey {
   switch (kind) {

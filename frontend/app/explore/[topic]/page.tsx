@@ -20,39 +20,27 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import ItemCard, { SkeletonCard } from "@/components/ItemCard";
-import CategoryStrip, { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import { labelForKind } from "@/components/CategoryStrip";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
-import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
+import CommunityTiles from "@/components/explore/CommunityTiles";
+import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
+import NewsFront from "@/components/explore/NewsFront";
+import OtherSections from "@/components/explore/OtherSections";
+import PaperList from "@/components/explore/PaperList";
+import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
+import { TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import SectionHeading from "@/components/explore/SectionHeading";
+import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { submitFeedbackAction } from "@/app/feedback/actions";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
 
-const SECTION_TITLE: Record<string, string> = {
-  news: "Industry News",
-  paper: "Latest Papers",
-  dataset: "Datasets",
-  geneset: "Gene sets",
-  compound: "Compounds",
-  target: "Target-Disease Evidence",
-  tool: "Trending Tools",
-  trial: "Clinical Trials",
-  grant: "Funding & Grants",
-  episode: "From the Podcast",
-  resource: "Lab Resources",
-  person: "People",
-};
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
 // not removed: drop a kind from this set to bring its section back.
 const HIDDEN_SECTION_KINDS = new Set(["grant"]);
 const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
   (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
-
-const titleFor = (kind: string) =>
-  SECTION_TITLE[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
-
-const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6";
 
 // See app/explore/page.tsx for the rationale on this control — same option
 // set/values, same tokens, kept in sync between the two pages.
@@ -92,26 +80,6 @@ function TrialStatusControl({
     </div>
   );
 }
-
-function SectionHeader({ title, note }: { title: string; note?: string }) {
-  return (
-    <div className="flex items-center gap-3 mb-8">
-      <div className="w-1.5 h-8 bg-primary rounded-full" />
-      <div>
-        <h2 className="font-headline-lg text-headline-lg text-on-background">{title}</h2>
-        {note && <p className="text-xs text-tertiary mt-0.5">{note}</p>}
-      </div>
-    </div>
-  );
-}
-
-// Open Targets' association score aggregates evidence across source types
-// (genetic association, literature, animal model, ...) via a weighted
-// harmonic mean — it is not a biological-importance ranking, so a pair
-// with many evidence types can outscore one with strong-but-narrow
-// evidence. One short line here, not a card-level essay.
-const TARGET_SECTION_NOTE =
-  "Open Targets' association score reflects breadth of evidence sources, not biological importance.";
 
 function SearchResults() {
   const router = useRouter();
@@ -219,17 +187,11 @@ function SearchResults() {
     // read once via isFirstLoadRef, not meant to re-trigger this effect
   }, [topic, trialStatusParam]);
 
-  // A+B rule (same as feed): 3+ -> full grid; 1-2 -> pooled "Also Found"; 0 hidden.
-  const { fullSections, pooledItems } = useMemo(() => {
-    const withItems = visibleSections(data).filter((s) => s.items.length > 0);
-    const full = withItems.filter((s) => s.items.length >= 3);
-    const pooled = withItems
-      .filter((s) => s.items.length >= 1 && s.items.length < 3)
-      .flatMap((s) => s.items);
-    return { fullSections: full, pooledItems: pooled };
-  }, [data]);
+  const sections = useMemo(() => visibleSections(data), [data]);
+  const sectionOf = (kind: string) => sections.find((s) => s.kind === kind);
+  const itemsOf = (kind: string): ExploreItem[] => sectionOf(kind)?.items ?? [];
+  const totalItems = sections.reduce((n, s) => n + s.items.length, 0);
 
-  const totalItems = fullSections.reduce((n, s) => n + s.items.length, 0) + pooledItems.length;
   // Two DISTINCT settled failure shapes, never conflated:
   //   backendError — the search never actually ran (transport failure, or the
   //                  route itself reporting error:true). An availability
@@ -282,131 +244,199 @@ function SearchResults() {
     router.push(qs ? `/explore/${encodeURIComponent(topic)}?${qs}` : `/explore/${encodeURIComponent(topic)}`);
   };
 
-  return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
-      {/* Way back to the project this search came from — same breadcrumb
-          pattern as /projects/[id]/wiki (arrow_back + the thing you're
-          returning to, text-secondary hover:text-primary). Without this,
-          arriving via "Explore for this project" was a one-way trip: the
-          only path back was the browser's own Back button. */}
-      {projectId && projectName && (
-        <div className="max-w-3xl mx-auto mb-4">
-          <Link
-            href={`/projects/${projectId}`}
-            className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
-          >
-            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-            {projectName}
-          </Link>
-        </div>
-      )}
+  // ---- Per-view content (same components and look as /explore) -------------
 
-      {/* Saving-to-project indicator — a save from this page must never go
-          somewhere the visitor didn't expect, so this is not subtle. */}
-      {projectId && projectName && (
-        <div className="max-w-3xl mx-auto mb-4">
+  const select = (kind: string | null) => {
+    setSelected(kind);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
+  };
+
+  const emptyCategory = (kind: string) => (
+    <CategoryEmptyCard
+      label={labelForKind(kind)}
+      kind={kind}
+      query={topic}
+      failed={!!sections.find((s) => s.kind === kind && !!s.error)}
+      onBrowseAll={() => setSelected(null)}
+    />
+  );
+
+  const resourceSection = (kind: "dataset" | "tool", title: string) => {
+    const items = itemsOf(kind);
+    if (items.length === 0) return null;
+    return (
+      <section key={kind}>
+        <SectionHeading title={title} />
+        <ResourceBento tiles={items.map(liveTile)} projectId={projectId} />
+      </section>
+    );
+  };
+
+  const trialSection = () => {
+    const items = itemsOf("trial");
+    if (items.length === 0) return null;
+    return (
+      <section key="trial">
+        <SectionHeading title="Clinical trials" />
+        <div className={TILE_GRID}>
+          {items.map((item) => (
+            <TrialTile key={item.id} item={item} projectId={projectId} />
+          ))}
+        </div>
+      </section>
+    );
+  };
+
+  const allView = () => {
+    const papers = itemsOf("paper");
+    const news = itemsOf("news");
+    const handled = new Set(["paper", "dataset", "tool", "trial", "news"]);
+    const rest = sections.filter((s) => !handled.has(s.kind) && s.items.length > 0);
+    return (
+      <div className="space-y-16">
+        {papers.length > 0 && (
+          <section>
+            <SectionHeading title="Papers" />
+            <PaperList
+              items={papers}
+              limit={6}
+              onMore={() => select("paper")}
+              projectId={projectId}
+            />
+          </section>
+        )}
+        {resourceSection("dataset", "Datasets")}
+        {resourceSection("tool", "Tools")}
+        {trialSection()}
+        {news.length > 0 && (
+          <section>
+            <SectionHeading title="News" />
+            <NewsFront items={news} onAllNews={() => select("news")} projectId={projectId} />
+          </section>
+        )}
+        <CommunityTiles items={communities} />
+        <OtherSections sections={rest} projectId={projectId} />
+      </div>
+    );
+  };
+
+  const selectedView = (kind: string) => {
+    if (kind === "communities") {
+      return communities.length === 0 ? (
+        <div className="text-center py-20 text-secondary font-body-md">
+          No communities found for &ldquo;{topic}&rdquo;.
+        </div>
+      ) : (
+        <CommunityTiles items={communities} />
+      );
+    }
+
+    const section = sectionOf(kind);
+    if (!section || section.items.length === 0) return emptyCategory(kind);
+
+    if (kind === "paper") {
+      const key = section.items_key ?? [];
+      return (
+        <div className="space-y-14">
+          <section>
+            <SectionHeading title="Papers" />
+            <PaperList items={section.items} projectId={projectId} />
+          </section>
+          {key.length > 0 && (
+            <section>
+              <SectionHeading title="Key papers" subtitle="The most influential in this set." />
+              <PaperList items={key} projectId={projectId} />
+            </section>
+          )}
+        </div>
+      );
+    }
+    if (kind === "news") {
+      return <NewsFront items={section.items} expanded projectId={projectId} />;
+    }
+    if (kind === "dataset" || kind === "tool") {
+      return <div>{resourceSection(kind, kind === "dataset" ? "Datasets" : "Tools")}</div>;
+    }
+    if (kind === "trial") return <div>{trialSection()}</div>;
+    return (
+      <div className="space-y-14">
+        <OtherSections sections={[section]} projectId={projectId} />
+      </div>
+    );
+  };
+
+  const banner =
+    projectId && projectName ? (
+      <div className="space-y-3 mb-6">
+        {/* Way back to the project this search came from. */}
+        <Link
+          href={`/projects/${projectId}`}
+          className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
+        >
+          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          {projectName}
+        </Link>
+        {/* Saving-to-project indicator: a save from this page must never go
+            somewhere the visitor didn't expect, so this is not subtle. */}
+        <div>
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary font-label-md text-label-md">
             <span className="material-symbols-outlined text-[18px]">bookmark_added</span>
             Saving to <strong>{projectName}</strong>
           </div>
         </div>
-      )}
-
-      {/* Search (pre-filled, editable) */}
-      <section className="max-w-3xl mx-auto mb-6">
-        <form onSubmit={submit} className="relative">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            type="text"
-            placeholder="Search papers, tools, trials, podcast, people…"
-            className="w-full h-16 px-6 pr-16 bg-white border border-outline-variant/40 rounded-xl focus:ring-2 focus:ring-primary/20 focus:border-primary shadow-sm text-body-lg font-body-lg placeholder:text-secondary/50 transition-all"
-          />
-          <button
-            type="submit"
-            aria-label="Search"
-            className="absolute right-3 top-3 bottom-3 btn-primary px-6 rounded-lg flex items-center justify-center"
-          >
-            <span className="material-symbols-outlined">search</span>
-          </button>
-        </form>
-      </section>
-
-      {/* Query heading */}
-      <div className="mb-6 text-center">
-        <p className="text-secondary font-body-md">
-          Results for{" "}
-          <span className="text-on-background font-headline-md">&ldquo;{topic}&rdquo;</span>
-        </p>
       </div>
+    ) : undefined;
 
-      {/* Category strip — the Podcast chip routes to /explore/podcast, carrying
-          the routed topic so the episode grid opens scoped to the same search. */}
-      <CategoryStrip selected={selected} onSelect={setSelected} query={topic} />
-
-      {/* Filters — below the type tabs, scoped to the active one. Shows ONLY
-          on the Trials tab — see app/explore/page.tsx for the full
-          rationale (kept in sync between the two pages). Switching tabs
-          does not clear trial_status from the URL/state; only visibility
-          changes. */}
+  return (
+    <ExplorePageFrame
+      banner={banner}
+      title={<>Results for &ldquo;{topic}&rdquo;</>}
+      subtitle="Papers, datasets, tools, trials and news matching your search."
+      search={{
+        value: query,
+        onChange: setQuery,
+        onSubmit: submit,
+        placeholder: "Search papers, tools, trials, podcast, people…",
+      }}
+      chips={{ selected, onSelect: select, query: topic }}
+    >
+      {/* Trial status filter, only on the Trials view. */}
       {selected === "trial" && (
         <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
           <div>
             <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
-            <TrialStatusControl
-              value={trialStatusParam ?? ""}
-              onChange={onTrialStatusChange}
-            />
+            <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
           </div>
         </div>
       )}
 
-      {/* Communities chip — its own view, independent of the explore-backend
-          loading/error/data state below: see app/explore/page.tsx for the
-          full rationale (kept in sync between the two pages). */}
+      {/* Communities chip: independent of the explore-backend state. */}
       {selected === "communities" ? (
-        communities.length === 0 ? (
-          <div className="text-center py-20 text-secondary font-body-md">
-            No communities found for &ldquo;{topic}&rdquo;.
-          </div>
-        ) : (
-          <CommunitiesResultsSection items={communities} />
-        )
+        selectedView("communities")
       ) : (
         <>
-          {/* Loading */}
           {loading && (
-            <div className="space-y-16">
-              {[0, 1].map((s) => (
-                <section key={s}>
-                  <div className="h-8 w-48 rounded bg-surface-container mb-8 animate-pulse" />
-                  <div className={GRID}>
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <SkeletonCard key={i} />
-                    ))}
-                  </div>
-                </section>
-              ))}
+            <div className="space-y-10">
+              <BlockSkeleton className="h-40" />
+              <BlockSkeleton className="h-64" />
             </div>
           )}
 
-          {/* Error / no results at all — copy differs by which settled outcome
-              this was. A backend failure must never read like an empty search:
-              "try a broader term" tells someone their query was the problem when
-              the actual problem is that nothing searched at all. */}
+          {/* Error / no results at all. Copy differs by which settled outcome this
+              was: a backend failure must never read like an empty search. */}
           {!loading && showError && (
-            <div className="max-w-md mx-auto text-center py-24">
+            <div className="max-w-md mx-auto text-center py-16">
               {backendError ? (
                 <>
                   <span className="material-symbols-outlined text-5xl text-secondary/50">
                     cloud_off
                   </span>
-                  <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                  <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
                     Couldn&apos;t search right now
                   </h2>
                   <p className="mt-2 text-secondary font-body-md">
-                    The discovery backend didn&apos;t respond. This isn&apos;t about your
-                    search — please try again in a moment.
+                    The discovery backend didn&apos;t respond. This isn&apos;t about your search,
+                    please try again in a moment.
                   </p>
                 </>
               ) : (
@@ -414,7 +444,7 @@ function SearchResults() {
                   <span className="material-symbols-outlined text-5xl text-secondary/50">
                     search_off
                   </span>
-                  <h2 className="mt-4 font-headline-md text-headline-md text-on-background">
+                  <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
                     No results for &ldquo;{topic}&rdquo;
                   </h2>
                   <p className="mt-2 text-secondary font-body-md">
@@ -442,91 +472,10 @@ function SearchResults() {
             </div>
           )}
 
-          {/* Results */}
-          {!loading && !showError && (() => {
-            const activeSections =
-              selected === null
-                ? fullSections
-                : visibleSections(data).filter((s) => s.kind === selected && s.items.length > 0);
-            const showPooled = selected === null && pooledItems.length > 0;
-
-            // Selected category with no results -> the A+D invitation card.
-            // FAILED vs GENUINELY EMPTY: a real per-tool failure (tools/explore.py
-            // sets section.error when that tool's call raised) must not read as
-            // "try a broader term" — that's a lie when the source never actually
-            // searched. `activeSections`/`pooledItems` above are built from
-            // `.items` alone and drop `.error`, so look it up separately, straight
-            // from the raw response, for whichever kind is selected.
-            if (selected !== null && activeSections.length === 0) {
-              const failedSection = visibleSections(data).find(
-                (s) => s.kind === selected && !!s.error
-              );
-              return (
-                <CategoryEmptyCard
-                  label={labelForKind(selected)}
-                  kind={selected}
-                  query={topic}
-                  failed={!!failedSection}
-                  onBrowseAll={() => setSelected(null)}
-                />
-              );
-            }
-
-            return (
-              <div className="space-y-16">
-                {/* Communities, pinned first on "All" — see
-                    app/explore/page.tsx for the full rationale (kept in sync
-                    between the two pages). */}
-                {selected === null && <CommunitiesResultsSection items={communities} />}
-
-                {activeSections.map((section: ExploreSection) => (
-                  <section key={section.tool}>
-                    <SectionHeader
-                      title={titleFor(section.kind)}
-                      note={section.kind === "target" ? TARGET_SECTION_NOTE : undefined}
-                    />
-                    <div className={GRID}>
-                      {section.items.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} projectId={projectId} />
-                      ))}
-                    </div>
-
-                    {/* Key Papers — same pool as "Latest Papers" above, re-ordered
-                        by WINNER instead of date desc; a second subsection under
-                        the existing Papers section/tab, not a new CategoryStrip
-                        tab — see app/explore/page.tsx for the full rationale
-                        (kept in sync between the two pages). "★ Key paper" is
-                        the wording ItemCard already uses for a WINNER-ranked
-                        item's badge. */}
-                    {section.kind === "paper" && (section.items_key?.length ?? 0) > 0 && (
-                      <div className="mt-12">
-                        <SectionHeader title="Key Papers" />
-                        <div className={GRID}>
-                          {section.items_key!.map((item: ExploreItem) => (
-                            <ItemCard key={item.id} item={item} projectId={projectId} variant="key" />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </section>
-                ))}
-
-                {showPooled && (
-                  <section>
-                    <SectionHeader title="Also Found" />
-                    <div className={GRID}>
-                      {pooledItems.map((item: ExploreItem) => (
-                        <ItemCard key={item.id} item={item} projectId={projectId} />
-                      ))}
-                    </div>
-                  </section>
-                )}
-              </div>
-            );
-          })()}
+          {!loading && !showError && (selected === null ? allView() : selectedView(selected))}
         </>
       )}
-    </div>
+    </ExplorePageFrame>
   );
 }
 
@@ -535,15 +484,7 @@ function SearchResults() {
 export default function SearchResultsPage() {
   return (
     <Suspense
-      fallback={
-        <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-32">
-          <div className={GRID}>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonCard key={i} />
-            ))}
-          </div>
-        </div>
-      }
+      fallback={<PageSkeleton />}
     >
       <SearchResults />
     </Suspense>
