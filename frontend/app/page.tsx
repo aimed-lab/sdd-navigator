@@ -1,7 +1,6 @@
 // Landing page ("/") — the BioTechX Europe pitch: open source drug discovery,
-// an open network where researchers build projects and industry partners with
-// them. The hero presents the hub and its three functions (Explore, Collaborate,
-// Promote, same words as the nav). PHGDH in Alzheimer's is the worked example:
+// an open network where researchers build projects. The hero presents the hub
+// and its three functions (Explore, Collaborate, Promote, same words as the nav). PHGDH in Alzheimer's is the worked example:
 // the coral route on the clickable DiscoveryMap plus the grouped step list under
 // it; its links all live in lib/phgdhRoute.ts. Uses the shared design
 // tokens (tailwind.config.ts) and the .btn-primary class from globals.css. Nav
@@ -62,22 +61,6 @@ async function getEpisodeCount(): Promise<number | null> {
   }
 }
 
-const AUDIENCES = [
-  {
-    icon: "science",
-    title: "I'm a researcher",
-    body: "Explore, collaborate and promote your work.",
-    cta: "Start exploring",
-    href: "/explore",
-  },
-  {
-    icon: "domain",
-    title: "I'm from industry",
-    body: "See the project pipeline, find expertise, sponsor challenges.",
-    cta: "See what's here for you",
-    href: "/industry",
-  },
-] as const;
 
 
 const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
@@ -175,35 +158,15 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* c. Two audiences */}
+      {/* c. One call to action */}
       <section>
-        <div className={`${WRAP} py-14 md:py-16`}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter">
-            {AUDIENCES.map((c) => (
-              <div
-                key={c.title}
-                className="rounded-2xl bg-white border border-outline-variant/60 p-8 md:p-10 flex flex-col gap-5"
-              >
-                <span className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-primary text-4xl">{c.icon}</span>
-                </span>
-                <div>
-                  <h3 className="font-headline-md text-headline-md text-on-background mb-2">
-                    {c.title}
-                  </h3>
-                  <p className="font-body-lg text-body-lg text-secondary">{c.body}</p>
-                </div>
-                <div className="mt-auto pt-2">
-                  <Link
-                    href={c.href}
-                    className="btn-primary inline-block px-6 py-3 rounded-lg font-label-md text-label-md text-center"
-                  >
-                    {c.cta}
-                  </Link>
-                </div>
-              </div>
-            ))}
-          </div>
+        <div className={`${WRAP} py-14 md:py-16 flex justify-center`}>
+          <Link
+            href="/explore"
+            className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center"
+          >
+            Start exploring →
+          </Link>
         </div>
       </section>
 
@@ -218,13 +181,13 @@ export default async function Home() {
           className={`${WRAP} py-16 md:py-20 flex flex-col md:flex-row md:items-center md:justify-between gap-8`}
         >
           <h2 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight">
-            Bring us your hardest problem.
+            Have a target in mind? Start exploring.
           </h2>
           <Link
-            href="/industry"
+            href="/explore"
             className="btn-primary px-8 py-4 rounded-lg font-label-md text-lg text-center md:shrink-0"
           >
-            For industry
+            Start exploring →
           </Link>
         </div>
       </section>

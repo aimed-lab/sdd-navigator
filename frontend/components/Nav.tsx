@@ -23,7 +23,6 @@ const PILLARS = [
   { label: "Explore", href: "/explore" },
   { label: "Collaborate", href: "/collaborate" },
   { label: "Promote", href: "/promote" },
-  { label: "For industry", href: "/industry" },
 ] as const;
 
 // Projects used to be a pillar here (added only when signed in, since a

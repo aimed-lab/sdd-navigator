@@ -1,5 +1,5 @@
 // "The network" teaser: three columns of blurred grey placeholder bars with a
-// lock overlay and an invite-code button. Shared by the homepage and /industry.
+// lock overlay and an invite-code button. Used on the homepage.
 // Placeholder bars only, never real or invented names. Server-safe (no state).
 
 import Link from "next/link";

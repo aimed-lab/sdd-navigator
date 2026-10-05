@@ -8,6 +8,12 @@ const nextConfig: NextConfig = {
         destination: "/login",
         permanent: true,
       },
+      // The industry page was removed; keep any shared old link working.
+      {
+        source: "/industry",
+        destination: "/",
+        permanent: true,
+      },
     ];
   },
   images: {

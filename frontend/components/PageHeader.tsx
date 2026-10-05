@@ -1,7 +1,7 @@
 // The one page header every top-level page uses: an optional small uppercase
 // label, a Newsreader title, a muted one-line subtitle, and an optional action
 // on the right (a button). Extracted from ExplorePageFrame so Explore, Collaborate,
-// Promote, Industry, Invite, About, Contact and the community pages all start the
+// Promote, Invite, About, Contact and the community pages all start the
 // same way. Server-safe (no state).
 
 export default function PageHeader({
