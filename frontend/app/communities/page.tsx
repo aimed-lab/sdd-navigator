@@ -9,6 +9,8 @@
 
 import { getCurrentUser } from "@/lib/auth";
 import { listCommunities, listMyMemberships } from "@/lib/server/communities";
+import PageHeader, { PageShell } from "@/components/PageHeader";
+import SectionHeading from "@/components/explore/SectionHeading";
 import CommunityCard from "@/components/communities/CommunityCard";
 import CreateCommunitySection from "@/components/communities/CreateCommunitySection";
 
@@ -27,26 +29,28 @@ export default async function CommunitiesPage() {
   const others = communities.filter((c) => memberships[c.id]?.status !== "active");
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-12">
-      <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-outline-variant/30 pb-6">
-        <h1 className="font-display-lg text-[40px] leading-tight text-on-background">
-          Communities
-        </h1>
-        {user ? (
-          <CreateCommunitySection />
-        ) : (
-          <a
-            href="/login?callbackUrl=%2Fcommunities"
-            className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
-          >
-            Sign in to create one
-          </a>
-        )}
-      </section>
+    <PageShell className="flex flex-col gap-12">
+      <PageHeader
+        title="Communities"
+        subtitle="Groups working on shared problems."
+        className="mb-0"
+        action={
+          user ? (
+            <CreateCommunitySection />
+          ) : (
+            <a
+              href="/login?callbackUrl=%2Fcommunities"
+              className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
+            >
+              Sign in to create one
+            </a>
+          )
+        }
+      />
 
       {user && (
         <section className="flex flex-col gap-6">
-          <h2 className="font-headline-md text-headline-md text-on-background">Your communities</h2>
+          <SectionHeading title="Your communities" className="" />
           {yours.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
               {yours.map((c) => (
@@ -69,7 +73,7 @@ export default async function CommunitiesPage() {
       )}
 
       <section className="flex flex-col gap-6">
-        <h2 className="font-headline-md text-headline-md text-on-background">Other communities</h2>
+        <SectionHeading title="Other communities" className="" />
         {others.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-gutter">
             {others.map((c) => (
@@ -88,6 +92,6 @@ export default async function CommunitiesPage() {
           </p>
         )}
       </section>
-    </div>
+    </PageShell>
   );
 }

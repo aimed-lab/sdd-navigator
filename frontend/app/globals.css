@@ -2,13 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Editorial type tints (see lib/typeStyles.ts). bg = tile tint, fg = label color. */
+:root {
+  --explore-bg: #fbfaf7;
+  --type-paper-bg: #e6edf7;     --type-paper-fg: #28579a;
+  --type-dataset-bg: #e6f1ef;   --type-dataset-fg: #0b6e69;
+  --type-tool-bg: #eeeaf6;      --type-tool-fg: #5e4596;
+  --type-news-bg: #f8ecdd;      --type-news-fg: #9a4c0e;
+  --type-podcast-bg: #f3efdd;   --type-podcast-fg: #6a5c1e;
+  --type-community-bg: #e4f0e6; --type-community-fg: #1f6b3a;
+  --type-other-bg: #eeece6;     --type-other-fg: #4a4740;
+}
+
 @layer base {
   html {
     color-scheme: light;
     scroll-behavior: smooth;
   }
   body {
-    background-color: #f7f9fb; /* surface / background */
+    background-color: #fbfaf7; /* warm off-white, same on every page */
     color: #191c1e;           /* on-background */
     -webkit-font-smoothing: antialiased;
     font-family: "Inter", sans-serif;
@@ -19,25 +31,46 @@
 }
 
 @layer components {
-  /* Glassmorphism card — the core "airy" surface from DESIGN.md */
+  /* Cards: one system. White on the warm page, 14px radius, no border, a hair
+     of shadow at rest and a small lift on hover (same motion as .tile). Kept
+     under the old class names so every existing card inherits it. */
   .glass-card {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(224, 227, 229, 0.5);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: #ffffff;
+    border: none;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(40, 36, 28, 0.05);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
   }
   .glass-card:hover {
-    border-color: #22c55e; /* primary-container */
-    transform: translateY(-4px);
-    box-shadow: 0px 10px 30px rgba(15, 23, 42, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(40, 36, 28, 0.1);
   }
 
-  /* Same glass surface, no hover lift — for static content panels that aren't
-     clickable (the lift on .glass-card reads as "this is a link"). */
+  /* Same surface, no hover lift: static content panels that aren't clickable. */
   .glass-panel {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(224, 227, 229, 0.5);
+    background: #ffffff;
+    border: none;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(40, 36, 28, 0.05);
+  }
+
+  /* Editorial tile: no border, 14px radius, small lift on hover. */
+  .tile {
+    border-radius: 14px;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(40, 36, 28, 0.1);
+  }
+
+  /* Small uppercase type label (color comes from the type's fg). */
+  .type-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    line-height: 1.2;
   }
 
   /* Primary CTA — Research Green */

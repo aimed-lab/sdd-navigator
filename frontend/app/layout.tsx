@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Newsreader } from "next/font/google";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
@@ -6,6 +7,15 @@ import { AuthProvider } from "@/context/AuthContext";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import GeneralFeedback from "@/components/feedback/GeneralFeedback";
+
+// Serif for editorial titles (Explore, homepage tiles). Exposed as --font-title,
+// used by the `font-title` Tailwind class. Body and labels keep Inter/Geist.
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-title",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "SmartDrugDiscovery",
@@ -15,7 +25,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={newsreader.variable}>
       <head>
         {/* Fonts per DESIGN.md: Geist (display/headline/label) + Inter (body) + Material Symbols */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />

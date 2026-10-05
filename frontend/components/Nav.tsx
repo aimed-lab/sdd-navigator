@@ -80,11 +80,11 @@ export default function Nav() {
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
   return (
-    <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-white/70 backdrop-blur-xl border-b border-surface-variant/50 shadow-sm">
+    <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-[#fbfaf7]/85 backdrop-blur-xl border-b border-[#e7e4dc]">
       <div className="max-w-container-max mx-auto h-full flex justify-between items-center px-margin-mobile md:px-margin-desktop">
         {/* Left: wordmark + center pillars */}
         <div className="flex items-center gap-8">
-          <Link href="/" className="font-headline-md text-headline-md font-bold text-on-background">
+          <Link href="/" className="font-label-md text-[24px] leading-8 font-bold text-on-background">
             SmartDrugDiscovery
           </Link>
           <div className="hidden md:flex items-center gap-6">

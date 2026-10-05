@@ -48,12 +48,12 @@ export default function ResourceCard({
     .filter((r) => r.value !== null);
 
   return (
-    <article className="glass-panel rounded-2xl p-7 flex flex-col h-full">
-      <span className="self-start px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm mb-4">
+    <article className="tile p-6 flex flex-col h-full" style={{ background: "var(--type-other-bg)" }}>
+      <span className="self-start px-3 py-1 rounded-full bg-white/70 text-on-surface-variant font-label-sm text-label-sm mb-4">
         {label}
       </span>
 
-      <h3 className="font-headline-md text-lg leading-tight text-on-background mb-1">{name}</h3>
+      <h3 className="font-title text-[20px] leading-tight font-medium text-on-background mb-1">{name}</h3>
       {lab && <p className="font-body-sm text-body-sm text-secondary mb-4">{lab}</p>}
 
       {rows.length > 0 && (
@@ -67,7 +67,7 @@ export default function ResourceCard({
         </dl>
       )}
 
-      <div className="mt-auto pt-6 border-t border-outline-variant/30">
+      <div className="mt-auto pt-6 border-t border-black/10">
         <p className="font-label-md text-label-md text-on-background truncate">
           {resource.owner_name || "Community member"}
         </p>

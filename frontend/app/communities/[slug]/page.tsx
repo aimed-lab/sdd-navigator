@@ -34,6 +34,7 @@ import ExploreSection from "@/components/communities/ExploreSection";
 import EmptySection from "@/components/communities/EmptySection";
 import CollapsibleSection from "@/components/communities/CollapsibleSection";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
+import PageHeader, { PageShell } from "@/components/PageHeader";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
 import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
@@ -196,7 +197,7 @@ export default async function CommunityDetailPage({
     membership.isAdmin && !members.some((m) => m.role === "admin" && m.user_id !== user?.id);
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-6 md:pt-8 pb-16 md:pb-20">
+    <PageShell>
       {/* Way back to the community list — same breadcrumb pattern as
           Explore's own back-to-project link
           (app/explore/[topic]/page.tsx), and the project page's own
@@ -219,30 +220,25 @@ export default async function CommunityDetailPage({
       </div>
 
       <div className="flex flex-col gap-12">
-        <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-outline-variant/30 pb-6">
-          <div>
-            <h1 className="font-display-lg text-[40px] leading-tight text-on-background">
-              {community.name}
-            </h1>
-            {community.description && (
-              <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
-                {community.description}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col items-start sm:items-end gap-3 shrink-0">
-            <JoinLeaveControl
-              communityId={community.id}
-              communityName={community.name}
-              slug={community.slug}
-              isOpen={community.is_open}
-              membership={membership}
-            />
-            {/* Any active member, not just admins — the point is members
-                can bring people in themselves. */}
-            {isMember && <CopyLinkButton slug={community.slug} />}
-          </div>
-        </section>
+        <PageHeader
+          title={community.name}
+          subtitle={community.description || undefined}
+          className="mb-0"
+          action={
+            <div className="flex flex-col items-start sm:items-end gap-3">
+              <JoinLeaveControl
+                communityId={community.id}
+                communityName={community.name}
+                slug={community.slug}
+                isOpen={community.is_open}
+                membership={membership}
+              />
+              {/* Any active member, not just admins: the point is members
+                  can bring people in themselves. */}
+              {isMember && <CopyLinkButton slug={community.slug} />}
+            </div>
+          }
+        />
 
         {/* The pitch for a non-member on a 'standard' community — see
             CommunityPublicPreview's own comment on why this sits here
@@ -487,6 +483,6 @@ export default async function CommunityDetailPage({
           </ManageCommunityCard>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

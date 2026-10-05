@@ -28,7 +28,10 @@
 
 import Link from "next/link";
 import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
+import OpenCallTile from "@/components/collaborate/OpenCallTile";
 import PostCard from "@/components/collaborate/PostCard";
+import PageHeader, { PageShell } from "@/components/PageHeader";
+import SectionHeading from "@/components/explore/SectionHeading";
 import ResourceCard from "@/components/collaborate/ResourceCard";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
@@ -53,19 +56,12 @@ function boardHref(params: { q?: string; filter?: string; area?: string }) {
   return qs ? `/collaborate?${qs}` : "/collaborate";
 }
 
-// Type filter + topic chips — the lighter, FILTER-level pill.
-//
-// SELECTED, NOT ACTION (2026-08-21 design pass): an active chip used to be
-// solid primary green — the exact same treatment as "Add to the board" and
-// "Join", so five unrelated green elements all read as equally-important
-// buttons with no entry point. A selected chip isn't an action to take,
-// it's a STATE to notice — so it now uses secondary-container (the existing
-// light blue-lavender token, not a new color) with bold text instead.
+// Type filter + topic chips: the same pill as Explore's chips.
 function chip(active: boolean) {
   return (
-    "px-4 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
+    "px-6 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
     (active
-      ? "bg-secondary-container text-on-secondary-container font-semibold"
+      ? "bg-primary text-on-primary"
       : "bg-surface-container-low text-secondary hover:bg-surface-container hover:text-primary")
   );
 }
@@ -86,12 +82,10 @@ function InvitationCard({
   return (
     <Link
       href={href}
-      className="group border-2 border-dashed border-outline-variant/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-surface-container-low transition-all min-h-[18rem]"
+      className="tile group p-8 flex flex-col items-center justify-center text-center min-h-[18rem]"
+      style={{ background: "var(--type-other-bg)" }}
     >
-      <span className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-        <span className="material-symbols-outlined text-primary text-3xl">handshake</span>
-      </span>
-      <h3 className="font-headline-md text-lg text-on-background mb-2">{heading}</h3>
+      <h3 className="font-title text-[24px] font-medium text-on-background mb-2">{heading}</h3>
       <p className="font-body-md text-body-md text-secondary mb-5 max-w-xs">{body}</p>
       <span className="flex items-center gap-2 font-label-md text-label-md text-primary">
         {cta}
@@ -136,22 +130,19 @@ export default async function CollaboratePage({
   const newResourceHref = "/collaborate/resources/new";
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-6 md:py-8">
-      <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
-        <div>
-          <h1 className="font-headline-lg text-headline-lg md:text-[32px] md:leading-tight text-on-background">
-            Collaborate
-          </h1>
-          <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
-            Share what your lab offers, find what you need, and build teams — for
-            the drug discovery community.
-          </p>
-        </div>
-        <AddToBoardButton newPostHref={newPostHref} newResourceHref={newResourceHref} />
-      </header>
+    <PageShell>
+      <PageHeader
+        title="Collaborate"
+        subtitle="Share what your lab offers, find what you need, and build teams, for the drug discovery community."
+        action={<AddToBoardButton newPostHref={newPostHref} newResourceHref={newResourceHref} />}
+        className="mb-0"
+      />
+
+      {/* Pinned open call: a static tile, not a post */}
+      <OpenCallTile />
 
       {/* Search (plain GET form — keeps every view linkable) */}
-      <form action="/collaborate" method="get" className="mt-5">
+      <form action="/collaborate" method="get" className="mt-8 max-w-3xl">
         {filter !== "all" && <input type="hidden" name="filter" value={filter} />}
         {area && <input type="hidden" name="area" value={area} />}
         <div className="relative">
@@ -164,13 +155,13 @@ export default async function CollaboratePage({
             defaultValue={q}
             placeholder="Search collaborations, resources, people…"
             aria-label="Search the collaboration board"
-            className="w-full glass-panel rounded-xl pl-12 pr-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
         </div>
       </form>
 
       {/* Type — a FILTER on the board. Lighter pills. */}
-      <div className="mt-4 flex flex-wrap gap-2 items-center">
+      <div className="mt-6 flex flex-wrap gap-3 items-center">
         {FILTERS.map((f) => (
           <Link
             key={f.value}
@@ -185,7 +176,7 @@ export default async function CollaboratePage({
       {/* Topics — a SUBJECT, not an intent, so it's a row of its own rather
           than sharing the type-filter row it used to sit in. */}
       {areas.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2 items-center">
+        <div className="mt-3 flex flex-wrap gap-3 items-center">
           <span className="font-label-sm text-label-sm text-secondary/70 uppercase mr-1">
             Topics
           </span>
@@ -203,7 +194,7 @@ export default async function CollaboratePage({
 
       {/* Result line */}
       {(posts.length > 0 || resources.length > 0 || filtered) && (
-        <p className="mt-4 font-label-md text-label-md text-secondary">
+        <p className="mt-6 text-sm text-secondary/80">
           {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
           {resources.length === 1 ? "resource" : "resources"}
           {filtered && " matching"}
@@ -232,7 +223,7 @@ export default async function CollaboratePage({
           />
         </div>
       ) : (
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {posts.map((post) => (
             <PostCard key={post.id} post={post} signedIn={signedIn} />
           ))}
@@ -245,17 +236,13 @@ export default async function CollaboratePage({
       )}
 
       {/* Shared lab resources */}
-      <section className="mt-14 pt-8 border-t border-outline-variant/30">
+      <section className="mt-16 pt-10 border-t border-[#e7e4dc]">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h2 className="font-headline-md text-headline-md text-on-background">
-              Shared lab resources
-            </h2>
-            <p className="mt-1 font-body-md text-body-md text-secondary">
-              Techniques, equipment, vectors, models, and more that labs have
-              registered for others to use.
-            </p>
-          </div>
+          <SectionHeading
+            title="Shared lab resources"
+            subtitle="Techniques, equipment, vectors, models, and more that labs have registered for others to use."
+            className=""
+          />
           <Link
             href={newResourceHref}
             className="btn-outline shrink-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg font-label-md text-label-md"
@@ -275,13 +262,13 @@ export default async function CollaboratePage({
             />
           </div>
         ) : (
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {resources.map((r) => (
               <ResourceCard key={r.id} resource={r} signedIn={signedIn} />
             ))}
           </div>
         )}
       </section>
-    </div>
+    </PageShell>
   );
 }

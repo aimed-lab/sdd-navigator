@@ -1,7 +1,8 @@
 // Promote — /promote. The showcase gallery.
 //
-// Layout follows design/stitch/smartdrugdiscovery_promote_with_showcase_images,
-// restyled in the shared design system. Nav/Footer come from the root layout,
+// Editorial look shared with /explore: #FBFAF7 page, Newsreader serif title,
+// the same pill chips, tinted tiles (components/promote/ShowcaseCard.tsx). It was
+// laid out from design/stitch/smartdrugdiscovery_promote_with_showcase_images. Nav/Footer come from the root layout,
 // and per design/SHELL.md the Stitch file's own header/footer are ignored —
 // along with its "1,200+ laboratories" CTA band, which is an invented statistic
 // (see the no-fake-metrics rule established on the landing page).
@@ -20,9 +21,10 @@ import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/sh
 
 export const dynamic = "force-dynamic";
 
+// Same pill as CategoryStrip's chips on Explore.
 function chip(active: boolean) {
   return (
-    "px-4 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
+    "px-6 py-2 rounded-full font-label-md text-label-md whitespace-nowrap transition-all " +
     (active
       ? "bg-primary text-on-primary"
       : "bg-surface-container-low text-secondary hover:bg-surface-container hover:text-primary")
@@ -33,12 +35,10 @@ function InvitationCard({ heading, body }: { heading: string; body: string }) {
   return (
     <Link
       href="/promote/submit"
-      className="group border-2 border-dashed border-outline-variant/50 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-surface-container-low transition-all min-h-[16rem]"
+      className="tile group p-8 flex flex-col items-center justify-center text-center min-h-[16rem]"
+      style={{ background: "var(--type-other-bg)" }}
     >
-      <span className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-        <span className="material-symbols-outlined text-primary text-3xl">campaign</span>
-      </span>
-      <h3 className="font-headline-md text-lg text-on-background mb-2">{heading}</h3>
+      <h3 className="font-title text-[24px] font-medium text-on-background mb-2">{heading}</h3>
       <p className="font-body-md text-body-md text-secondary mb-5 max-w-xs">{body}</p>
       <span className="flex items-center gap-2 font-label-md text-label-md text-primary">
         Submit to the showcase
@@ -63,12 +63,13 @@ export default async function PromotePage({
   const filtered = type !== "all";
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16 space-y-20">
+    <div className="bg-[var(--explore-bg)] min-h-[calc(100vh-4rem)]">
+    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-10 pb-32">
       {/* ── Showcase ─────────────────────────────────────────────────────── */}
       <section>
         <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
           <div>
-            <h1 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight text-on-background">
+            <h1 className="font-title text-[34px] md:text-[44px] leading-[1.1] font-medium text-on-background">
               Promote
             </h1>
             <p className="mt-3 font-body-lg text-body-lg text-secondary max-w-2xl">
@@ -93,7 +94,7 @@ export default async function PromotePage({
         </header>
 
         {/* Type filters */}
-        <div className="mt-8 flex flex-wrap gap-2">
+        <div className="mt-8 flex gap-3 overflow-x-auto no-scrollbar pb-1">
           <Link href="/promote" className={chip(type === "all")}>
             All
           </Link>
@@ -104,7 +105,7 @@ export default async function PromotePage({
           ))}
         </div>
 
-        <p className="mt-6 font-label-md text-label-md text-secondary">
+        <p className="mt-6 text-sm text-secondary/80">
           {entries.length} {entries.length === 1 ? "entry" : "entries"}
           {filtered && " · "}
           {filtered && (
@@ -149,11 +150,11 @@ export default async function PromotePage({
           // that's just an ordinary short last row — the completely normal,
           // unremarkable way every card grid on the web ends when the count
           // isn't a clean multiple of the column count.
-          <div className="mt-8 space-y-6">
+          <div className="mt-8 space-y-4">
             <ShowcaseCard entry={entries[0]} featured />
 
             {entries.length > 1 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {entries.slice(1).map((e) => (
                   <ShowcaseCard key={e.id} entry={e} />
                 ))}
@@ -162,7 +163,7 @@ export default async function PromotePage({
           </div>
         )}
       </section>
-
+    </div>
     </div>
   );
 }
