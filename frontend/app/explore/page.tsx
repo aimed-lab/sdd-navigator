@@ -24,6 +24,7 @@ import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSe
 import CommunityTiles from "@/components/explore/CommunityTiles";
 import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
 import HandPickedRow from "@/components/explore/HandPickedRow";
+import LabPapers from "@/components/explore/LabPapers";
 import NewsFront from "@/components/explore/NewsFront";
 import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
@@ -324,6 +325,9 @@ function ExploreFeed() {
           />
           <HandPickedRow mode="mix" onBrowseAll={() => select("tool")} />
         </section>
+
+        {/* 2b. The AI.MED Lab's recent publications (static list, lib/labPapers.ts) */}
+        <LabPapers />
 
         {!loading && !showError && (
           <>

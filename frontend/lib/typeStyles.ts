@@ -93,7 +93,9 @@ export function relativeTime(iso: string | null | undefined): string | null {
 /** Four-digit year, or null. */
 export function yearOf(iso: string | null | undefined): string | null {
   const d = validDate(iso);
-  return d ? String(d.getFullYear()) : null;
+  // UTC year: ISO dates are UTC, and a year-only date ("2026-01-01T00:00:00Z")
+  // would otherwise read as the previous year in any timezone behind UTC.
+  return d ? String(d.getUTCFullYear()) : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -465,12 +465,14 @@ export const curatedDatasets: CuratedItem[] = [
     url: "https://deepchem.readthedocs.io/en/latest/api_reference/moleculenet.html",
     tags: ["benchmarks", "machine learning"],
   },
-
-  // TODO(Chen lab): add the Chen lab virtual cell datasets below. Fill in the
-  // real name, one-line description and official URL for each; do not guess.
-  // TODO(Chen lab): virtual cell dataset #1
-  // TODO(Chen lab): virtual cell dataset #2
-  // TODO(Chen lab): virtual cell dataset #3
+  {
+    id: "cm4ai",
+    name: "Cell Maps for AI (CM4AI)",
+    oneLine: "AI-ready maps of human cell architecture from proteomics, imaging and CRISPR.",
+    category: "Virtual cell",
+    url: "https://cm4ai.org/data-releases/",
+    tags: ["virtual cell", "Bridge2AI"],
+  },
 ];
 
 /** Shapes a curated entry as an ExploreItem so the existing ItemCard renders it

@@ -56,14 +56,14 @@ export default function PaperList({
               </div>
               <div className="col-start-2 row-start-1 row-span-2 flex items-start gap-3 md:justify-end">
                 {right && (
-                  <span className="hidden md:block text-sm text-secondary text-right pt-0.5 max-w-[240px] truncate">
+                  <span className="hidden md:block text-sm text-secondary text-right pt-0.5 max-w-[260px]">
                     {right}
                   </span>
                 )}
                 <SaveButton item={item} projectId={projectId} />
               </div>
               {right && (
-                <p className="md:hidden col-start-1 text-xs text-secondary truncate">{right}</p>
+                <p className="md:hidden col-start-1 text-xs text-secondary">{right}</p>
               )}
             </li>
           );
