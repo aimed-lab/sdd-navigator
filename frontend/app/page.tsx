@@ -12,7 +12,7 @@
 // paint. The news row uses the same tinted tiles as Explore (NewsTile).
 //
 // SERVER component. Two live reads, both degrade to "not shown" on failure:
-//   * the 3 newest Industry News headlines, from the explore-mcp landing feed
+//   * 3 Industry News headlines (non-political, most relevant then newest), from the explore-mcp landing feed
 //     (the same RSS-backed news section Explore's News chip shows);
 //   * the podcast episode count, from the same wiki_pages read /explore/podcast
 //     uses.
@@ -23,6 +23,7 @@ import Link from "next/link";
 import DiscoveryMap from "@/components/DiscoveryMap";
 import PhgdhRouteList from "@/components/PhgdhRouteList";
 import NewsTile from "@/components/explore/NewsTile";
+import { rankNews } from "@/lib/newsLead";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { TYPE_STYLES } from "@/lib/typeStyles";
@@ -43,7 +44,9 @@ async function getLatestNews(): Promise<ExploreItem[]> {
     if (!res.ok) return [];
     const data = (await res.json()) as ExploreResponse;
     const news = (data.sections ?? []).find((s) => s.kind === "news");
-    return (news?.items ?? []).slice(0, 3);
+    // Not just the newest three: drop political headlines and rank the rest by
+    // drug-discovery relevance, then recency (lib/newsLead.ts).
+    return rankNews(news?.items ?? [], 3);
   } catch (e) {
     console.error("Home: news fetch failed", e);
     return [];

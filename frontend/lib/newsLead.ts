@@ -59,3 +59,14 @@ export function withBestLead(items: ExploreItem[]): ExploreItem[] {
   if (!lead) return items;
   return [lead, ...items.filter((i) => i !== lead)];
 }
+
+/** Headlines for a compact news row (the homepage): political titles dropped
+ *  entirely, the rest ordered by drug-discovery relevance (the same scoring as
+ *  the Explore lead), then newest first. Returns at most `limit`; fewer when
+ *  fewer non-political items exist. */
+export function rankNews(items: ExploreItem[], limit: number): ExploreItem[] {
+  return items
+    .filter((i) => !isPolitical(i.title))
+    .sort((a, b) => relevanceScore(b.title) - relevanceScore(a.title) || time(b) - time(a))
+    .slice(0, limit);
+}
