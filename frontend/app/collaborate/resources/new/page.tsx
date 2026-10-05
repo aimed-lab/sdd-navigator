@@ -11,6 +11,7 @@
 // here into a communityId, passed to the form as a plain prop.
 
 import Link from "next/link";
+import PageHeader, { PageShell } from "@/components/PageHeader";
 import AddResourceForm from "@/components/collaborate/AddResourceForm";
 import { getCurrentUser } from "@/lib/auth";
 import { getCommunityBySlug } from "@/lib/server/communities";
@@ -36,7 +37,7 @@ export default async function NewResourcePage({
   const loginCallback = `/collaborate/resources/new${communitySlug ? `?community=${encodeURIComponent(communitySlug)}` : ""}`;
 
   return (
-    <div className="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16">
+    <PageShell narrow>
       <Link
         href={returnTo}
         className="inline-flex items-center gap-1 mb-8 font-label-md text-label-md text-secondary hover:text-primary transition-colors"
@@ -45,14 +46,11 @@ export default async function NewResourcePage({
         Back to the board
       </Link>
 
-      <h1 className="font-headline-lg text-headline-lg text-on-background">
-        Add what your lab can share
-      </h1>
-      <p className="mt-3 font-body-lg text-body-lg text-secondary">
-        A technique, a piece of equipment, a vector, a model — anything another
-        lab could use. Just a name and a type to start; everything else is
-        optional.
-      </p>
+      <PageHeader
+        title="Add what your lab can share"
+        subtitle="A technique, a piece of equipment, a vector, a model — anything another lab could use. Just a name and a type to start; everything else is optional."
+        className="mb-0"
+      />
 
       <div className="mt-10">
         {user ? (
@@ -62,7 +60,7 @@ export default async function NewResourcePage({
             returnTo={returnTo}
           />
         ) : (
-          <div className="glass-panel rounded-2xl p-10 text-center">
+          <div className="glass-panel p-10 text-center">
             <span className="material-symbols-outlined text-4xl text-primary">lock</span>
             <h2 className="mt-3 font-headline-md text-headline-md text-on-background">
               Sign in to share a resource
@@ -85,6 +83,6 @@ export default async function NewResourcePage({
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

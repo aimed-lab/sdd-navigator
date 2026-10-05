@@ -35,27 +35,7 @@ import type {
   TrialRaw,
 } from "@/types/explore";
 import { removeFromProjectAction, saveToProjectAction } from "@/app/explore/actions";
-
-// Per-kind top-border accent (literal class strings so Tailwind compiles them).
-const ACCENT: Record<string, string> = {
-  paper: "border-t-primary",
-  news: "border-t-sky-500",
-  tool: "border-t-blue-500",
-  trial: "border-t-purple-500",
-  grant: "border-t-amber-500",
-  dataset: "border-t-emerald-500",
-  geneset: "border-t-fuchsia-500",
-  // rose-500 — unused by every other kind (paper=primary, news=sky,
-  // tool=blue, trial=purple, grant=amber, dataset=emerald, geneset=fuchsia,
-  // episode=primary-container, resource=teal, person=secondary, target=indigo).
-  compound: "border-t-rose-500",
-  // indigo-500 — unused by every other kind (see the rose-500 comment above
-  // for the full accounting; indigo isn't in that list either).
-  target: "border-t-indigo-500",
-  episode: "border-t-primary-container",
-  resource: "border-t-teal-500",
-  person: "border-t-secondary",
-};
+import { TYPE_STYLES, typeKeyForKind } from "@/lib/typeStyles";
 
 // GEO dataset fields (backend/explore-mcp/sources/geo.py) — all in `raw`,
 // there is no top-level Item field for any of them except date_iso/url.
@@ -316,7 +296,8 @@ export default function ItemCard({
   // not papers) or a plain "N citations"/priorCitations() string for papers.
   const paperDate = item.kind === "paper" ? formatDate(item.date_iso) : null;
   const paperCitations = item.kind === "paper" ? badge : null;
-  const accent = ACCENT[item.kind] ?? "border-t-outline-variant";
+  // Tile tint by type (lib/typeStyles.ts): no colored top border.
+  const tint = TYPE_STYLES[typeKeyForKind(item.kind)].bg;
   const imageUrl =
     item.kind === "episode" ? (item.raw?.image_url as string | undefined) : undefined;
   const geo = geoFields(item);
@@ -376,7 +357,8 @@ export default function ItemCard({
             }
           : undefined
       }
-      className={`glass-card group flex flex-col overflow-hidden rounded-xl border-t-4 ${accent} min-h-[220px] ${interactive ? "cursor-pointer" : ""}`}
+      className={`tile group flex flex-col overflow-hidden min-h-[220px] ${interactive ? "cursor-pointer" : ""}`}
+      style={{ background: tint }}
     >
       {imageUrl && (
         <div className="w-full aspect-video bg-surface-container-high overflow-hidden">
@@ -628,7 +610,7 @@ export default function ItemCard({
 // Loading placeholder matching the card footprint.
 export function SkeletonCard() {
   return (
-    <div className="glass-card rounded-xl border-t-4 border-t-surface-variant min-h-[220px] p-6 animate-pulse">
+    <div className="rounded-[14px] bg-[#eeece6] min-h-[220px] p-6 animate-pulse">
       <div className="flex justify-between items-start mb-6">
         <div className="h-6 w-24 rounded-full bg-surface-container" />
         <div className="h-6 w-6 rounded bg-surface-container" />

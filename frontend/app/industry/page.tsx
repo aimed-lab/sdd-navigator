@@ -5,6 +5,7 @@
 // numbers beyond the "8 teams" in the brief's own pipeline copy.
 
 import Link from "next/link";
+import PageHeader from "@/components/PageHeader";
 import Locked from "@/components/Locked";
 import LockedNetworkCard from "@/components/LockedNetworkCard";
 
@@ -60,46 +61,43 @@ const CAPABILITIES = [
 
 const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
 const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
-const CARD = "rounded-2xl bg-white border border-outline-variant/60";
+// White card on the warm page: 14px radius, no border, hair of shadow (.glass-panel).
+const CARD = "glass-panel";
 
 export default function IndustryPage() {
   return (
     <>
       {/* 1. Hero */}
-      <section className="bg-gradient-to-b from-white to-surface-container-low">
-        <div className={`${WRAP} py-12 md:py-20`}>
-          <div className="max-w-3xl mx-auto text-center space-y-4">
-            <p className="font-label-md text-label-md uppercase tracking-wide text-primary">
-              For industry
-            </p>
-            <h1 className="font-display-lg text-display-lg md:text-[56px] md:leading-[1.1] text-on-background">
-              Bring us your hardest problem.
-            </h1>
-            <p className="font-body-lg text-body-lg text-secondary">
-              Reach academic drug discovery teams early, while ideas are still being shaped.
-              Nonprofit and pre-competitive.
-            </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
-              <Link
-                href="/contact"
-                className="btn-primary px-8 py-3 rounded-lg font-label-md text-lg text-center"
-              >
-                Talk to us about a challenge
-              </Link>
-              <Link
-                href="/invite"
-                className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-primary/10 transition-colors"
-              >
-                Request invite code
-              </Link>
-            </div>
-          </div>
+      <section>
+        <div className={`${WRAP} pt-10 pb-2`}>
+          <PageHeader
+            label="For industry"
+            title="Bring us your hardest problem."
+            subtitle="Reach academic drug discovery teams early, while ideas are still being shaped. Nonprofit and pre-competitive."
+            className="mb-0"
+            action={
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Link
+                  href="/contact"
+                  className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md text-center"
+                >
+                  Talk to us about a challenge
+                </Link>
+                <Link
+                  href="/invite"
+                  className="px-6 py-3 rounded-lg font-label-md text-label-md text-center border border-primary text-primary hover:bg-primary/10 transition-colors"
+                >
+                  Request invite code
+                </Link>
+              </div>
+            }
+          />
         </div>
       </section>
 
       {/* 2. How a sponsored challenge works: metro-style flow */}
       <section className={`${WRAP} py-14 md:py-16`}>
-        <h2 className="font-headline-lg text-headline-lg text-on-background mb-10 text-center md:text-left">
+        <h2 className="font-headline-lg text-headline-lg text-on-background mb-8">
           How a sponsored challenge works
         </h2>
         <ol className="relative grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-6">
@@ -146,7 +144,7 @@ export default function IndustryPage() {
       </section>
 
       {/* 3. The project pipeline */}
-      <section className="bg-surface-container-low">
+      <section>
         <div className={`${WRAP} py-14 md:py-16`}>
           <div className={`${CARD} p-6 md:p-10 flex flex-col md:flex-row md:items-center gap-6 md:gap-10`}>
             <span className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
@@ -190,7 +188,7 @@ export default function IndustryPage() {
       </section>
 
       {/* 5. Capabilities */}
-      <section className="bg-surface-container-low">
+      <section>
         <div className={`${WRAP} py-14 md:py-16`}>
           <h2 className="font-headline-lg text-headline-lg text-on-background mb-10">
             Capabilities you won&apos;t find at a vendor

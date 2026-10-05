@@ -13,10 +13,10 @@ const LINKS = [
 
 export default function Footer() {
   return (
-    <footer className="bg-surface-container-lowest border-t border-surface-variant/30">
+    <footer className="bg-[#fbfaf7] border-t border-[#e7e4dc]">
       <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-12 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
         <div className="space-y-1">
-          <span className="font-headline-md text-headline-md font-bold text-on-background">
+          <span className="font-title text-[24px] leading-8 font-medium text-on-background">
             SmartDrugDiscovery
           </span>
           <p className="font-label-md text-label-md text-secondary max-w-sm">

@@ -6,6 +6,7 @@
 // results) they are indistinguishable. Don't restyle one without the other.
 
 import CategoryStrip from "@/components/CategoryStrip";
+import PageHeader from "@/components/PageHeader";
 
 export default function ExplorePageFrame({
   banner,
@@ -38,14 +39,7 @@ export default function ExplorePageFrame({
       <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-10 pb-32">
         {banner}
 
-        {/* Page heading */}
-        <header className="max-w-3xl mb-8">
-          <h1 className="font-title text-[34px] md:text-[44px] leading-[1.1] font-medium text-on-background">
-            {title}
-          </h1>
-          <p className="mt-3 font-body-lg text-body-lg text-secondary">{subtitle}</p>
-          {statsLine && <p className="mt-2 text-sm text-secondary/80">{statsLine}</p>}
-        </header>
+        <PageHeader title={title} subtitle={subtitle} statsLine={statsLine} />
 
         {/* Search */}
         <section className="max-w-3xl mb-8">

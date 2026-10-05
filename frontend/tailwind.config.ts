@@ -2,7 +2,7 @@ import type { Config } from "tailwindcss";
 
 // Tokens are the exact values from design/stitch/smartdrugdiscovery/DESIGN.md
 // (Research Green #006e2f / #22c55e, surface #f7f9fb) — the new three-pillar
-// design system. Typography: Geist for display/headline/label, Inter for body.
+// design system. Typography: Newsreader (serif) for display/headline, Geist for labels, Inter for body.
 const config: Config = {
   darkMode: "class",
   content: [
@@ -12,13 +12,13 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        surface: "#f7f9fb",
+        surface: "#fbfaf7",
         "surface-dim": "#d8dadc",
         "surface-bright": "#f7f9fb",
         "surface-container-lowest": "#ffffff",
-        "surface-container-low": "#f2f4f6",
-        "surface-container": "#eceef0",
-        "surface-container-high": "#e6e8ea",
+        "surface-container-low": "#f3f1ea",
+        "surface-container": "#eeece6",
+        "surface-container-high": "#e8e5de",
         "surface-container-highest": "#e0e3e5",
         "on-surface": "#191c1e",
         "on-surface-variant": "#3d4a3d",
@@ -56,16 +56,16 @@ const config: Config = {
         "tertiary-fixed-dim": "#b7c8e1",
         "on-tertiary-fixed": "#0b1c30",
         "on-tertiary-fixed-variant": "#38485d",
-        background: "#f7f9fb",
+        background: "#fbfaf7",
         "on-background": "#191c1e",
         "surface-variant": "#e0e3e5",
       },
       fontFamily: {
-        "display-lg": ["Geist", "sans-serif"],
-        "headline-lg": ["Geist", "sans-serif"],
-        "headline-lg-mobile": ["Geist", "sans-serif"],
-        "headline-md": ["Geist", "sans-serif"],
-        "headline-sm": ["Geist", "sans-serif"],
+        "display-lg": ["var(--font-title)", "Newsreader", "Georgia", "serif"],
+        "headline-lg": ["var(--font-title)", "Newsreader", "Georgia", "serif"],
+        "headline-lg-mobile": ["var(--font-title)", "Newsreader", "Georgia", "serif"],
+        "headline-md": ["var(--font-title)", "Newsreader", "Georgia", "serif"],
+        "headline-sm": ["var(--font-title)", "Newsreader", "Georgia", "serif"],
         "label-md": ["Geist", "sans-serif"],
         "label-sm": ["Geist", "sans-serif"],
         "body-lg": ["Inter", "sans-serif"],
@@ -75,10 +75,10 @@ const config: Config = {
         title: ["var(--font-title)", "Newsreader", "Georgia", "serif"],
       },
       fontSize: {
-        "display-lg": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
-        "headline-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.01em", fontWeight: "600" }],
-        "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "600" }],
-        "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
+        "display-lg": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "500" }],
+        "headline-lg": ["28px", { lineHeight: "36px", letterSpacing: "-0.01em", fontWeight: "500" }],
+        "headline-lg-mobile": ["24px", { lineHeight: "32px", fontWeight: "500" }],
+        "headline-md": ["24px", { lineHeight: "32px", fontWeight: "500" }],
         // Fills the gap between headline-md (24px) and body-lg (18px) —
         // four call sites (WikiGraph.tsx x2, CommunityCard.tsx,
         // AnnouncementsSection.tsx) were already reaching for
@@ -92,7 +92,7 @@ const config: Config = {
         // that actually makes something read as a headline rather than
         // body text. No letterSpacing, same as headline-md (only
         // headline-lg and display-lg tighten tracking).
-        "headline-sm": ["20px", { lineHeight: "28px", fontWeight: "600" }],
+        "headline-sm": ["20px", { lineHeight: "28px", fontWeight: "500" }],
         "body-lg": ["18px", { lineHeight: "28px", fontWeight: "400" }],
         "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }],
         "body-sm": ["14px", { lineHeight: "20px", fontWeight: "400" }],
@@ -102,7 +102,8 @@ const config: Config = {
       borderRadius: {
         DEFAULT: "0.25rem",
         lg: "0.5rem",
-        xl: "0.75rem",
+        xl: "14px",
+        "2xl": "14px",
         full: "9999px",
       },
       spacing: {

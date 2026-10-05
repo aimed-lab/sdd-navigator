@@ -173,7 +173,7 @@ export default async function Home() {
       </section>
 
       {/* c. Two audiences */}
-      <section className="bg-surface-container-low">
+      <section>
         <div className={`${WRAP} py-14 md:py-16`}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-gutter">
             {AUDIENCES.map((c) => (

@@ -16,6 +16,7 @@ import Link from "next/link";
 import ConnectModal from "./ConnectModal";
 import DeletePostConfirm from "./DeletePostConfirm";
 import { FUNDING_STATUS_LABEL, type CollabPost, type FundingStatus, type Stage } from "@/lib/collabTypes";
+import { TYPE_STYLES, type TypeKey } from "@/lib/typeStyles";
 
 const STAGE_LABEL: Record<Stage, string> = {
   concept: "Concept",
@@ -32,9 +33,9 @@ const STAGE_LABEL: Record<Stage, string> = {
 // word: funded reads as reassuring, applying as in-progress, unfunded as
 // plain information rather than a warning.
 const FUNDING_PILL: Record<FundingStatus, string> = {
-  funded: "bg-primary/10 text-primary",
-  applying: "bg-secondary-container/40 text-on-surface-variant",
-  unfunded: "bg-surface-container-low text-secondary",
+  funded: "bg-white/70 text-primary",
+  applying: "bg-white/70 text-on-surface-variant",
+  unfunded: "bg-white/70 text-secondary",
 };
 
 // Posted date: relative for anything recent enough that "how stale is this"
@@ -68,6 +69,18 @@ function postedLabel(createdAt: string): string {
   return RELATIVE_TIME.format(Math.round(diffMs / WEEK_MS), "week");
 }
 
+// Post type, read from the post's own fields (the same ones the board filters on):
+// stage "seeking_team", else asks-only, else offers. Tint comes from the shared
+// type tints so the board matches Explore.
+function postKind(post: CollabPost): { label: string; tint: TypeKey } {
+  if (post.stage === "seeking_team") return { label: "Seeking teammates", tint: "news" };
+  if (post.needs.length > 0 && post.haves.length === 0) {
+    return { label: "Seeking resources", tint: "tool" };
+  }
+  if (post.haves.length > 0) return { label: "Offering", tint: "dataset" };
+  return { label: "Collaboration", tint: "other" };
+}
+
 function PillGroup({
   label,
   items,
@@ -80,8 +93,8 @@ function PillGroup({
   if (items.length === 0) return null;
   const pill =
     tone === "offer"
-      ? "bg-primary/5 text-on-surface-variant"
-      : "bg-secondary-container/40 text-on-surface-variant";
+      ? "bg-white/70 text-on-surface-variant"
+      : "bg-white/70 text-on-surface-variant";
   return (
     <div>
       <span className="block font-label-sm text-label-sm text-secondary/70 uppercase mb-2">
@@ -108,19 +121,24 @@ export default function PostCard({
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const owner = post.owner;
+  const kind = postKind(post);
+  const t = TYPE_STYLES[kind.tint];
   const ownerLine = [owner?.name, owner?.institution ?? owner?.affiliation]
     .filter(Boolean)
     .join(" · ");
 
   return (
     <>
-      <article className="glass-panel rounded-2xl p-7 flex flex-col h-full">
+      <article className="tile p-6 flex flex-col h-full" style={{ background: t.bg }}>
+        <p className="type-label mb-4" style={{ color: t.fg }}>
+          {kind.label}
+        </p>
         {/* areas + stage */}
         <div className="flex flex-wrap items-center gap-2 mb-5">
           {post.research_areas.slice(0, 3).map((a) => (
             <span
               key={a}
-              className="px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm"
+              className="px-3 py-1 rounded-full bg-white/70 text-on-surface-variant font-label-sm text-label-sm"
             >
               {a}
             </span>
@@ -133,13 +151,13 @@ export default function PostCard({
                 {FUNDING_STATUS_LABEL[post.funding_status]}
               </span>
             )}
-            <span className="px-3 py-1 rounded-full bg-surface-container-low text-secondary font-label-sm text-label-sm">
+            <span className="px-3 py-1 rounded-full bg-white/70 text-secondary font-label-sm text-label-sm">
               {STAGE_LABEL[post.stage]}
             </span>
           </span>
         </div>
 
-        <h3 className="font-headline-md text-lg leading-tight text-on-background mb-3">
+        <h3 className="font-title text-[20px] leading-tight font-medium text-on-background mb-3">
           {post.title}
         </h3>
         {post.description && (
@@ -155,7 +173,7 @@ export default function PostCard({
 
         {/* owner + single action */}
         <div className="mt-auto pt-6">
-          <div className="pt-5 border-t border-outline-variant/30">
+          <div className="pt-5 border-t border-black/10">
             <p className="font-label-md text-label-md text-on-background truncate">
               {ownerLine || "Community member"}
             </p>
@@ -198,7 +216,7 @@ export default function PostCard({
 
             <button
               onClick={() => setOpen(true)}
-              className="btn-primary w-full mt-5 px-6 py-3 rounded-xl font-label-md text-label-md"
+              className="btn-primary w-full mt-5 px-6 py-3 rounded-lg font-label-md text-label-md"
             >
               Connect
             </button>

@@ -4,9 +4,8 @@
 // redemption here; invites are handled by hand for now.
 
 import InviteForm from "@/components/invite/InviteForm";
+import PageHeader, { PageShell } from "@/components/PageHeader";
 import { interestFromParam } from "@/lib/inviteTypes";
-
-const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 
 export default async function InvitePage({
   searchParams,
@@ -18,24 +17,13 @@ export default async function InvitePage({
   const initialInterest = interestFromParam(raw);
 
   return (
-    <section className="bg-gradient-to-b from-white to-surface-container-low min-h-[70vh]">
-      <div className={`${WRAP} py-12 md:py-16`}>
-        <div className="max-w-2xl mx-auto space-y-8">
-          <div className="text-center space-y-4">
-            <span className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <span className="material-symbols-outlined text-primary text-4xl">lock_open</span>
-            </span>
-            <h1 className="font-display-lg text-display-lg md:text-[48px] md:leading-[1.1] text-on-background">
-              Request an invite code
-            </h1>
-            <p className="font-body-lg text-body-lg text-secondary">
-              The full network, project proposals and protected datasets unlock with an invite code.
-              Tell us a little about you and we&apos;ll be in touch.
-            </p>
-          </div>
-          <InviteForm initialInterest={initialInterest} />
-        </div>
-      </div>
-    </section>
+    <PageShell narrow className="space-y-8">
+      <PageHeader
+        title="Request an invite code"
+        subtitle="The full network, project proposals and protected datasets unlock with an invite code. Tell us a little about you and we'll be in touch."
+        className="mb-0"
+      />
+      <InviteForm initialInterest={initialInterest} />
+    </PageShell>
   );
 }

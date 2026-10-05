@@ -1,14 +1,14 @@
 // Contact — /contact. Static server page, linked from the shared Footer.
 // [CONTACT EMAIL] is a placeholder to be replaced with the real address.
 
+import PageHeader, { PageShell } from "@/components/PageHeader";
+
 export const metadata = { title: "Contact — SmartDrugDiscovery" };
 
 export default function ContactPage() {
   return (
-    <div className="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16 space-y-6">
-      <h1 className="font-headline-lg text-headline-lg md:text-[40px] md:leading-tight text-on-background">
-        Contact
-      </h1>
+    <PageShell narrow className="space-y-6">
+      <PageHeader title="Contact" className="mb-2" />
       <p className="font-body-lg text-body-lg text-secondary">
         Questions, feedback or ideas? Email us at{" "}
         <a
@@ -19,6 +19,6 @@ export default function ContactPage() {
         </a>
         .
       </p>
-    </div>
+    </PageShell>
   );
 }

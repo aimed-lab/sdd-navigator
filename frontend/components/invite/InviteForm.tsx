@@ -10,7 +10,7 @@ import {
 } from "@/lib/inviteTypes";
 
 const INPUT =
-  "w-full rounded-lg border border-outline-variant bg-white px-4 py-3 font-body-md text-body-md text-on-background " +
+  "w-full rounded-[14px] border border-outline-variant/40 bg-white px-4 py-3 font-body-md text-body-md text-on-background " +
   "focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary";
 const LABEL = "block font-label-md text-label-md text-on-background mb-1.5";
 
@@ -81,12 +81,10 @@ export default function InviteForm({ initialInterest }: { initialInterest: strin
     return (
       <div
         role="status"
-        className="rounded-2xl bg-white border border-outline-variant/60 p-8 md:p-10 text-center flex flex-col items-center gap-4"
+        className="glass-panel p-8 md:p-10 text-center flex flex-col items-center gap-4"
       >
-        <span className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
-          <span className="material-symbols-outlined text-primary text-4xl">check_circle</span>
-        </span>
-        <p className="font-headline-md text-headline-md text-on-background">
+        <span className="material-symbols-outlined text-primary text-5xl">check_circle</span>
+        <p className="font-title text-[24px] font-medium text-on-background">
           Thanks, we&apos;ll be in touch soon.
         </p>
       </div>
@@ -97,7 +95,7 @@ export default function InviteForm({ initialInterest }: { initialInterest: strin
     <form
       onSubmit={onSubmit}
       noValidate
-      className="rounded-2xl bg-white border border-outline-variant/60 p-6 md:p-10 space-y-6"
+      className="glass-panel p-6 md:p-10 space-y-6"
     >
       <div>
         <label htmlFor="inv-name" className={LABEL}>
