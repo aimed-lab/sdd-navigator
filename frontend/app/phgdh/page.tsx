@@ -20,6 +20,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import PaperList from "@/components/explore/PaperList";
+import ProjectWorkspace from "@/components/phgdh/ProjectWorkspace";
 import ResourceBento, { liveTile, type BentoTile } from "@/components/explore/ResourceBento";
 import { TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
@@ -262,6 +263,11 @@ export default function PhgdhCollectionPage() {
             <KeyFinding item={keyFinding} />
           </div>
         )}
+
+        {/* Project workspace: the three access levels (public content + locked previews) */}
+        <div className="mb-16">
+          <ProjectWorkspace />
+        </div>
 
         <div className="space-y-16">
           {/* Papers: only ones that mention PHGDH. A short list is never padded. */}
