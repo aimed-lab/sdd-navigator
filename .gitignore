@@ -49,3 +49,8 @@ docs/
 CLAUDE.md
 
 backend/explore-mcp/venv311/
+
+# Local live-deploy env and Supabase CLI state — never commit
+.env.live
+backend/explore-mcp/.env.live
+supabase/
