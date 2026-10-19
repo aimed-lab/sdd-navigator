@@ -1,5 +1,4 @@
 // Contact — /contact. Static server page, linked from the shared Footer.
-// [CONTACT EMAIL] is a placeholder to be replaced with the real address.
 
 import PageHeader, { PageShell } from "@/components/PageHeader";
 
@@ -12,10 +11,10 @@ export default function ContactPage() {
       <p className="font-body-lg text-body-lg text-secondary">
         Questions, feedback or ideas? Email us at{" "}
         <a
-          href="mailto:[CONTACT EMAIL]"
+          href="mailto:smartdrugdiscovery@gmail.com"
           className="text-primary hover:underline underline-offset-4"
         >
-          [CONTACT EMAIL]
+          smartdrugdiscovery@gmail.com
         </a>
         .
       </p>

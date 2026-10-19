@@ -142,7 +142,7 @@ export default function CreateProjectForm({
     >
       <header className="text-center">
         <h1 className="font-headline-lg text-headline-lg md:text-display-lg md:font-display-lg text-primary">
-          {colabofest ? "Start your ColaboFest project" : "Create a project"}
+          Create a project
         </h1>
         {colabofest && (
           <span className="inline-flex items-center px-3 py-1 rounded-full bg-primary-container/20 text-primary font-label-sm text-label-sm mt-2">

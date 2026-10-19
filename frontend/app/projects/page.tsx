@@ -18,7 +18,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listMyProjects } from "@/lib/server/projects";
-import ColabofestBanner from "@/components/projects/ColabofestBanner";
 import ProjectCard from "@/components/projects/ProjectCard";
 
 export const dynamic = "force-dynamic"; // depends on the session
@@ -33,8 +32,6 @@ export default async function ProjectsPage() {
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-12">
-      <ColabofestBanner />
-
       <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-outline-variant/30 pb-6">
         <h1 className="font-display-lg text-[40px] leading-tight text-on-background">
           Your projects

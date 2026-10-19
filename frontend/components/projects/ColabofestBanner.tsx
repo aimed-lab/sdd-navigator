@@ -1,11 +1,6 @@
-// The ColaboFest feature banner at the top of /projects.
-//
-// STRUCTURE.md: "only rendered when ColaboFest is currently open for entry —
-// this is a global condition, not per-project." There is no admin toggle or
-// settings row for that yet anywhere in the schema, so COLABOFEST_OPEN below
-// is a plain constant standing in for it — flip it to false (or wire it to a
-// real settings row) once the challenge closes or a second one needs
-// scheduling. Documented here rather than silently hardcoding the banner on.
+// ColaboFest 2026 constants. The challenge banner that used to render at the top
+// of /projects was removed (the challenge has closed); only these constants
+// remain, because app/projects/actions.ts imports COLABOFEST_DEADLINE.
 //
 // COLABOFEST_DEADLINE lives right next to it for the same reason: ONE named
 // constant, not a date scattered across the create form and the server
@@ -14,49 +9,5 @@
 // project's deadline to this value SERVER-SIDE and the create form never
 // asks for one. End-of-day UTC, not midnight, so the deadline reads as
 // "through September 30", not "up to the start of it".
-import Link from "next/link";
-
 export const COLABOFEST_OPEN = true;
 export const COLABOFEST_DEADLINE = "2026-09-30T23:59:59Z";
-
-export default function ColabofestBanner() {
-  if (!COLABOFEST_OPEN) return null;
-
-  return (
-    <section className="w-full rounded-2xl bg-primary-container/10 border border-primary/20 p-6 md:p-8 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-      <div className="flex flex-col gap-2">
-        <span className="font-label-sm text-label-sm text-primary tracking-wider uppercase font-bold">
-          Challenge
-        </span>
-        <h2 className="font-headline-lg text-headline-lg text-on-background">ColaboFest 2026</h2>
-        {/* Exact wording from https://2026collabofest.ubrite.org/ (fetched
-            2026-08-17): "Three teams each receive up to $40,000 in combined
-            SPARC and Southern Research services — AI design and wet-lab
-            support, plus $1,000 in prize money." Southern Research became a
-            co-sponsor in the site's July 30, 2026 update — previously this
-            said "$20,000 in SPARC services" with no mention of them. */}
-        <p className="font-body-md text-body-md text-secondary">
-          Three teams each receive up to $40,000 in combined SPARC and
-          Southern Research services — AI design and wet-lab support, plus
-          $1,000 in prize money. Submissions close September 30.
-        </p>
-      </div>
-      <div className="flex flex-col sm:flex-row items-center gap-6 shrink-0 w-full lg:w-auto">
-        <Link
-          href="/projects/new?colabofest=1"
-          className="w-full sm:w-auto btn-outline px-6 py-3 rounded-lg font-label-md text-label-md flex items-center justify-center"
-        >
-          Start your ColaboFest project
-        </Link>
-        {/* The ColaboFest community page — the landing page's own ColaboFest
-            section was removed, so this is now the in-app entry point. */}
-        <Link
-          href="/communities/colabofest-2026"
-          className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors whitespace-nowrap"
-        >
-          Learn more
-        </Link>
-      </div>
-    </section>
-  );
-}
