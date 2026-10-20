@@ -9,8 +9,6 @@ in-set papers, deduped pairs, string-only node ids).
 
 from __future__ import annotations
 
-import pytest
-
 from models import Item, Signal
 from ranking import (
     MIN_EDGES,

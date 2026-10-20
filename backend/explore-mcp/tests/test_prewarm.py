@@ -68,7 +68,6 @@ def test_disabled_start_is_a_no_op(monkeypatch):
     calls = 0
 
     async def body():
-        nonlocal calls
         await prewarm.start()
 
     asyncio.run(body())

@@ -11,8 +11,6 @@ too large for a result item.
 
 from __future__ import annotations
 
-import json
-
 from supabase_client import sb_get
 
 from models import Item

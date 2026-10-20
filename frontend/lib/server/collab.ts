@@ -335,13 +335,13 @@ export async function canParticipate(): Promise<boolean> {
   return (await getCurrentUser()) !== null;
 }
 
-/** Delete a post as the signed-in user. Hard delete — matches the idiom in
- *  lib/server/savedItems.ts:removeSavedItem (session-derived user,
- *  .delete().eq()), not a soft-delete: no such pattern exists anywhere in
+/** Delete a post as the signed-in user. Hard delete — matches the idiom used
+ *  elsewhere in lib/server (session-derived user, .delete().eq()),
+ *  not a soft-delete: no such pattern exists anywhere in
  *  this codebase and this isn't the place to start one.
  *
  *  The .eq("owner_id", user.id) here is belt-and-suspenders, matching
- *  savedItems.ts's own style — the REAL gate is the collab_posts_delete_own
+ *  the rest of lib/server — the REAL gate is the collab_posts_delete_own
  *  RLS policy (database/schema.sql), which enforces auth.uid() = owner_id in
  *  Postgres regardless of what this query claims. A caller cannot delete
  *  someone else's post by forging this call: RLS silently matches zero rows

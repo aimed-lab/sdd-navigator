@@ -1,7 +1,7 @@
 """
 sources/crossref.py — Crossref works fetcher.
 
-Port of _reference/ts-sources/sources/crossref.ts. Same URL, same field mapping,
+Port of the original TypeScript Crossref fetcher. Same URL, same field mapping,
 same blank-title drop, and the same non-article `type` guard (books, chapters,
 indices are dropped at fetch time). Crossref exposes no ranking metric, so every
 Item's `signal` stays None.

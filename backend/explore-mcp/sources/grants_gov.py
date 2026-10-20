@@ -1,7 +1,7 @@
 """
 sources/grants_gov.py — Grants.gov search2 fetcher.
 
-Port of _reference/ts-sources/sources/grantsGov.ts. POST search2 with the same
+Port of the original TypeScript Grants.gov fetcher. POST search2 with the same
 body, same field mapping, same drop of hits missing a title or opportunity
 number. Grants.gov exposes no ranking metric, so signal stays None.
 """

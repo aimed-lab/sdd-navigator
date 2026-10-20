@@ -77,7 +77,7 @@ def parse_rss(rss_url: str) -> list[dict]:
     Parse RSS feed; return list of episode dicts sorted by episode_number asc.
     Each dict: episode_number, title, audio_url, episode_url, description.
     """
-    print(f"📡 Parsing RSS feed…")
+    print("📡 Parsing RSS feed…")
     print(f"   {rss_url}")
     feed = feedparser.parse(rss_url)
     if feed.bozo:
@@ -142,7 +142,7 @@ def parse_rss(rss_url: str) -> list[dict]:
 # ── Download + Whisper ─────────────────────────────────────────────────────────
 
 def _download(url: str, dest: str) -> None:
-    print(f"   ⬇️  Downloading audio…")
+    print("   ⬇️  Downloading audio…")
     with requests.get(url, stream=True, timeout=300) as r:
         r.raise_for_status()
         total_bytes = 0
@@ -207,7 +207,7 @@ def transcribe_episode(episode: dict, output_dir: str, model) -> str:
     out_path = os.path.join(output_dir, f"episode_{ep_num}.json")
 
     if os.path.isfile(out_path):
-        print(f"   📂 Cached transcript found — skipping download")
+        print("   📂 Cached transcript found — skipping download")
         return out_path
 
     tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp3")

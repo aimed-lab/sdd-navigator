@@ -1,7 +1,7 @@
 """
 sources/github.py — GitHub repository search fetcher.
 
-Port of _reference/ts-sources/sources/github.ts. Same URL, same `stars:>=5`
+Port of the original TypeScript GitHub fetcher. Same URL, same `stars:>=5`
 filter, same field mapping, same blank-title drop (repos with no full_name).
 GitHub reports a real popularity metric, so each Item carries a stars Signal.
 

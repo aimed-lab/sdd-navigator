@@ -16,7 +16,7 @@
 // STORAGE SHAPE: item_data is JSONB with no schema of its own — this file
 // stores the WHOLE ExploreItem in it (kind, title, summary, url, signal,
 // raw, everything), not the narrower DiscoverItem shape
-// lib/server/savedItems.ts's personal-save flow uses. That's fine: the
+// an older personal-save flow used. That's fine: the
 // column doesn't care, and Resources needs to hand full ExploreItem props
 // straight to the same <ItemCard> Explore already uses — reusing the real
 // card, not inventing a third shape for it to render.
@@ -138,13 +138,10 @@ export async function listProjectResources(projectId: string): Promise<ListProje
 // doesn't care about project_id at all — a personal row is just a row this
 // user owns, same as any of theirs.
 //
-// A SEPARATE module (lib/server/savedItems.ts) already exists for
-// project_id IS NULL saves, but stores the narrower DiscoverItem shape for
-// an old discovery flow with no surviving caller anywhere in app/ or
-// components/ (grep confirms it's unreferenced) — left untouched rather
-// than repurposed, so as not to silently change a type contract some other
-// still-unknown caller might rely on. These three functions are the
-// ExploreItem-shaped equivalent, living here (not there) because this file
+// A separate module for project_id IS NULL saves once existed, storing the
+// narrower DiscoverItem shape for an old discovery flow; it has since been
+// removed. These three functions are the
+// ExploreItem-shaped equivalent, living here because this file
 // already owns the "personal or project — either way, one ExploreItem
 // saved into saved_items" concern (see the file's own top comment).
 
@@ -243,8 +240,8 @@ export type SaveToProjectResult =
  *  call this — the item becomes visible to every member, not just the
  *  saver (that's the whole point; see saved_items_select_own's project
  *  branch). user_id is always the caller's own id: you save AS yourself,
- *  project-scoped or not, same rule lib/server/savedItems.ts already
- *  follows for personal saves. */
+ *  project-scoped or not, same rule the
+ *  earlier personal-save flow followed. */
 export async function saveToProject(projectId: string, item: ExploreItem): Promise<SaveToProjectResult> {
   const { user, db } = await requireCurrentUser();
 

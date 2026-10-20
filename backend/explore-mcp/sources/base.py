@@ -1,7 +1,7 @@
 """
 sources/base.py — shared helpers for the source fetchers.
 
-Port of _reference/ts-sources/sources/shared.ts: the per-request fetch timeout
+Port of the original TypeScript shared fetch helpers: the per-request fetch timeout
 and the two date helpers (`to_iso`, `fmt_date`). Bodies match the TS behavior.
 
 FETCH_TIMEOUT is 8 (seconds) — the TS used AbortSignal.timeout(8000).

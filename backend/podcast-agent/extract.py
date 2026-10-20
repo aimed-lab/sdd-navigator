@@ -165,7 +165,7 @@ def extract_knowledge(transcript: str, metadata: dict, _retry: bool = True) -> d
         f"TRANSCRIPT:\n{trimmed}"
     )
 
-    print(f"   🤖 Sending to Groq (openai/gpt-oss-120b)…")
+    print("   🤖 Sending to Groq (openai/gpt-oss-120b)…")
     print(f"   📤 Prompt size: {len(user_msg):,} chars")
 
     messages = [

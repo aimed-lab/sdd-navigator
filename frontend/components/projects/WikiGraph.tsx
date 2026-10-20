@@ -1,8 +1,8 @@
 "use client";
 
 // WikiGraph — the project wiki's graph view (stage 2). Force-directed,
-// d3-force (already a dependency — "d3": "^7.9.0" in package.json — but
-// unused anywhere in this app until now; there is no existing d3 idiom to
+// d3-force (a direct dependency in package.json; the app had no
+// prior d3 use, so there is no existing d3 idiom to
 // match here, so this picks the standard React+d3-force pairing: d3 owns
 // the simulation math only, React owns every DOM node via normal JSX/SVG,
 // nothing touches the DOM through a d3 selection. HAND-ROLLED SVG

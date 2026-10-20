@@ -138,7 +138,7 @@ def _process_one(episode: dict, prog: dict, whisper_model) -> bool:
     print(f"{'─' * 62}")
 
     # ── Step 1: Transcribe ────────────────────────────────────────────────
-    print(f"\n  📡 STEP 1 / 4 — Transcribe")
+    print("\n  📡 STEP 1 / 4 — Transcribe")
     try:
         json_path = transcribe_episode(episode, OUTPUT_DIR, whisper_model)
         with open(json_path, encoding="utf-8") as f:
@@ -152,7 +152,7 @@ def _process_one(episode: dict, prog: dict, whisper_model) -> bool:
         return False
 
     # ── Step 2: Extract ───────────────────────────────────────────────────
-    print(f"\n  🤖 STEP 2 / 4 — Extract Knowledge")
+    print("\n  🤖 STEP 2 / 4 — Extract Knowledge")
     try:
         extracted = extract_knowledge(transcript, metadata)
     except Exception as exc:
@@ -161,11 +161,11 @@ def _process_one(episode: dict, prog: dict, whisper_model) -> bool:
         return False
 
     # ── Step 3: Validate ──────────────────────────────────────────────────
-    print(f"\n  🔍 STEP 3 / 4 — Validate")
+    print("\n  🔍 STEP 3 / 4 — Validate")
     validate_episode(extracted, transcript)   # logs PASS/FAIL, never blocks
 
     # ── Step 4: Save to Supabase ──────────────────────────────────────────
-    print(f"\n  💾 STEP 4 / 4 — Save to Supabase")
+    print("\n  💾 STEP 4 / 4 — Save to Supabase")
     try:
         wiki_id = _save_wiki_page(metadata, transcript, extracted, image_url=episode.get("image_url", ""))
         print(f"   ✅ wiki_page saved  id={wiki_id}  slug={extracted.get('slug')}")

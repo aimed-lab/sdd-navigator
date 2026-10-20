@@ -59,8 +59,7 @@ export async function removeFromProjectAction(
 }
 
 // ── Personal (non-project) saves — see lib/server/projectResources.ts's
-// "Personal (non-project) saves" section for why these live there rather
-// than in lib/server/savedItems.ts. Powers the "Just save it for me" choice
+// "Personal (non-project) saves" section for why these live there. Powers the "Just save it for me" choice
 // in SaveItemPicker.tsx, and /saved's own remove control.
 
 export async function saveForMeAction(item: ExploreItem): Promise<SaveActionResult> {
