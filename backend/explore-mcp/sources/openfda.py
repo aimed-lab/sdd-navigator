@@ -43,7 +43,32 @@ _APPROVAL_URL = "https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event
 
 _NDA_BLA_RE = re.compile(r"^(?:NDA|BLA)\d+$", re.IGNORECASE)
 _BIOSIMILAR_SUFFIX_RE = re.compile(r"-[a-z]{4}$")
+_POSSESSIVE_RE = re.compile(r"['’]s\b")
+_NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+# Words that say little about WHICH condition: a label's indication text varies
+# ("metastatic pancreatic adenocarcinoma" for "pancreatic cancer").
+_GENERIC_WORDS = {
+    "cancer", "cancers", "disease", "diseases", "disorder", "tumor", "tumour", "tumors",
+    "carcinoma", "neoplasm", "the", "of", "and", "in",
+}
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _indication_clause(disease: str) -> str:
+    """The indications_and_usage search clause for `disease`: ALL of its
+    meaningful words (AND), not the exact phrase, because a label's wording
+    rarely matches the searched phrase ("pancreatic cancer" vs "metastatic
+    pancreatic adenocarcinoma"). Lowercased, possessive 's removed, generic
+    words (cancer, disease, ...) dropped; if nothing is left (just "cancer"),
+    the original phrase is searched instead."""
+    cleaned = _POSSESSIVE_RE.sub("", disease.lower())
+    words = [w for w in _NON_ALNUM_RE.split(cleaned) if w and w not in _GENERIC_WORDS]
+    words = list(dict.fromkeys(words))   # de-duplicate, keep order
+    if not words:
+        return f'indications_and_usage:"{quote(disease, safe="")}"'
+    if len(words) == 1:
+        return f"indications_and_usage:{words[0]}"
+    return f"indications_and_usage:({'+AND+'.join(words)})"
 
 
 def _api_key_param() -> str:
@@ -93,7 +118,7 @@ async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int)
 
     label_url = (
         f"{_LABEL}?limit={_LABEL_LIMIT}&sort=effective_time:desc"
-        f'&search=indications_and_usage:"{quote(disease, safe="")}"'
+        f"&search={_indication_clause(disease)}"
         "+AND+(openfda.application_number:NDA*+OR+openfda.application_number:BLA*)"
         f"{key}"
     )
