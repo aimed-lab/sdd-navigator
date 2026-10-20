@@ -20,7 +20,7 @@ export default function Footer() {
             SmartDrugDiscovery
           </span>
           <p className="font-label-md text-label-md text-secondary max-w-sm">
-            Precision in research — explore, collaborate, and promote across drug discovery.
+            Precision in research — explore, build, and promote across drug discovery.
           </p>
         </div>
         <nav className="flex flex-wrap gap-x-6 gap-y-2">
