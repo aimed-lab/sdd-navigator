@@ -32,6 +32,7 @@ export const CATEGORIES: {
   { label: "Preprints", kind: "preprint" },
   { label: "Datasets", kind: "dataset" },
   { label: "Trials", kind: "trial" },
+  { label: "FDA approved", kind: "approval" },
   { label: "Compounds", kind: "compound" },
   { label: "Targets", kind: "target" },
   { label: "Gene sets", kind: "geneset" },

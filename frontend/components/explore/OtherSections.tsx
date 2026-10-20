@@ -8,10 +8,11 @@
 
 import { useState } from "react";
 import SectionHeading from "@/components/explore/SectionHeading";
-import { GrantTile, ResultTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import { ApprovalTile, GrantTile, ResultTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import type { ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
+  approval: "FDA-approved drugs",
   preprint: "Preprints",
   geneset: "Gene sets",
   compound: "Compounds",
@@ -39,6 +40,8 @@ function Grid({ section, projectId }: { section: ExploreSection; projectId?: str
       {section.items.map((item) =>
         item.kind === "trial" ? (
           <TrialTile key={item.id} item={item} projectId={projectId} />
+        ) : item.kind === "approval" ? (
+          <ApprovalTile key={item.id} item={item} projectId={projectId} />
         ) : item.kind === "grant" ? (
           <GrantTile key={item.id} item={item} projectId={projectId} />
         ) : (

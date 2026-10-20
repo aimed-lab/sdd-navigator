@@ -28,7 +28,7 @@ import NewsFront from "@/components/explore/NewsFront";
 import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
-import { TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
@@ -289,6 +289,24 @@ function SearchResults() {
 
   // No free patent API to search, so this links out to the two public patent
   // search sites with the query pre-filled rather than showing results.
+  const approvalSection = () => {
+    const items = itemsOf("approval");
+    if (items.length === 0) return null;
+    return (
+      <section key="approval">
+        <SectionHeading
+          title="FDA-approved drugs"
+          subtitle="Drugs whose FDA label mentions this condition."
+        />
+        <div className={TILE_GRID}>
+          {items.map((item) => (
+            <ApprovalTile key={item.id} item={item} projectId={projectId} />
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   const patentsSection = () => {
     if (!topic.trim()) return null;
     const q = encodeURIComponent(topic);
@@ -323,7 +341,7 @@ function SearchResults() {
     const papers = itemsOf("paper");
     const preprints = itemsOf("preprint");
     const news = itemsOf("news");
-    const handled = new Set(["paper", "preprint", "dataset", "tool", "trial", "news"]);
+    const handled = new Set(["paper", "preprint", "dataset", "tool", "trial", "approval", "news"]);
     const rest = sections.filter((s) => !handled.has(s.kind) && s.items.length > 0);
     return (
       <div className="space-y-16">
@@ -353,6 +371,7 @@ function SearchResults() {
         {resourceSection("dataset", "Datasets")}
         {resourceSection("tool", "Tools")}
         {trialSection()}
+        {approvalSection()}
         {patentsSection()}
         {news.length > 0 && (
           <section>
@@ -412,6 +431,7 @@ function SearchResults() {
       return <div>{resourceSection(kind, kind === "dataset" ? "Datasets" : "Tools")}</div>;
     }
     if (kind === "trial") return <div>{trialSection()}</div>;
+    if (kind === "approval") return <div>{approvalSection()}</div>;
     return (
       <div className="space-y-14">
         <OtherSections sections={[section]} projectId={projectId} expandGenesets={kind === "geneset"} />

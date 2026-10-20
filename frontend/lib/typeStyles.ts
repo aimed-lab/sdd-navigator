@@ -25,6 +25,7 @@ export const TYPE_STYLES: Record<TypeKey, { label: string; bg: string; fg: strin
 /** Short label for a result's type, including the niche kinds that share the
  *  neutral tint. */
 const KIND_LABELS: Record<string, string> = {
+  approval: "FDA approved",
   preprint: "Preprint",
   geneset: "Gene set",
   compound: "Compound",

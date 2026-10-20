@@ -8,7 +8,7 @@ export type Signal = {
 
 export type ExploreItem = {
   id: string;
-  kind: string; // paper | preprint | news | trial | grant | tool | dataset | geneset | compound | target | resource | person | episode
+  kind: string; // paper | preprint | news | trial | approval | grant | tool | dataset | geneset | compound | target | resource | person | episode
   title: string;
   summary: string | null;
   url: string | null;
@@ -54,6 +54,17 @@ export type TrialRaw = {
   overall_status?: string | null;
   why_stopped?: string | null;
   phase?: string | null;
+};
+
+/** backend/explore-mcp/sources/openfda.py's `raw` shape (kind "approval").
+ *  approval_date is YYYYMMDD. */
+export type ApprovalRaw = {
+  brand?: string | null;
+  generic?: string | null;
+  sponsor?: string | null;
+  application_number?: string | null;
+  approval_date?: string | null;
+  review_priority?: string | null;
 };
 
 /** backend/explore-mcp/sources/europepmc.py's `raw` shape (kind "preprint"). */
