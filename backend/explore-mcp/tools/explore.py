@@ -48,7 +48,7 @@ from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
 from tools.search_opentargets import search_opentargets_async
 from tools.search_pager import search_pager_async
-from tools.search_papers import search_papers_async, search_papers_multi_dual_async
+from tools.search_papers import search_papers_multi_dual_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
 from tools.search_trials import search_trials_async

@@ -2,7 +2,7 @@
 dedupe.py — DOI-aware dedupe keys + a deterministic cross-source merge.
 
 `dedupe_key` is a DOI-first port of `dedupeKey` from
-_reference/ts-sources/discovery.ts. Branches, checked in order:
+the original TypeScript discovery code. Branches, checked in order:
 
     1. an explicit normalized DOI        -> "doi:<doi>"
     2. a DOI extracted from a doi.org URL -> "doi:<doi>"

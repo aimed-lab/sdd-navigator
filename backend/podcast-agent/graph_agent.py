@@ -233,13 +233,13 @@ def run_graph_agent() -> None:
             existing_nodes,
         )
         if not ep_id:
-            print(f"     ❌ Episode node failed — skipping this page\n")
+            print("     ❌ Episode node failed — skipping this page\n")
             continue
         if is_new:
             new_ep_nodes += 1
-            print(f"     ✔ [NEW] episode node")
+            print("     ✔ [NEW] episode node")
         else:
-            print(f"     ✔ [existing] episode node")
+            print("     ✔ [existing] episode node")
 
         ep_to_concept_ids[ep_id]  = []
         ep_to_resource_ids[ep_id] = []

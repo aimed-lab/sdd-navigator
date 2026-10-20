@@ -1,7 +1,7 @@
 """
 sources/clinical_trials.py — ClinicalTrials.gov v2 fetcher.
 
-Port of _reference/ts-sources/sources/clinicalTrials.ts. Same URL, same field
+Port of the original TypeScript ClinicalTrials fetcher. Same URL, same field
 mapping, same drop of studies with no NCT id (the TS `id !== "ct-"` filter).
 Trials expose no ranking metric, so signal stays None.
 

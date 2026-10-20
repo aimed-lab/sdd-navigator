@@ -1,7 +1,7 @@
 """
 sources/openalex.py — OpenAlex works fetcher.
 
-Port of _reference/ts-sources/sources/openalex.ts. Same URL, same field mapping,
+Port of the original TypeScript OpenAlex fetcher. Same URL, same field mapping,
 same blank-title drop. Two Explore-specific additions per spec:
   - `signal` is set from `cited_by_count` (metric="citations") — a REAL metric.
   - `referenced_works` is captured into `raw` (the whole work is stored, which

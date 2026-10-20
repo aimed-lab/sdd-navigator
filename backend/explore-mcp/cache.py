@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # ── key normalization ─────────────────────────────────────────────────────────
 #
-# Port of the cache-key pattern from _reference/ts-sources/discovery.ts:211
+# Port of the cache-key pattern from the original TypeScript discovery code
 #     const cacheKey = activeTerms.map(t => t.toLowerCase()).sort().join("|");
 # Lowercase each term, sort, join with "|" — so "EGFR glioblastoma" and
 # "glioblastoma egfr" are the same cache entry.

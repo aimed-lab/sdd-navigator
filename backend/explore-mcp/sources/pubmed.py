@@ -1,7 +1,7 @@
 """
 sources/pubmed.py — PubMed E-utilities fetcher.
 
-Port of _reference/ts-sources/sources/pubmed.ts. Two-step: esearch for the id
+Port of the original TypeScript PubMed fetcher. Two-step: esearch for the id
 list, then esummary for metadata. Same URLs, same field mapping, same blank-title
 drop. PubMed exposes no ranking metric, so every Item's `signal` stays None.
 
