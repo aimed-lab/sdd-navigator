@@ -28,7 +28,7 @@ import NewsFront from "@/components/explore/NewsFront";
 import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
-import { TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
@@ -38,7 +38,7 @@ import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
 // not removed: drop a kind from this set to bring its section back.
-const HIDDEN_SECTION_KINDS = new Set(["grant"]);
+const HIDDEN_SECTION_KINDS = new Set<string>();
 const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
   (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
 
@@ -287,10 +287,61 @@ function SearchResults() {
     );
   };
 
+  // No free patent API to search, so this links out to the two public patent
+  // search sites with the query pre-filled rather than showing results.
+  const approvalSection = () => {
+    const items = itemsOf("approval");
+    if (items.length === 0) return null;
+    return (
+      <section key="approval">
+        <SectionHeading
+          title="FDA-approved drugs"
+          subtitle="Drugs whose FDA label mentions this condition."
+        />
+        <div className={TILE_GRID}>
+          {items.map((item) => (
+            <ApprovalTile key={item.id} item={item} projectId={projectId} />
+          ))}
+        </div>
+      </section>
+    );
+  };
+
+  const patentsSection = () => {
+    if (!topic.trim()) return null;
+    const q = encodeURIComponent(topic);
+    const links = [
+      { label: "Google Patents", href: `https://patents.google.com/?q=${q}` },
+      { label: "Lens", href: `https://www.lens.org/lens/search/patent/list?q=${q}` },
+    ];
+    return (
+      <section key="patents">
+        <SectionHeading title="Patents" />
+        <p className="text-secondary font-body-md">
+          Search patents for &ldquo;{topic}&rdquo;
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {links.map((l) => (
+            <a
+              key={l.label}
+              href={l.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-outline px-5 py-2 rounded-lg font-label-md text-label-md"
+            >
+              {l.label} ↗
+            </a>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   const allView = () => {
     const papers = itemsOf("paper");
+    const preprints = itemsOf("preprint");
     const news = itemsOf("news");
-    const handled = new Set(["paper", "dataset", "tool", "trial", "news"]);
+    const handled = new Set(["paper", "preprint", "dataset", "tool", "trial", "approval", "news"]);
     const rest = sections.filter((s) => !handled.has(s.kind) && s.items.length > 0);
     return (
       <div className="space-y-16">
@@ -305,9 +356,23 @@ function SearchResults() {
             />
           </section>
         )}
+        {preprints.length > 0 && (
+          <section>
+            <SectionHeading title="Preprints" subtitle="Not yet peer reviewed." />
+            <PaperList
+              items={preprints}
+              limit={4}
+              onMore={() => select("preprint")}
+              projectId={projectId}
+              preprint
+            />
+          </section>
+        )}
         {resourceSection("dataset", "Datasets")}
         {resourceSection("tool", "Tools")}
         {trialSection()}
+        {approvalSection()}
+        {patentsSection()}
         {news.length > 0 && (
           <section>
             <SectionHeading title="News" />
@@ -351,6 +416,14 @@ function SearchResults() {
         </div>
       );
     }
+    if (kind === "preprint") {
+      return (
+        <section>
+          <SectionHeading title="Preprints" subtitle="Not yet peer reviewed." />
+          <PaperList items={section.items} projectId={projectId} preprint />
+        </section>
+      );
+    }
     if (kind === "news") {
       return <NewsFront items={section.items} expanded projectId={projectId} />;
     }
@@ -358,9 +431,10 @@ function SearchResults() {
       return <div>{resourceSection(kind, kind === "dataset" ? "Datasets" : "Tools")}</div>;
     }
     if (kind === "trial") return <div>{trialSection()}</div>;
+    if (kind === "approval") return <div>{approvalSection()}</div>;
     return (
       <div className="space-y-14">
-        <OtherSections sections={[section]} projectId={projectId} />
+        <OtherSections sections={[section]} projectId={projectId} expandGenesets={kind === "geneset"} />
       </div>
     );
   };

@@ -26,7 +26,46 @@ export type BentoTile = {
   item?: ExploreItem;
   /** Marks a link that leaves the site: shows a ↗ after the name. */
   external?: boolean;
+  /** Live GEO dataset: 3 tags, 2-line title and accession meta on small tiles, 4-line description on the large one. */
+  liveDataset?: boolean;
 };
+
+// GEO fields on a dataset's `raw` (see geoFields() in components/ItemCard.tsx).
+type GeoRaw = {
+  accession?: string;
+  organism?: string | null;
+  sample_count?: number | null;
+  experiment_type?: string | null;
+};
+
+const EXPERIMENT_TYPE_MAX = 28;
+
+// GEO's official wording -> the short names researchers use.
+const EXPERIMENT_TYPE_NAMES: Record<string, string> = {
+  "expression profiling by high throughput sequencing": "RNA-seq",
+  "expression profiling by array": "Microarray",
+  "genome binding/occupancy profiling by high throughput sequencing": "ChIP/ATAC-seq",
+  "methylation profiling by high throughput sequencing": "Methylation-seq",
+  "methylation profiling by array": "Methylation array",
+  "non-coding rna profiling by high throughput sequencing": "ncRNA-seq",
+};
+
+function truncateExperimentType(t: string): string {
+  return t.length > EXPERIMENT_TYPE_MAX ? t.slice(0, EXPERIMENT_TYPE_MAX - 1).trimEnd() + "…" : t;
+}
+
+// GEO sometimes joins several types with "; ": show the first part that has a
+// short name, skipping "Other". Only when none maps, truncate the first
+// non-"Other" part. Null (no chip) when "Other" is all there is.
+function shortExperimentType(type: string): string | null {
+  const parts = type.split(";").map((p) => p.trim()).filter(Boolean);
+  for (const p of parts) {
+    const name = EXPERIMENT_TYPE_NAMES[p.toLowerCase()];
+    if (name) return name;
+  }
+  const fallback = parts.find((p) => p.toLowerCase() !== "other");
+  return fallback ? truncateExperimentType(fallback) : null;
+}
 
 export function curatedTile(item: CuratedItem, kind: "tool" | "dataset"): BentoTile {
   const e = curatedToExploreItem(item, kind);
@@ -43,6 +82,27 @@ export function curatedTile(item: CuratedItem, kind: "tool" | "dataset"): BentoT
 }
 
 export function liveTile(item: ExploreItem): BentoTile {
+  if (item.kind === "dataset") {
+    const geo = (item.raw ?? {}) as GeoRaw;
+    const tags: string[] = [];
+    if (geo.organism) tags.push(geo.organism);
+    if (typeof geo.sample_count === "number") {
+      tags.push(`${geo.sample_count.toLocaleString()} sample${geo.sample_count === 1 ? "" : "s"}`);
+    }
+    const experiment = geo.experiment_type ? shortExperimentType(geo.experiment_type) : null;
+    if (experiment) tags.push(experiment);
+    return {
+      id: item.id,
+      kind: item.kind,
+      name: item.title,
+      description: item.summary?.trim() || null,
+      url: item.url,
+      tags,
+      meta: geo.accession || null,
+      item,
+      liveDataset: true,
+    };
+  }
   return {
     id: item.id,
     kind: item.kind,
@@ -75,7 +135,7 @@ function Tile({
 }) {
   const large = !flat && index === 0;
   const t = TYPE_STYLES[typeKeyForKind(tile.kind)];
-  const tags = tile.tags.slice(0, 2);
+  const tags = tile.tags.slice(0, tile.liveDataset ? 3 : 2);
 
   const inner = (
     <>
@@ -89,7 +149,7 @@ function Tile({
       <h3
         className={
           "font-title font-medium text-on-background leading-tight " +
-          (large ? "mt-4 text-[30px]" : "mt-1.5 text-[18px] truncate")
+          (large ? "mt-4 text-[30px]" : "mt-1.5 text-[18px] " + (tile.liveDataset ? "line-clamp-2" : "truncate"))
         }
       >
         {tile.name}
@@ -101,7 +161,7 @@ function Tile({
           className={
             "text-on-background/70 " +
             (large
-              ? "mt-3 text-[15px] leading-relaxed"
+              ? "mt-3 text-[15px] leading-relaxed" + (tile.liveDataset ? " line-clamp-4" : "")
               : `mt-1 text-[13px] leading-[1.3] ${descLines === 3 ? "line-clamp-3" : "line-clamp-2"}`)
           }
         >
@@ -111,6 +171,9 @@ function Tile({
 
       {large && tile.meta && (
         <p className="mt-3 text-[13px] text-on-background/60">{tile.meta}</p>
+      )}
+      {!large && tile.liveDataset && tile.meta && (
+        <p className="mt-1 text-[12px] text-on-background/60 truncate">{tile.meta}</p>
       )}
 
       {tags.length > 0 && (

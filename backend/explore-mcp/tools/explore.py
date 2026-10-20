@@ -43,15 +43,17 @@ from cache import (
 )
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
+from tools.search_fda import search_fda_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
 from tools.search_opentargets import search_opentargets_async
 from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_multi_dual_async
+from tools.search_preprints import search_preprints_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
-from tools.search_trials import search_trials_async
+from tools.search_trials import search_trials_async, search_trials_with_gene_async
 from tools.search_wiki import search_wiki
 
 SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
@@ -172,8 +174,10 @@ def _extract_scope(input_text: str) -> dict:
 # One-line descriptions the router reasons over. Order defines a stable listing.
 _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_papers":        "live scientific literature — PubMed / OpenAlex / Crossref",
+    "search_preprints":     "PREPRINTS not yet peer-reviewed (bioRxiv, medRxiv, Research Square, ...), newest first — Europe PMC",
     "search_news":          "industry news headlines from biopharma RSS feeds (BioPharma Dive, STAT, Endpoints), newest first",
     "search_trials":        "clinical trials — ClinicalTrials.gov",
+    "search_fda":           "FDA-APPROVED drugs whose label indication mentions the disease — openFDA",
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
     "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
@@ -210,6 +214,8 @@ _ROUTING_SYSTEM = (
     "funding activity worth surfacing — same reasoning as why a disease/gene alone "
     "already triggers datasets and pager above, not only when the user's own wording "
     "happens to say 'clinical trials' or 'funding'.\n"
+    "  • Whenever the scope names a DISEASE → ALSO include search_fda (drugs already "
+    "FDA-approved for it), same rule as search_trials.\n"
     "  • An explicit funding ask with NO disease named ('funding for a CRISPR screen', "
     "'grant for a high-throughput assay') → grants (and relevant tools) even though the "
     "disease-triggered rule above doesn't apply to it.\n"
@@ -226,6 +232,8 @@ _ROUTING_SYSTEM = (
     "...), whether or not the user's own wording asks for 'evidence' or 'targets' "
     "explicitly. Unlike search_chembl (gene-only), search_opentargets accepts EITHER a "
     "gene OR a disease on its own.\n"
+    "  • ALWAYS include search_preprints whenever search_papers is included — preprints "
+    "are the newest research, not yet in the journal indexes.\n"
     "  • Never claim a ranking that isn't backed by a real signal.\n"
     'Return ONLY a JSON object of the form '
     '{"tools": ["search_papers", ...], "reasoning": "one sentence"}. '
@@ -241,8 +249,10 @@ def _heuristic_tools(scope: dict) -> list[str]:
     chosen: list[str] = []
     if topical:
         chosen.append("search_papers")
+        chosen.append("search_preprints")
     if scope["diseases"]:
         chosen.append("search_trials")
+        chosen.append("search_fda")
         chosen.append("search_grants")
     if methody:
         chosen.append("search_tools")
@@ -403,8 +413,10 @@ def _choose_tools(input_text: str, scope: dict) -> tuple[list[str], str | None]:
 # disease-only project still gets a real PAGER query instead of skipping the
 # tool or sending nothing.
 _QUERY_SLICES: dict[str, tuple[str, ...]] = {
+    "search_preprints":     ("diseases", "genes"),            # VESTIGIAL - _query_for special-cases this to _preprints_query() (terms joined with AND, as Europe PMC expects). Left here as a record of the slice.
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind; own fan-out handles dilution separately
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
+    "search_fda":           ("diseases",),                    # VESTIGIAL - _query_for special-cases this to the FIRST disease only (openFDA phrase-matches the label's indication text).
     "search_trials":        ("diseases",),                    # STRICT matcher — condition ONLY; even one gene term can zero out a real trial (see note above)
     "search_grants":        ("diseases", "genes"),            # checked for trials' same failure mode, did not find it — Grants.gov didn't reduce results when a gene was added (see note above); kept
     "search_tools":         ("methods", "genes"),             # VESTIGIAL — _query_for special-cases this to _single_method_query(), which drops genes entirely. Left here as a record: "RNA ASO preclinical ATXN2 TARDBP" (this slice's output) returned 0 GitHub repos; RNA/ASO/preclinical alone each returned 16-20, ATXN2/TARDBP alone each returned 0 — genes are actively harmful here, not just diluting, since GitHub indexes what a repo DOES, not what gene it studies.
@@ -445,8 +457,10 @@ _FALLBACK_SLICES: dict[str, tuple[str, ...]] = {
 
 _KINDS: dict[str, str] = {
     "search_papers": "paper",
+    "search_preprints": "preprint",
     "search_news": "news",
     "search_trials": "trial",
+    "search_fda": "approval",
     "search_grants": "grant",
     "search_tools": "tool",
     "search_datasets": "dataset",
@@ -616,7 +630,33 @@ def _opentargets_query(scope: dict) -> str:
     return _join_unique(*[scope[k] for k in SCOPE_KEYS])
 
 
+def _preprints_query(scope: dict) -> str:
+    """Europe PMC query for preprints: the same entities papers use, diseases
+    and genes, joined with AND (multi-word terms quoted so they stay phrases).
+    Falls back to topics only when the scope has neither; "" when nothing, in
+    which case the tool is skipped."""
+    terms: list[str] = []
+    for key in ("diseases", "genes"):
+        terms.extend(scope.get(key) or [])
+    if not any((t or "").strip() for t in terms):
+        terms = list(scope.get("topics") or [])
+    seen: set[str] = set()
+    parts: list[str] = []
+    for t in terms:
+        t = (t or "").strip()
+        if not t or t.lower() in seen:
+            continue
+        seen.add(t.lower())
+        parts.append(f'"{t}"' if re.search(r"\s", t) else t)
+    return " AND ".join(parts)
+
+
 def _query_for(name: str, scope: dict) -> str:
+    if name == "search_preprints":
+        return _preprints_query(scope)
+    if name == "search_fda":
+        diseases = [d.strip() for d in (scope.get("diseases") or []) if d and d.strip()]
+        return diseases[0] if diseases else ""
     if name == "search_tools":
         return _single_method_query(scope)
     if name == "search_datasets":
@@ -795,6 +835,10 @@ def _dispatch(name: str, query: str):
     function is bypassed for it specifically."""
     if name == "search_news":
         return search_news_async(query, _NET_LIMIT)
+    if name == "search_preprints":
+        return search_preprints_async(query, _NET_LIMIT)
+    if name == "search_fda":
+        return search_fda_async(query, _NET_LIMIT)
     if name == "search_trials":
         return search_trials_async(query, _NET_LIMIT)
     if name == "search_grants":
@@ -851,6 +895,8 @@ async def _execute(
             specs.append((name, _KINDS[name], papers_query_display))
             continue
         query = _query_for(name, scope)
+        if name in ("search_preprints", "search_fda") and not query:
+            continue   # nothing to search on
         if name == "search_opentargets":
             # Thread the disease term through as a SEPARATE parameter
             # alongside the gene, not concatenated into `query` — see
@@ -874,11 +920,36 @@ async def _execute(
             # user actually typed instead.
             news_query = query or scope.get("_raw_input") or ""
             tasks.append(search_news_async(news_query, _NET_LIMIT, match=not scope.get("is_default")))
-        elif name == "search_trials" and status_filter:
+        elif name == "search_grants":
+            # Grants.gov's keyword match is loose: require the title to mention
+            # a scope disease or gene. No disease/gene (methods fallback) -> no
+            # filter, as before.
+            mentions = [t.strip() for t in (scope.get("diseases") or []) + (scope.get("genes") or []) if t and t.strip()]
+            tasks.append(search_grants_async(query, _NET_LIMIT, must_mention=mentions or None))
+        elif name == "search_trials":
+            # The query came from the `diseases` slice (the only primary slice)
+            # exactly when scope has diseases; otherwise it is the methods
+            # fallback, which stays on free-text query.term.
+            condition_only = bool(scope.get("diseases"))
+            genes = [g.strip() for g in (scope.get("genes") or []) if g and g.strip()]
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
             # search_trials_async -> ClinicalTrials.gov's filter.overallStatus.
-            tasks.append(search_trials_async(query, _NET_LIMIT, status_filter=status_filter))
+            if condition_only and genes:
+                # Disease AND gene: gene-matched trials first, then the
+                # condition-only ones (see search_trials_with_gene_async).
+                tasks.append(
+                    search_trials_with_gene_async(
+                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None
+                    )
+                )
+            else:
+                tasks.append(
+                    search_trials_async(
+                        query, _NET_LIMIT, status_filter=status_filter or None,
+                        condition_only=condition_only,
+                    )
+                )
         else:
             tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))
@@ -912,6 +983,19 @@ async def _execute(
         else:
             section["items"] = [item.model_dump() for item in result]
         sections.append(section)
+
+    # A preprint with the same DOI as a returned paper is the same work: show
+    # it once, as the paper.
+    paper_dois = {
+        (i.get("doi") or "").lower()
+        for s in sections if s["tool"] == "search_papers"
+        for i in [*s.get("items", []), *s.get("items_key", [])]
+        if i.get("doi")
+    }
+    if paper_dois:
+        for s in sections:
+            if s["tool"] == "search_preprints":
+                s["items"] = [i for i in s["items"] if (i.get("doi") or "").lower() not in paper_dois]
     return sections
 
 
@@ -957,6 +1041,20 @@ async def _explore_uncached(
     if (input_text or "").strip() and "search_papers" not in chosen:
         chosen.append("search_papers")
         forced_papers = True
+    # Preprints ride along with papers (they are the newest research, not yet in
+    # the journal indexes) whenever there is something to search on.
+    if (input_text or "").strip() and "search_papers" in chosen \
+            and "search_preprints" not in chosen and _preprints_query(scope):
+        chosen.append("search_preprints")
+    # FDA approvals ride along with any disease in a typed search (a router that
+    # skipped it would hide approved drugs for a named disease).
+    if (
+        (input_text or "").strip()
+        and scope.get("diseases")
+        and "search_fda" not in chosen
+        and _query_for("search_fda", scope)
+    ):
+        chosen.append("search_fda")
     # Same for news: always look, it's a cheap filter over cached RSS feeds and
     # returns nothing (section hidden) when no headline matches.
     if (input_text or "").strip() and "search_news" not in chosen:

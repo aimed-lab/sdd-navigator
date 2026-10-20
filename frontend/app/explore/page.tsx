@@ -38,7 +38,7 @@ import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
 // not removed: drop a kind from this set to bring its section back.
-const HIDDEN_SECTION_KINDS = new Set(["grant"]);
+const HIDDEN_SECTION_KINDS = new Set<string>();
 const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
   (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
 
@@ -414,7 +414,7 @@ function ExploreFeed() {
       );
     }
     return <div className="space-y-14">
-        <OtherSections sections={[section]} />
+        <OtherSections sections={[section]} expandGenesets={kind === "geneset"} />
       </div>;
   };
 

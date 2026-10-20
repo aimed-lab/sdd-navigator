@@ -221,11 +221,20 @@ async def _resolve_entity(client: httpx.AsyncClient, term: str, entity: str) -> 
     """`term` -> Open Targets id for the given `entity` ("target" or
     "disease") via Open Targets' own `search` query. Zero-match returns None
     — handled by the caller as an empty result / a fallback to try, same
-    pattern as chembl.py's target-search-miss handling."""
+    pattern as chembl.py's target-search-miss handling.
+
+    For "target" only a hit whose `name` equals `term` (case-insensitive,
+    trimmed) is accepted. Open Targets fuzzy-matches any text against
+    targets, so a disease word like "glioblastoma" would otherwise resolve to
+    an unrelated gene (KRTAP3-3). No exact match returns None so the caller
+    falls through to the disease path. "disease" keeps first-hit behavior."""
     data = await _post_graphql(client, _SEARCH_QUERY, {"q": term, "entityNames": [entity]})
     hits = ((data.get("search") or {}).get("hits")) or []
+    wanted = (term or "").strip().casefold()
     for hit in hits:
         if hit.get("entity") == entity and hit.get("id"):
+            if entity == "target" and (hit.get("name") or "").strip().casefold() != wanted:
+                continue
             return hit["id"]
     return None
 
@@ -388,6 +397,19 @@ async def _fetch_by_gene(
                 score=row.get("score"), evidence=_curated_evidence(row.get("datatypeScores") or []),
                 tractability=tractability, index=0, matched_query_disease=True,
             )
+
+    if disease_efo_id:
+        # The rest of the slots come from the disease path: other genes for the
+        # query's own disease, not this gene's unrelated diseases (Noonan, ...).
+        # cap + 1 because this gene may come back too and is skipped. Those
+        # items carry no matched_query_disease flag (they ARE on-topic). Only if
+        # the disease path yields nothing do we fall back to the gene's other
+        # diseases below.
+        disease_items = await _fetch_by_disease(client, disease_efo_id, cap + 1)
+        other_genes = [it for it in disease_items if it.raw.get("target_ensembl_id") != ensembl_id]
+        if other_genes:
+            head = [matched_item] if matched_item else []
+            return (head + other_genes)[:cap]
 
     items: list[Item] = []
     if matched_item:

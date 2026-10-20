@@ -8,10 +8,12 @@
 
 import { useState } from "react";
 import SectionHeading from "@/components/explore/SectionHeading";
-import { ResultTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
+import { ApprovalTile, GrantTile, ResultTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import type { ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
+  approval: "FDA-approved drugs",
+  preprint: "Preprints",
   geneset: "Gene sets",
   compound: "Compounds",
   target: "Target-disease evidence",
@@ -38,6 +40,10 @@ function Grid({ section, projectId }: { section: ExploreSection; projectId?: str
       {section.items.map((item) =>
         item.kind === "trial" ? (
           <TrialTile key={item.id} item={item} projectId={projectId} />
+        ) : item.kind === "approval" ? (
+          <ApprovalTile key={item.id} item={item} projectId={projectId} />
+        ) : item.kind === "grant" ? (
+          <GrantTile key={item.id} item={item} projectId={projectId} />
         ) : (
           <ResultTile key={item.id} item={item} projectId={projectId} />
         )
@@ -49,9 +55,12 @@ function Grid({ section, projectId }: { section: ExploreSection; projectId?: str
 export default function OtherSections({
   sections,
   projectId,
+  expandGenesets = false,
 }: {
   sections: ExploreSection[];
   projectId?: string;
+  /** Show gene sets open instead of behind the "Show gene sets" button (the Gene sets chip). */
+  expandGenesets?: boolean;
 }) {
   const [showGenesets, setShowGenesets] = useState(false);
   const withItems = sections.filter((s) => s.items.length > 0);
@@ -73,7 +82,7 @@ export default function OtherSections({
 
       {genesetCount > 0 && (
         <section>
-          {showGenesets ? (
+          {expandGenesets || showGenesets ? (
             <>
               <SectionHeading title="Gene sets" />
               {genesets.map((s) => (

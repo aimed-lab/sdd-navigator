@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sources.opentargets import fetch_opentargets  # noqa: E402
+from sources.opentargets import _resolve_entity, fetch_opentargets  # noqa: E402
 
 _FORBIDDEN = ("email", "transcript", "contact_info")
 
@@ -252,6 +252,64 @@ def test_opentargets_disease_filter_matched_pair_is_first_and_labeled():
     assert all(it.raw["matched_query_disease"] is False for it in rest)
 
 
+_PANCREATIC_DISEASE_PAYLOAD = {
+    "id": "MONDO_0005192",
+    "name": "exocrine pancreatic carcinoma",
+    "associatedTargets": {
+        "count": 4,
+        "rows": [
+            {   # KRAS comes back for the disease too and must not appear twice
+                "score": 0.7,
+                "target": {"id": "ENSG00000133703", "approvedSymbol": "KRAS", "approvedName": "KRAS proto-oncogene"},
+                "datatypeScores": [{"id": "somatic_mutation", "score": 0.6}],
+            },
+            {
+                "score": 0.6,
+                "target": {"id": "ENSG00000141510", "approvedSymbol": "TP53", "approvedName": "tumor protein p53"},
+                "datatypeScores": [{"id": "somatic_mutation", "score": 0.5}],
+            },
+            {
+                "score": 0.5,
+                "target": {"id": "ENSG00000147889", "approvedSymbol": "CDKN2A", "approvedName": "cyclin dependent kinase inhibitor 2A"},
+                "datatypeScores": [{"id": "somatic_mutation", "score": 0.4}],
+            },
+        ],
+    },
+}
+
+
+def test_opentargets_gene_plus_disease_fills_rest_with_other_genes_for_that_disease():
+    client = _FakeClient(
+        {"target": _KRAS_TARGET_HIT, "disease": _PANCREATIC_HIT},
+        target_payload=_KRAS_TARGET_PAYLOAD,
+        disease_payload=_PANCREATIC_DISEASE_PAYLOAD,
+        filter_payload=_KRAS_PANCREATIC_MATCH,
+    )
+    items = asyncio.run(fetch_opentargets(client, "KRAS", 10, disease="pancreatic cancer"))
+
+    # #1 is the matched KRAS-pancreatic pair, unchanged.
+    assert items[0].raw["target_symbol"] == "KRAS"
+    assert items[0].raw["disease_name"] == "exocrine pancreatic carcinoma"
+    assert items[0].raw["matched_query_disease"] is True
+    # The rest are OTHER genes for pancreatic cancer, not KRAS's other diseases.
+    assert [it.raw["target_symbol"] for it in items[1:]] == ["TP53", "CDKN2A"]
+    assert all(it.raw["disease_name"] == "exocrine pancreatic carcinoma" for it in items[1:])
+    # KRAS appears exactly once.
+    assert [it.raw["target_symbol"] for it in items].count("KRAS") == 1
+    assert not {"Noonan syndrome", "cardiofaciocutaneous syndrome"} & {it.raw["disease_name"] for it in items}
+
+
+def test_opentargets_gene_plus_disease_respects_cap():
+    client = _FakeClient(
+        {"target": _KRAS_TARGET_HIT, "disease": _PANCREATIC_HIT},
+        target_payload=_KRAS_TARGET_PAYLOAD,
+        disease_payload=_PANCREATIC_DISEASE_PAYLOAD,
+        filter_payload=_KRAS_PANCREATIC_MATCH,
+    )
+    items = asyncio.run(fetch_opentargets(client, "KRAS", 2, disease="pancreatic cancer"))
+    assert [it.raw["target_symbol"] for it in items] == ["KRAS", "TP53"]
+
+
 def test_opentargets_disease_filter_no_match_falls_back_to_top_scoring_all_labeled_false():
     client = _FakeClient(
         {"target": _KRAS_TARGET_HIT, "disease": _PANCREATIC_HIT},
@@ -300,6 +358,18 @@ def test_opentargets_tractability_drops_pr_data_availability_noise():
 
     assert ("Half-life Data", "PR") not in labels_modalities
     assert ("Literature", "PR") not in labels_modalities
+
+
+def test_resolve_target_rejects_fuzzy_non_exact_hit():
+    # Open Targets fuzzy-matches a disease word to an unrelated gene.
+    fuzzy = {"search": {"hits": [{"id": "ENSG00000244537", "name": "KRTAP3-3", "entity": "target"}]}}
+    client = _FakeClient({"target": fuzzy})
+    assert asyncio.run(_resolve_entity(client, "glioblastoma", "target")) is None
+
+
+def test_resolve_target_accepts_exact_name_case_insensitive():
+    client = _FakeClient({"target": _TARGET_HIT})
+    assert asyncio.run(_resolve_entity(client, " phgdh ", "target")) == "ENSG00000092621"
 
 
 if __name__ == "__main__":

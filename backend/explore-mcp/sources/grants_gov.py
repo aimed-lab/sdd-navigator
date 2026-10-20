@@ -38,12 +38,27 @@ def _title_activity_codes(title: str) -> set[str]:
     return set(_NIH_ACTIVITY_CODE_RE.findall(title.upper()))
 
 
+def _mentions_any(title: str, patterns: list[re.Pattern[str]]) -> bool:
+    return any(p.search(title) for p in patterns)
+
+
 async def fetch_grants(
     client: httpx.AsyncClient,
     term: str,
     cap: int,
     activity_codes: tuple[str, ...] | None = None,
+    must_mention: list[str] | None = None,
 ) -> list[Item]:
+    # `must_mention`: Grants.gov's keyword search is loose (a "pancreatic cancer
+    # KRAS" query returns Type 1 Diabetes and Immune Tolerance opportunities),
+    # so when given, keep only grants whose TITLE contains at least one of these
+    # terms as a whole phrase, case-insensitive. Nothing passing means an empty
+    # list, never a fall back to the unfiltered hits.
+    mention_patterns = [
+        re.compile(r"\b" + re.escape(t.strip()) + r"\b", re.IGNORECASE)
+        for t in (must_mention or [])
+        if t and t.strip()
+    ]
     body = {"keyword": term, "oppStatuses": "forecasted|posted", "rows": cap}
     data = await post_json(client, _SEARCH2, body)
 
@@ -55,6 +70,9 @@ async def fetch_grants(
         title = h.get("title")
         number = h.get("number")
         if not title or not number:   # blank-title / missing-number drop
+            continue
+
+        if mention_patterns and not _mentions_any(title, mention_patterns):
             continue
 
         if allowed is not None:
@@ -93,7 +111,16 @@ async def fetch_grants(
                 date_iso=iso_date,
                 signal=None,   # no ranking metric
                 dedupe_key=dedupe_key(url, title),
-                raw=h,
+                # Small first-party dict (response.py lists grants_gov in
+                # _INTERNAL_SOURCES) so the deadline reaches the frontend.
+                raw={
+                    "number": number,
+                    "agency": h.get("agency"),
+                    "agency_code": h.get("agencyCode"),
+                    "status": h.get("oppStatus"),
+                    "open_date": h.get("openDate"),
+                    "close_date": h.get("closeDate"),
+                },
             )
         )
     # filter_quality applies the off-domain guard; grants are exempt from the

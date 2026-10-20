@@ -77,6 +77,51 @@ def test_grants_item_shape_and_no_signal():
     _assert_no_forbidden(items)
 
 
+_HITS_PANCREATIC = {"data": {"oppHits": [
+    {"id": 1, "number": "A-1", "title": "The Role of the Innate Immune System in the Pathogenesis of Type 1 Diabetes"},
+    {"id": 2, "number": "A-2", "title": "Immune Tolerance Network"},
+    {
+        "id": 3, "number": "PAR-26-001", "title": "Pancreatic Cancer Detection Consortium",
+        "agencyCode": "HHS-NIH-NCI", "agency": "National Cancer Institute", "oppStatus": "posted",
+        "openDate": "2026-05-01", "closeDate": "2026-12-15",
+    },
+]}}
+
+
+def test_grants_must_mention_drops_off_topic_titles():
+    client = _FakeClient(_HITS_PANCREATIC)
+    items = asyncio.run(fetch_grants(client, "pancreatic cancer KRAS", 10, must_mention=["pancreatic cancer", "KRAS"]))
+    assert [it.title for it in items] == ["Pancreatic Cancer Detection Consortium"]
+
+
+def test_grants_must_mention_no_match_returns_empty_not_unfiltered():
+    client = _FakeClient(_HITS_PANCREATIC)
+    assert asyncio.run(fetch_grants(client, "x", 10, must_mention=["glioblastoma"])) == []
+
+
+def test_grants_must_mention_is_whole_phrase():
+    client = _FakeClient({"data": {"oppHits": [{"id": 9, "number": "B-1", "title": "Nonkrasonic Studies"}]}})
+    assert asyncio.run(fetch_grants(client, "x", 10, must_mention=["kras"])) == []
+
+
+def test_grants_without_must_mention_keeps_everything():
+    client = _FakeClient(_HITS_PANCREATIC)
+    assert len(asyncio.run(fetch_grants(client, "x", 10))) == 3
+
+
+def test_grants_raw_is_small_dict_with_close_date():
+    client = _FakeClient(_HITS_PANCREATIC)
+    items = asyncio.run(fetch_grants(client, "x", 10, must_mention=["pancreatic cancer"]))
+    assert items[0].raw == {
+        "number": "PAR-26-001",
+        "agency": "National Cancer Institute",
+        "agency_code": "HHS-NIH-NCI",
+        "status": "posted",
+        "open_date": "2026-05-01",
+        "close_date": "2026-12-15",
+    }
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failures = 0
