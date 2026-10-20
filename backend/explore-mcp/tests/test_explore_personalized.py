@@ -37,7 +37,7 @@ def executed(monkeypatch):
     with — one entry per ACTUAL compute, so its length is the miss count."""
     calls: list[tuple[list[str], dict]] = []
 
-    async def fake_execute(chosen, scope, since_year=None):
+    async def fake_execute(chosen, scope, since_year=None, status_filter=None, **kwargs):
         calls.append((list(chosen), dict(scope)))
         return [{"tool": name, "kind": te._KINDS[name], "query": "", "items": []} for name in chosen]
 
@@ -177,4 +177,4 @@ def test_interests_and_the_same_words_typed_as_a_search_stay_separate(executed, 
 
     assert len(executed) == 2
     assert feed["tools_called"] == te._DEFAULT_TOOLS
-    assert search["tools_called"] == ["search_papers"]
+    assert search["tools_called"] == ["search_papers", "search_preprints", "search_news"]
