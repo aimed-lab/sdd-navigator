@@ -5,7 +5,7 @@
 // icon on hover (always visible on phones). Thin dividers between rows.
 
 import SaveButton from "@/components/explore/SaveButton";
-import { paperMeta } from "@/lib/typeStyles";
+import { paperMeta, preprintMeta } from "@/lib/typeStyles";
 import type { ExploreItem } from "@/types/explore";
 
 export default function PaperList({
@@ -13,6 +13,7 @@ export default function PaperList({
   limit,
   onMore,
   projectId,
+  preprint = false,
 }: {
   items: ExploreItem[];
   /** All view: show at most this many, then a "More papers" link. */
@@ -20,6 +21,9 @@ export default function PaperList({
   onMore?: () => void;
   /** Saves into this project instead of a local toggle. */
   projectId?: string;
+  /** Preprint rows: "Preprint · <server>" in place of the journal, and a
+   *  "More preprints" link. */
+  preprint?: boolean;
 }) {
   if (items.length === 0) return null;
   const shown = limit ? items.slice(0, limit) : items;
@@ -28,7 +32,7 @@ export default function PaperList({
     <div>
       <ul className="divide-y divide-[#e7e4dc] border-y border-[#e7e4dc]">
         {shown.map((item) => {
-          const { authors, venue, year } = paperMeta(item);
+          const { authors, venue, year } = preprint ? preprintMeta(item) : paperMeta(item);
           const right = [venue, year].filter(Boolean).join(" · ");
           const body = (
             <>
@@ -75,7 +79,7 @@ export default function PaperList({
           onClick={onMore}
           className="mt-5 font-label-md text-label-md text-primary hover:underline underline-offset-4"
         >
-          More papers →
+          {preprint ? "More preprints →" : "More papers →"}
         </button>
       )}
     </div>

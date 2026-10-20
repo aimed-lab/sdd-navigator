@@ -25,6 +25,7 @@ export const TYPE_STYLES: Record<TypeKey, { label: string; bg: string; fg: strin
 /** Short label for a result's type, including the niche kinds that share the
  *  neutral tint. */
 const KIND_LABELS: Record<string, string> = {
+  preprint: "Preprint",
   geneset: "Gene set",
   compound: "Compound",
   target: "Target evidence",
@@ -42,6 +43,7 @@ export function kindLabel(kind: string): string {
 export function typeKeyForKind(kind: string): TypeKey {
   switch (kind) {
     case "paper":
+    case "preprint": // same tint as papers; kindLabel() keeps the "Preprint" wording
       return "paper";
     case "dataset":
       return "dataset";
@@ -171,6 +173,33 @@ export function shortAuthors(names: string[]): string | null {
   if (names.length === 0) return null;
   if (names.length === 1) return names[0];
   return `${names[0]} et al.`;
+}
+
+/** Row meta for a preprint (Europe PMC): authors cut to "First Author et al.",
+ *  a "Preprint · <server>" label where a paper shows its journal (so it is
+ *  never mistaken for a peer-reviewed paper), and the year. */
+export function preprintMeta(item: ExploreItem): {
+  authors: string | null;
+  venue: string;
+  year: string | null;
+} {
+  const raw = item.raw ?? {};
+  const server = str(raw.server);
+  const authorString = str(raw.authors);
+  let authors: string | null = null;
+  if (authorString) {
+    const first = authorString.split(",")[0].trim();
+    authors = first
+      ? authorString.includes(",") || /et al\.?$/.test(authorString)
+        ? `${first.replace(/\.$/, "")} et al.`
+        : first.replace(/\.$/, "")
+      : null;
+  }
+  return {
+    authors,
+    venue: server ? `Preprint · ${server}` : "Preprint",
+    year: yearOf(item.date_iso),
+  };
 }
 
 export function paperMeta(item: ExploreItem): {

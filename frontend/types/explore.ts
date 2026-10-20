@@ -8,7 +8,7 @@ export type Signal = {
 
 export type ExploreItem = {
   id: string;
-  kind: string; // paper | news | trial | grant | tool | dataset | geneset | compound | target | resource | person | episode
+  kind: string; // paper | preprint | news | trial | grant | tool | dataset | geneset | compound | target | resource | person | episode
   title: string;
   summary: string | null;
   url: string | null;
@@ -54,6 +54,13 @@ export type TrialRaw = {
   overall_status?: string | null;
   why_stopped?: string | null;
   phase?: string | null;
+};
+
+/** backend/explore-mcp/sources/europepmc.py's `raw` shape (kind "preprint"). */
+export type PreprintRaw = {
+  server?: string | null;
+  authors?: string | null;
+  doi?: string | null;
 };
 
 /** backend/explore-mcp/sources/grants_gov.py's `raw` shape. Dates are the

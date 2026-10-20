@@ -29,6 +29,7 @@ export const CATEGORIES: {
 }[] = [
   { label: "All", kind: null },
   { label: "Papers", kind: "paper" },
+  { label: "Preprints", kind: "preprint" },
   { label: "Datasets", kind: "dataset" },
   { label: "Trials", kind: "trial" },
   { label: "Compounds", kind: "compound" },

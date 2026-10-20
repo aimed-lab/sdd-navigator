@@ -12,6 +12,7 @@ import { GrantTile, ResultTile, TILE_GRID, TrialTile } from "@/components/explor
 import type { ExploreSection } from "@/types/explore";
 
 const SECTION_TITLE: Record<string, string> = {
+  preprint: "Preprints",
   geneset: "Gene sets",
   compound: "Compounds",
   target: "Target-disease evidence",

@@ -321,8 +321,9 @@ function SearchResults() {
 
   const allView = () => {
     const papers = itemsOf("paper");
+    const preprints = itemsOf("preprint");
     const news = itemsOf("news");
-    const handled = new Set(["paper", "dataset", "tool", "trial", "news"]);
+    const handled = new Set(["paper", "preprint", "dataset", "tool", "trial", "news"]);
     const rest = sections.filter((s) => !handled.has(s.kind) && s.items.length > 0);
     return (
       <div className="space-y-16">
@@ -334,6 +335,18 @@ function SearchResults() {
               limit={6}
               onMore={() => select("paper")}
               projectId={projectId}
+            />
+          </section>
+        )}
+        {preprints.length > 0 && (
+          <section>
+            <SectionHeading title="Preprints" subtitle="Not yet peer reviewed." />
+            <PaperList
+              items={preprints}
+              limit={4}
+              onMore={() => select("preprint")}
+              projectId={projectId}
+              preprint
             />
           </section>
         )}
@@ -382,6 +395,14 @@ function SearchResults() {
             </section>
           )}
         </div>
+      );
+    }
+    if (kind === "preprint") {
+      return (
+        <section>
+          <SectionHeading title="Preprints" subtitle="Not yet peer reviewed." />
+          <PaperList items={section.items} projectId={projectId} preprint />
+        </section>
       );
     }
     if (kind === "news") {
