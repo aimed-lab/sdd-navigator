@@ -34,18 +34,26 @@ export const sectionTitle = (kind: string) =>
 const TARGET_NOTE =
   "Open Targets' association score reflects breadth of evidence sources, not biological importance.";
 
-function Grid({ section, projectId }: { section: ExploreSection; projectId?: string }) {
+function Grid({
+  section,
+  projectId,
+  hideSave,
+}: {
+  section: ExploreSection;
+  projectId?: string;
+  hideSave?: boolean;
+}) {
   return (
     <div className={TILE_GRID}>
       {section.items.map((item) =>
         item.kind === "trial" ? (
-          <TrialTile key={item.id} item={item} projectId={projectId} />
+          <TrialTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
         ) : item.kind === "approval" ? (
-          <ApprovalTile key={item.id} item={item} projectId={projectId} />
+          <ApprovalTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
         ) : item.kind === "grant" ? (
-          <GrantTile key={item.id} item={item} projectId={projectId} />
+          <GrantTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
         ) : (
-          <ResultTile key={item.id} item={item} projectId={projectId} />
+          <ResultTile key={item.id} item={item} projectId={projectId} hideSave={hideSave} />
         )
       )}
     </div>
@@ -56,11 +64,14 @@ export default function OtherSections({
   sections,
   projectId,
   expandGenesets = false,
+  hideSave = false,
 }: {
   sections: ExploreSection[];
   projectId?: string;
   /** Show gene sets open instead of behind the "Show gene sets" button (the Gene sets chip). */
   expandGenesets?: boolean;
+  /** Leave out the bookmark on every tile. */
+  hideSave?: boolean;
 }) {
   const [showGenesets, setShowGenesets] = useState(false);
   const withItems = sections.filter((s) => s.items.length > 0);
@@ -76,7 +87,7 @@ export default function OtherSections({
             title={sectionTitle(section.kind)}
             subtitle={section.kind === "target" ? TARGET_NOTE : undefined}
           />
-          <Grid section={section} projectId={projectId} />
+          <Grid section={section} projectId={projectId} hideSave={hideSave} />
         </section>
       ))}
 
@@ -86,7 +97,7 @@ export default function OtherSections({
             <>
               <SectionHeading title="Gene sets" />
               {genesets.map((s) => (
-                <Grid key={s.tool} section={s} projectId={projectId} />
+                <Grid key={s.tool} section={s} projectId={projectId} hideSave={hideSave} />
               ))}
             </>
           ) : (

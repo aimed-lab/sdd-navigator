@@ -99,6 +99,8 @@ from tools.find_provider import (
     find_providers_for_project_async,
 )
 from tools.go_deeper import go_deeper_async
+from tools.assistant import UNAVAILABLE_REPLY, run_assistant_turn_async
+from tools.page_agent import run_page_agent_async, run_page_refresh_async
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
@@ -1390,6 +1392,139 @@ async def project_agent_status_http(request):
     # created_at (a monotonic clock float, meaningless off-process) is bookkeeping
     # for _prune_jobs() only — never shipped to the client.
     return JSONResponse({"status": job["status"], "stage": job["stage"], "result": job["result"]})
+
+
+@mcp.custom_route("/api/page-agent", methods=["POST"])
+async def page_agent_http(request):
+    """The PAGE agent — plain-HTTP only, no MCP tool, same trust level as
+    /api/project-agent. POST { topic: str } -> { summary, wiki_notes,
+    evidence_filings, unfiled_items, project_level_items,
+    missing_note_suggestions, candidates_found, tools_called, warnings,
+    search_failed }.
+
+    NEW ROUTE, ADDED ALONGSIDE the existing /api/project-agent routes — none
+    of those routes, or run_project_agent_async itself, are touched here.
+    See tools/page_agent.py's own module docstring for why this reuses
+    tools/wiki_agent.py's functions directly instead of duplicating them.
+
+    BLOCKING, ON PURPOSE: frontend/app/api/pages/route.ts (the Next.js
+    caller) has no login-gated polling UI the way the project agent's
+    start/status pair does — a topic-seeded page is created and returned in
+    one request/response, same shape as this service's own
+    /api/project-agent (the synchronous one, not /start+/status). No timeout
+    here for the same reason that route has none: this container has no
+    request timeout of its own.
+
+    `topic` is REQUIRED — same "cheapest reliable signal this is a genuine
+    call, not an empty probe" reasoning as _validate_project_agent_body,
+    just against a bare string field instead of `name`.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/page-agent: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    topic = body.get("topic")
+    if not isinstance(topic, str) or not topic.strip():
+        return JSONResponse({"error": "Missing required field: topic."}, status_code=400)
+
+    try:
+        result = await run_page_agent_async(topic)
+        return JSONResponse(result)
+    except Exception as exc:
+        logger.exception("POST /api/page-agent failed: topic=%r", topic)
+        return JSONResponse(
+            {
+                "summary": "The agent hit an unexpected error and could not complete this run.",
+                "wiki_notes": [],
+                "evidence_filings": {},
+                "unfiled_items": [],
+                "project_level_items": [],
+                "missing_note_suggestions": [],
+                "candidates_found": 0,
+                "tools_called": [],
+                "warnings": [str(exc)],
+                "search_failed": True,
+            },
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/assistant-turn", methods=["POST"])
+async def assistant_turn_http(request):
+    """One turn of the Explore AI assistant. POST { messages: [{role, content}],
+    context?: { query } } -> { reply, choices?, action? }.
+
+    The model only PROPOSES (tools/assistant.py): `action` is data for the
+    frontend to confirm and execute with the user's own session; nothing here
+    creates anything or touches a database. Same bearer-token auth as every
+    other /api route (BearerAuthMiddleware). An LLM failure is a 200 with an
+    apologetic reply, so the chat never shows a raw error."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return JSONResponse({"error": "Missing required field: messages."}, status_code=400)
+    last = messages[-1]
+    if not isinstance(last, dict) or last.get("role") != "user" or not str(last.get("content") or "").strip():
+        return JSONResponse({"error": "The last message must be a non-empty user message."}, status_code=400)
+
+    try:
+        return JSONResponse(await run_assistant_turn_async(messages, body.get("context")))
+    except Exception:
+        logger.exception("POST /api/assistant-turn failed")
+        return JSONResponse({"reply": UNAVAILABLE_REPLY})
+
+
+@mcp.custom_route("/api/page-refresh", methods=["POST"])
+async def page_refresh_http(request):
+    """Daily refresh of one existing living page (called by the Next.js
+    POST /api/pages/refresh job). POST { topic: str, known_item_ids: [str],
+    notes: [{slug, title, body}] } -> { new_items, evidence_filings,
+    unfiled_items, project_level_items, missing_note_suggestions,
+    candidates_found, tools_called, warnings, search_failed }.
+
+    Read-only with respect to notes: they are only used to file new items;
+    persisting anything is the caller's job. Same trust level as
+    /api/page-agent. An upstream failure comes back 200 with
+    search_failed=true so the caller can tell it from "nothing new"."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/page-refresh: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    topic = body.get("topic")
+    if not isinstance(topic, str) or not topic.strip():
+        return JSONResponse({"error": "Missing required field: topic."}, status_code=400)
+    known = body.get("known_item_ids")
+    notes = body.get("notes")
+    known = [k for k in known if isinstance(k, str)] if isinstance(known, list) else []
+    notes = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+
+    try:
+        return JSONResponse(await run_page_refresh_async(topic, known, notes))
+    except Exception as exc:
+        logger.exception("POST /api/page-refresh failed: topic=%r", topic)
+        return JSONResponse(
+            {
+                "new_items": [], "evidence_filings": {}, "unfiled_items": [],
+                "project_level_items": [], "missing_note_suggestions": [],
+                "candidates_found": 0, "tools_called": [],
+                "warnings": [str(exc)], "search_failed": True,
+            },
+            status_code=200,
+        )
 
 
 def _serve() -> None:

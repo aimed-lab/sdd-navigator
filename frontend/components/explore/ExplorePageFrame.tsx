@@ -5,6 +5,7 @@
 // Both pages render through this, so apart from content (heading text,
 // results) they are indistinguishable. Don't restyle one without the other.
 
+import AssistantChat from "@/components/explore/AssistantChat";
 import CategoryStrip from "@/components/CategoryStrip";
 import PageHeader from "@/components/PageHeader";
 
@@ -60,6 +61,8 @@ export default function ExplorePageFrame({
             </button>
           </form>
         </section>
+
+        <AssistantChat query={chips.query} />
 
         {scopeChips}
 

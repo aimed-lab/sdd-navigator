@@ -1,0 +1,32 @@
+name: Refresh living pages
+
+# Hourly: each run refreshes up to 3 pages that haven't been refreshed in 20+
+# hours (see frontend/lib/server/pages/pageRefresh.ts). Needs the repository
+# secret PAGES_REFRESH_SECRET, the same value as the app's PAGES_REFRESH_SECRET.
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Call the refresh endpoint
+        env:
+          PAGES_REFRESH_SECRET: ${{ secrets.PAGES_REFRESH_SECRET }}
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --output response.json --write-out "%{http_code}" \
+            --max-time 600 --request POST \
+            --header "Authorization: Bearer ${PAGES_REFRESH_SECRET}" \
+            https://connect.smartdrugdiscovery.org/api/pages/refresh)
+          cat response.json
+          echo
+          if [ "$status" -ne 200 ]; then
+            echo "Refresh endpoint returned HTTP $status" >&2
+            exit 1
+          fi
