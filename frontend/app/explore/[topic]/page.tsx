@@ -287,6 +287,38 @@ function SearchResults() {
     );
   };
 
+  // No free patent API to search, so this links out to the two public patent
+  // search sites with the query pre-filled rather than showing results.
+  const patentsSection = () => {
+    if (!topic.trim()) return null;
+    const q = encodeURIComponent(topic);
+    const links = [
+      { label: "Google Patents", href: `https://patents.google.com/?q=${q}` },
+      { label: "Lens", href: `https://www.lens.org/lens/search/patent/list?q=${q}` },
+    ];
+    return (
+      <section key="patents">
+        <SectionHeading title="Patents" />
+        <p className="text-secondary font-body-md">
+          Search patents for &ldquo;{topic}&rdquo;
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          {links.map((l) => (
+            <a
+              key={l.label}
+              href={l.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-outline px-5 py-2 rounded-lg font-label-md text-label-md"
+            >
+              {l.label} ↗
+            </a>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   const allView = () => {
     const papers = itemsOf("paper");
     const news = itemsOf("news");
@@ -308,6 +340,7 @@ function SearchResults() {
         {resourceSection("dataset", "Datasets")}
         {resourceSection("tool", "Tools")}
         {trialSection()}
+        {patentsSection()}
         {news.length > 0 && (
           <section>
             <SectionHeading title="News" />
