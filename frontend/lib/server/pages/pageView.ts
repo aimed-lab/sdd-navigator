@@ -9,6 +9,7 @@
 // returned (CLAUDE.md: owner ids don't ship to the client).
 
 import { getDb, getCurrentUser } from "@/lib/auth";
+import type { ActingContext } from "@/lib/server/pages/actingContext";
 import {
   citationNumber,
   isVisibility,
@@ -79,10 +80,10 @@ async function selectAll<T>(build: (from: number, to: number) => PromiseLike<{ d
   return out;
 }
 
-export async function getPageView(slug: string): Promise<PageViewResult> {
-  const db: Db | null = await getDb();
+export async function getPageView(slug: string, ctx?: ActingContext): Promise<PageViewResult> {
+  const db: Db | null = ctx ? ctx.db : await getDb();
   if (!db) return { status: "error" };
-  const user = await getCurrentUser();
+  const user = ctx ? ctx.user : await getCurrentUser();
 
   try {
     const { data: row, error } = await db
@@ -215,10 +216,10 @@ export type MyPagesResult = { status: "ok"; pages: MyPageRow[] } | { status: "si
 
 /** Pages the signed-in user owns, plus team pages they are a member of, each
  *  with the number of timeline entries added in the last 7 days. */
-export async function listMyPages(now: Date = new Date()): Promise<MyPagesResult> {
-  const user = await getCurrentUser();
+export async function listMyPages(now: Date = new Date(), ctx?: ActingContext): Promise<MyPagesResult> {
+  const user = ctx ? ctx.user : await getCurrentUser();
   if (!user) return { status: "signed_out" };
-  const db: Db | null = await getDb();
+  const db: Db | null = ctx ? ctx.db : await getDb();
   if (!db) return { status: "error" };
 
   const columns = "id, slug, title, visibility, refresh_enabled, last_refreshed_at";

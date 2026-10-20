@@ -8,6 +8,7 @@
 // owner) apart from success, and to return a clear { status: "forbidden" }.
 
 import { requireCurrentUser } from "@/lib/auth";
+import type { ActingContext } from "@/lib/server/pages/actingContext";
 import { isVisibility, type PageVisibility } from "@/lib/server/pages/pageViewHelpers";
 
 export type PageAdminResult =
@@ -17,8 +18,12 @@ export type PageAdminResult =
 
 const NOT_OWNER = "Only the page owner can do that.";
 
-export async function setPageVisibility(pageId: string, visibility: PageVisibility): Promise<PageAdminResult> {
-  const { db } = await requireCurrentUser();
+export async function setPageVisibility(
+  pageId: string,
+  visibility: PageVisibility,
+  ctx?: ActingContext
+): Promise<PageAdminResult> {
+  const { db } = ctx ?? (await requireCurrentUser());
   if (!isVisibility(visibility)) return { status: "error", error: "Visibility must be private, team or public." };
 
   const { data, error } = await db.from("pages").update({ visibility }).eq("id", pageId).select("id");
@@ -30,8 +35,12 @@ export async function setPageVisibility(pageId: string, visibility: PageVisibili
   return { status: "ok" };
 }
 
-export async function setPageRefreshEnabled(pageId: string, enabled: boolean): Promise<PageAdminResult> {
-  const { db } = await requireCurrentUser();
+export async function setPageRefreshEnabled(
+  pageId: string,
+  enabled: boolean,
+  ctx?: ActingContext
+): Promise<PageAdminResult> {
+  const { db } = ctx ?? (await requireCurrentUser());
   const { data, error } = await db
     .from("pages")
     .update({ refresh_enabled: !!enabled })
@@ -45,8 +54,8 @@ export async function setPageRefreshEnabled(pageId: string, enabled: boolean): P
   return { status: "ok" };
 }
 
-export async function deletePage(pageId: string): Promise<PageAdminResult> {
-  const { db } = await requireCurrentUser();
+export async function deletePage(pageId: string, ctx?: ActingContext): Promise<PageAdminResult> {
+  const { db } = ctx ?? (await requireCurrentUser());
   const { data, error } = await db.from("pages").delete().eq("id", pageId).select("id");
   if (error) {
     console.error("deletePage failed", error);

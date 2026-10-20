@@ -19,6 +19,7 @@
 // the result's `active` says whether it takes effect right now.
 
 import { requireCurrentUser } from "@/lib/auth";
+import type { ActingContext, ActingDb } from "@/lib/server/pages/actingContext";
 
 export type PageMemberRole = "editor" | "viewer";
 
@@ -44,7 +45,7 @@ function isPageMemberRole(v: unknown): v is PageMemberRole {
 /** True when `userId` owns the page. A page the caller can't read looks the
  *  same as a missing one (null), so this doesn't reveal private pages. */
 async function loadOwnerCheck(
-  db: Awaited<ReturnType<typeof requireCurrentUser>>["db"],
+  db: ActingDb,
   pageId: string,
   userId: string
 ): Promise<{ found: boolean; isOwner: boolean; visibility: string | null }> {
@@ -69,9 +70,10 @@ async function loadOwnerCheck(
 export async function addPageMember(
   pageId: string,
   email: string,
-  role: PageMemberRole = "viewer"
+  role: PageMemberRole = "viewer",
+  ctx?: ActingContext
 ): Promise<AddPageMemberResult> {
-  const { user, db } = await requireCurrentUser();
+  const { user, db } = ctx ?? (await requireCurrentUser());
 
   if (!isPageMemberRole(role)) {
     return { status: "error", error: "Role must be 'editor' or 'viewer'." };
@@ -129,9 +131,10 @@ export async function addPageMember(
  *  there is no owner row to protect here. */
 export async function removePageMember(
   pageId: string,
-  memberUserId: string
+  memberUserId: string,
+  ctx?: ActingContext
 ): Promise<RemovePageMemberResult> {
-  const { user, db } = await requireCurrentUser();
+  const { user, db } = ctx ?? (await requireCurrentUser());
 
   const page = await loadOwnerCheck(db, pageId, user.id);
   if (!page.found) return { status: "error", error: "Page not found." };

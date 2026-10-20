@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
+import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
 
 // POST /api/assistant — one turn of the Explore AI assistant, forwarded to
 // explore-mcp's POST /api/assistant-turn. The assistant only PROPOSES; this
@@ -17,29 +18,10 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 export const maxDuration = 60;
 
 const MAX_BODY_BYTES = 40_000;
-const WINDOW_MS = 10 * 60 * 1000;
-const MAX_REQUESTS_PER_WINDOW = 30;
-const hits = new Map<string, number[]>();
-
-function rateLimited(ip: string, now = Date.now()): boolean {
-  const recent = (hits.get(ip) ?? []).filter((t) => now - t < WINDOW_MS);
-  if (recent.length >= MAX_REQUESTS_PER_WINDOW) {
-    hits.set(ip, recent);
-    return true;
-  }
-  recent.push(now);
-  hits.set(ip, recent);
-  if (hits.size > 5000) {
-    hits.forEach((times, key) => {
-      if (times.every((t) => now - t >= WINDOW_MS)) hits.delete(key);
-    });
-  }
-  return false;
-}
+const limiter = createRateLimiter(ASSISTANT_WINDOW_MS, ASSISTANT_MAX_REQUESTS);
 
 export async function POST(req: Request) {
-  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
-  if (rateLimited(ip)) {
+  if (limiter.limited(clientIp(req))) {
     return NextResponse.json({ error: "Too many messages. Please wait a few minutes." }, { status: 429 });
   }
 
