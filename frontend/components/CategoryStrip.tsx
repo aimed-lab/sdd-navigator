@@ -30,7 +30,12 @@ export const CATEGORIES: {
   { label: "All", kind: null },
   { label: "Papers", kind: "paper" },
   { label: "Datasets", kind: "dataset" },
+  { label: "Trials", kind: "trial" },
+  { label: "Compounds", kind: "compound" },
+  { label: "Targets", kind: "target" },
+  { label: "Gene sets", kind: "geneset" },
   { label: "Tools", kind: "tool" },
+  { label: "Grants", kind: "grant" },
   { label: "News", kind: "news" },
   { label: "Podcast", kind: "episode", href: "/explore/podcast" },
   // Hidden for now (portal quick fixes) — code kept, chips not shown.
@@ -39,11 +44,6 @@ export const CATEGORIES: {
   // value the two pages that render this strip special-case to render
   // components/communities/CommunityCard instead of ItemCard.
   { label: "Communities", kind: "communities", hidden: true },
-  { label: "Gene sets", kind: "geneset", hidden: true },
-  { label: "Compounds", kind: "compound", hidden: true },
-  { label: "Targets", kind: "target", hidden: true },
-  { label: "Trials", kind: "trial", hidden: true },
-  { label: "Grants", kind: "grant", hidden: true },
   { label: "People", kind: "person", hidden: true },
 ];
 

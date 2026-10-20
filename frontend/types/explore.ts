@@ -56,6 +56,17 @@ export type TrialRaw = {
   phase?: string | null;
 };
 
+/** backend/explore-mcp/sources/grants_gov.py's `raw` shape. Dates are the
+ *  strings Grants.gov sends (MMDDYYYY), not ISO. */
+export type GrantRaw = {
+  number?: string | null;
+  agency?: string | null;
+  agency_code?: string | null;
+  status?: string | null;
+  open_date?: string | null;
+  close_date?: string | null;
+};
+
 /** backend/explore-mcp/sources/chembl.py's `raw` shape — a handful of
  *  first-party fields, no top-level Item field for any of them. Two record
  *  kinds share this shape: a mechanism-of-action record (mechanism_of_action/
