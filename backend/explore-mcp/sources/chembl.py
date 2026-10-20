@@ -65,12 +65,18 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
+import asyncio
+
 import httpx
 
 from dedupe import dedupe_key
 from models import Item
 
 from .base import get_json, to_iso
+
+# ChEMBL is routinely slower than the 8s shared FETCH_TIMEOUT (a mechanism call
+# was measured at 8.3s), so every ChEMBL request gets 15s. Other sources keep 8s.
+CHEMBL_TIMEOUT = 15
 
 _TARGET_SEARCH = "https://www.ebi.ac.uk/chembl/api/data/target/search"
 _MECHANISM = "https://www.ebi.ac.uk/chembl/api/data/mechanism.json"
@@ -86,14 +92,29 @@ async def _resolve_target(client: httpx.AsyncClient, gene_symbol: str) -> str | 
     """Gene symbol -> target_chembl_id via ChEMBL's target search. Zero-match
     (unknown gene, ChEMBL has no target record for it) returns None — handled
     by the caller as an empty result, same pattern as every other source's
-    empty-result handling."""
-    url = f"{_TARGET_SEARCH}?q={quote(gene_symbol)}&format=json"
-    data = await get_json(client, url)
-    targets = (data or {}).get("targets") or []
-    if not targets:
-        return None
-    target_id = targets[0].get("target_chembl_id")
-    return target_id or None
+    empty-result handling.
+
+    The search is fuzzy and its first hit is often the wrong kind of record
+    (q=EGFR returns protein-protein-interaction and mouse targets before the
+    human protein CHEMBL203). So take the first target that is a Homo sapiens
+    SINGLE PROTEIN whose GENE_SYMBOL synonym equals `gene_symbol`
+    (case-insensitive); with no such target, return None rather than a wrong
+    one."""
+    url = f"{_TARGET_SEARCH}?q={quote(gene_symbol)}&limit=20&format=json"
+    data = await get_json(client, url, timeout=CHEMBL_TIMEOUT)
+    wanted = gene_symbol.strip().lower()
+    for target in (data or {}).get("targets") or []:
+        if target.get("organism") != "Homo sapiens" or target.get("target_type") != "SINGLE PROTEIN":
+            continue
+        symbols = {
+            (syn.get("component_synonym") or "").strip().lower()
+            for comp in target.get("target_components") or []
+            for syn in comp.get("target_component_synonyms") or []
+            if syn.get("syn_type") == "GENE_SYMBOL"
+        }
+        if wanted in symbols and target.get("target_chembl_id"):
+            return target["target_chembl_id"]
+    return None
 
 
 async def _resolve_molecule_names(
@@ -109,7 +130,7 @@ async def _resolve_molecule_names(
     if not molecule_ids:
         return {}
     url = f"{_MOLECULE}?molecule_chembl_id__in={quote(','.join(molecule_ids))}&format=json"
-    data = await get_json(client, url)
+    data = await get_json(client, url, timeout=CHEMBL_TIMEOUT)
     names: dict[str, str | None] = {}
     for mol in (data or {}).get("molecules") or []:
         mid = mol.get("molecule_chembl_id")
@@ -138,7 +159,7 @@ def _pubmed_refs(mechanism_refs: list[dict]) -> list[str]:
 
 async def _fetch_mechanisms(client: httpx.AsyncClient, target_chembl_id: str, cap: int) -> list[Item]:
     url = f"{_MECHANISM}?target_chembl_id={quote(target_chembl_id)}&format=json&limit={cap}"
-    data = await get_json(client, url)
+    data = await get_json(client, url, timeout=CHEMBL_TIMEOUT)
 
     items: list[Item] = []
     for i, m in enumerate((data or {}).get("mechanisms") or []):
@@ -187,7 +208,7 @@ async def _fetch_activities(client: httpx.AsyncClient, target_chembl_id: str, ca
         f"{_ACTIVITY}?target_chembl_id={quote(target_chembl_id)}"
         f"&pchembl_value__isnull=false&format=json&limit={cap}"
     )
-    data = await get_json(client, url)
+    data = await get_json(client, url, timeout=CHEMBL_TIMEOUT)
 
     items: list[Item] = []
     for i, a in enumerate((data or {}).get("activities") or []):
@@ -269,8 +290,11 @@ async def fetch_chembl(client: httpx.AsyncClient, gene_symbol: str, cap: int) ->
     mech_cap = max(1, cap // 2)
     act_cap = max(1, cap - mech_cap)
 
-    mechanisms = await _fetch_mechanisms(client, target_chembl_id, mech_cap)
-    activities = await _fetch_activities(client, target_chembl_id, act_cap)
+    # Independent calls: run them together instead of back to back.
+    mechanisms, activities = await asyncio.gather(
+        _fetch_mechanisms(client, target_chembl_id, mech_cap),
+        _fetch_activities(client, target_chembl_id, act_cap),
+    )
 
     items = (mechanisms + activities)[:cap]
 

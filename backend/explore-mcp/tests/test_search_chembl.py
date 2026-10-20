@@ -69,7 +69,19 @@ def _assert_no_forbidden(items):
             assert field not in blob
 
 
-_TARGET_HIT = {"targets": [{"target_chembl_id": "CHEMBL1862"}]}
+def _target(chembl_id, name, organism, target_type, symbols):
+    """A target/search.json record in ChEMBL's shape: the gene symbol lives in
+    target_components[].target_component_synonyms[] with syn_type GENE_SYMBOL."""
+    return {
+        "target_chembl_id": chembl_id, "pref_name": name, "organism": organism,
+        "target_type": target_type,
+        "target_components": [{"target_component_synonyms": [
+            {"component_synonym": s, "syn_type": "GENE_SYMBOL"} for s in symbols
+        ]}] if symbols else [],
+    }
+
+
+_TARGET_HIT = {"targets": [_target("CHEMBL1862", "KRAS", "Homo sapiens", "SINGLE PROTEIN", ["KRAS"])]}
 
 _MECHANISMS = {
     "mechanisms": [
@@ -179,6 +191,53 @@ def test_chembl_blank_gene_returns_empty_without_any_request():
 
     items = asyncio.run(fetch_chembl(_ExplodingClient(), "  ", 10))
     assert items == []
+
+
+# ChEMBL's real order for q=EGFR: PPI and mouse records come before the human protein.
+_EGFR_SEARCH = {"targets": [
+    _target("CHEMBL4523747", "EGFR/PPP1CA", "Homo sapiens", "PROTEIN-PROTEIN INTERACTION", ["EGFR", "PPP1CA"]),
+    _target("CHEMBL5465557", "CCN2-EGFR", "Homo sapiens", "PROTEIN-PROTEIN INTERACTION", ["CCN2", "EGFR"]),
+    _target("CHEMBL3608", "Epidermal growth factor receptor", "Mus musculus", "SINGLE PROTEIN", ["Egfr"]),
+    _target("CHEMBL6193842", "Egfr/Ppp1ca", "Mus musculus", "PROTEIN-PROTEIN INTERACTION", ["Egfr"]),
+    _target("CHEMBL203", "Epidermal growth factor receptor", "Homo sapiens", "SINGLE PROTEIN", ["EGFR"]),
+]}
+
+
+def test_resolve_target_skips_ppi_and_mouse_records_and_picks_the_human_single_protein():
+    from sources.chembl import _resolve_target
+    client = _FakeClient(_EGFR_SEARCH, {}, {})
+    assert asyncio.run(_resolve_target(client, "EGFR")) == "CHEMBL203"
+    assert asyncio.run(_resolve_target(client, "egfr")) == "CHEMBL203"      # case-insensitive
+
+
+def test_resolve_target_still_picks_kras_when_it_is_first():
+    from sources.chembl import _resolve_target
+    client = _FakeClient(_TARGET_HIT, {}, {})
+    assert asyncio.run(_resolve_target(client, "KRAS")) == "CHEMBL1862"
+
+
+def test_resolve_target_returns_none_rather_than_a_wrong_target():
+    from sources.chembl import _resolve_target
+    client = _FakeClient(_EGFR_SEARCH, {}, {})
+    assert asyncio.run(_resolve_target(client, "HER2")) is None             # no GENE_SYMBOL match anywhere
+    only_wrong_kinds = {"targets": [
+        _target("CHEMBL4523747", "EGFR/PPP1CA", "Homo sapiens", "PROTEIN-PROTEIN INTERACTION", ["EGFR"]),
+        _target("CHEMBL3608", "Epidermal growth factor receptor", "Mus musculus", "SINGLE PROTEIN", ["EGFR"]),
+    ]}
+    assert asyncio.run(_resolve_target(_FakeClient(only_wrong_kinds, {}, {}), "EGFR")) is None
+
+
+def test_resolve_target_requests_up_to_20_results():
+    from sources.chembl import _resolve_target
+    seen = []
+
+    class _Spy(_FakeClient):
+        async def get(self, url, timeout=None, headers=None):
+            seen.append(url)
+            return await super().get(url, timeout=timeout, headers=headers)
+
+    asyncio.run(_resolve_target(_Spy(_EGFR_SEARCH, {}, {}), "EGFR"))
+    assert "limit=20" in seen[0] and "target/search" in seen[0]
 
 
 def test_chembl_records_missing_molecule_id_are_dropped():
