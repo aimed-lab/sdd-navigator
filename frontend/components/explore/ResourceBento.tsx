@@ -40,9 +40,31 @@ type GeoRaw = {
 
 const EXPERIMENT_TYPE_MAX = 28;
 
-function shortExperimentType(type: string): string {
-  const t = type.trim();
+// GEO's official wording -> the short names researchers use.
+const EXPERIMENT_TYPE_NAMES: Record<string, string> = {
+  "expression profiling by high throughput sequencing": "RNA-seq",
+  "expression profiling by array": "Microarray",
+  "genome binding/occupancy profiling by high throughput sequencing": "ChIP/ATAC-seq",
+  "methylation profiling by high throughput sequencing": "Methylation-seq",
+  "methylation profiling by array": "Methylation array",
+  "non-coding rna profiling by high throughput sequencing": "ncRNA-seq",
+};
+
+function truncateExperimentType(t: string): string {
   return t.length > EXPERIMENT_TYPE_MAX ? t.slice(0, EXPERIMENT_TYPE_MAX - 1).trimEnd() + "…" : t;
+}
+
+// GEO sometimes joins several types with "; ": show the first part that has a
+// short name, skipping "Other". Only when none maps, truncate the first
+// non-"Other" part. Null (no chip) when "Other" is all there is.
+function shortExperimentType(type: string): string | null {
+  const parts = type.split(";").map((p) => p.trim()).filter(Boolean);
+  for (const p of parts) {
+    const name = EXPERIMENT_TYPE_NAMES[p.toLowerCase()];
+    if (name) return name;
+  }
+  const fallback = parts.find((p) => p.toLowerCase() !== "other");
+  return fallback ? truncateExperimentType(fallback) : null;
 }
 
 export function curatedTile(item: CuratedItem, kind: "tool" | "dataset"): BentoTile {
@@ -67,7 +89,8 @@ export function liveTile(item: ExploreItem): BentoTile {
     if (typeof geo.sample_count === "number") {
       tags.push(`${geo.sample_count.toLocaleString()} sample${geo.sample_count === 1 ? "" : "s"}`);
     }
-    if (geo.experiment_type) tags.push(shortExperimentType(geo.experiment_type));
+    const experiment = geo.experiment_type ? shortExperimentType(geo.experiment_type) : null;
+    if (experiment) tags.push(experiment);
     return {
       id: item.id,
       kind: item.kind,
