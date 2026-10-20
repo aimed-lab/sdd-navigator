@@ -1,5 +1,5 @@
 // lib/server/pages/pagesDb.ts — shared plumbing for the new `pages` feature
-// (supabase/migrations/2026-09-30_living_pages.sql): a service-role Supabase
+// (database/migrations/2026-10-20_living_pages.sql): a service-role Supabase
 // client (anonymous pages are written by the server only, bypassing RLS, per
 // that migration's own header comment) and the slug helper POST /api/pages
 // uses to mint `pages.slug`.
@@ -17,12 +17,23 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+/** pages.visibility. 'private' = the owner only; 'team' = the owner plus
+ *  page_members (editors may write, viewers read); 'public' = anyone, signed
+ *  out too. page_members rows grant nothing on a private or public page. */
+export type PageVisibility = "private" | "team" | "public";
+
+export const DEFAULT_PAGE_VISIBILITY: PageVisibility = "private";
+
+export function isPageVisibility(v: unknown): v is PageVisibility {
+  return v === "private" || v === "team" || v === "public";
+}
+
 /** SERVICE-ROLE client for the `pages` feature only — bypasses RLS entirely,
  *  same as lib/server/supabaseServer.ts's own getServiceRoleClient(). Used
  *  because an anonymous (no-login) page has owner_id=null and there is no
  *  session to scope a normal request-scoped client to; the migration's RLS
  *  policies deliberately offer no INSERT path for a NULL owner_id (see
- *  2026-09-30_living_pages.sql's own OWNERSHIP MODEL note), so writing an
+ *  2026-10-20_living_pages.sql's OWNERSHIP, VISIBILITY AND TEAMS note), so writing an
  *  anonymous page and its notes/evidence/updates can only be done from the
  *  server with this key. SERVER-ONLY: read from process.env, never given a
  *  NEXT_PUBLIC_ prefix, never imported by a "use client" component. Returns

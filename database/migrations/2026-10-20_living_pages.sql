@@ -1,16 +1,16 @@
 -- =============================================================================
 -- Migration: living pages (pages, page_notes, page_evidence,
---            page_note_evidence, page_updates)  (2026-09-30)
+--            page_note_evidence, page_updates, page_members)  (2026-10-20)
 -- =============================================================================
 -- ADDITIVE ONLY. Does not alter or drop any existing table, function, or
 -- policy. Written but NOT run against any database as part of this task.
 --
--- Five new tables for the "living wiki" concept: a user types a seed (a
+-- Six new tables for the "living wiki" concept: a user types a seed (a
 -- topic, a researcher, or a community), an agent researches it and writes a
 -- page — no `projects`/`project_members` team model involved. Deliberately
 -- named `pages`/`page_notes`/`page_evidence`/`page_note_evidence`/
--- `page_updates`, NOT `wiki_*` — `public.wiki_pages` already exists (the
--- podcast-episode table, 2026-07-xx schema.sql) and means something
+-- `page_updates` (plus `page_members`), NOT `wiki_*` — `public.wiki_pages`
+-- already exists (the podcast-episode table, 2026-07-xx schema.sql) and means something
 -- unrelated; reusing the `wiki_` prefix here would collide in meaning even
 -- though not in name.
 --
@@ -22,23 +22,38 @@
 -- junction table. See those two migrations for the full design rationale
 -- (grounding, dedup on a stable item_id, links parsed from body text rather
 -- than a maintained edge table, etc.) — not re-derived here, only the
--- OWNERSHIP MODEL differs, described below.
+-- ownership model differs, described below.
 --
--- OWNERSHIP MODEL — single owner, not a team:
---   `pages.owner_id` is NULLABLE and references `public.users(id)`, the same
---   way `wiki_notes.updated_by` and every other user-FK in this codebase
---   does (never `auth.users` directly). NULL means an anonymous page — no
---   signed-in user created it. Anonymous pages are written ONLY by the
---   server using the service-role key (which bypasses RLS entirely), so
---   there are deliberately no INSERT/UPDATE/DELETE policies for anon here,
---   matching the instruction that gave rise to this migration.
+-- OWNERSHIP, VISIBILITY AND TEAMS:
+--   `pages.owner_id` references `public.users(id)` (never `auth.users`
+--   directly). It is NULL only for a site-created topic page, which must be
+--   visibility = 'public' (CHECK below); those are written by the server
+--   using the service-role key, which bypasses RLS, so there are no
+--   INSERT/UPDATE/DELETE policies for a NULL owner.
 --
--- VISIBILITY, NOT MEMBERSHIP — RLS here is `owner_id = auth.uid() OR
--- visibility = 'public'`, not `is_project_member()`. There is no team, so
--- there is no membership function to reuse; this follows the
--- `promote_showcase`/`published` precedent (schema.sql) — a single boolean-
--- shaped gate plus an owner escape hatch — rather than inventing a new
--- SECURITY DEFINER function for a check this simple.
+--   `visibility` is 'private' (default; the owner only), 'team' (the owner
+--   plus anyone in page_members) or 'public' (anyone, signed out too). The
+--   owner is NOT stored in page_members; owner_id stays the owner.
+--
+--   `page_members` (page_id, user_id, role 'editor'|'viewer') is the team,
+--   and it only counts while the page is 'team': rows on a private or public
+--   page grant nothing (they come back into effect if the owner switches the
+--   page to 'team'). On a team page editors can insert/update notes,
+--   evidence and the timeline; viewers read only. Deleting the page,
+--   changing its visibility, managing page_members and DELETING notes,
+--   evidence, filings or timeline entries are owner-only.
+--
+--   Access is decided by SECURITY DEFINER helpers in the style of
+--   public.is_project_member (2026-08-04_projects.sql): can_read_page() and
+--   can_edit_page(), plus is_page_owner() / is_page_participant() for the
+--   owner-only and member-list checks. Every policy below goes through them
+--   instead of repeating owner_id = auth.uid(), and because they run as the
+--   definer, a policy on `pages` reading `page_members` (and vice versa)
+--   cannot recurse through RLS.
+--
+--   can_read_page() is also granted to `anon`, so a public page is readable
+--   signed out; the SELECT policies therefore apply to every role. All
+--   other helpers, and every write policy, are authenticated-only.
 --
 -- `page_updates` is the one genuinely new shape: an APPEND-ONLY dated
 -- timeline (no `updated_at`, no update policy) — "new items found since
@@ -74,7 +89,7 @@ CREATE TABLE IF NOT EXISTS public.pages (
     -- uses, so a user's own display fields (name/affiliation/etc.) are one
     -- join away without touching auth schema.
     owner_id           UUID        REFERENCES public.users (id) ON DELETE CASCADE,
-    visibility         TEXT        NOT NULL DEFAULT 'public',
+    visibility         TEXT        NOT NULL DEFAULT 'private',
     refresh_enabled    BOOLEAN     NOT NULL DEFAULT true,
     last_refreshed_at  TIMESTAMPTZ,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -84,7 +99,11 @@ CREATE TABLE IF NOT EXISTS public.pages (
     CONSTRAINT pages_seed_type_check
         CHECK (seed_type IN ('topic', 'researcher', 'community')),
     CONSTRAINT pages_visibility_check
-        CHECK (visibility IN ('public', 'private'))
+        CHECK (visibility IN ('private', 'team', 'public')),
+    -- A page with no owner is a site-created topic page and must be public;
+    -- otherwise nobody could ever read it.
+    CONSTRAINT pages_ownerless_public_check
+        CHECK (owner_id IS NOT NULL OR visibility = 'public')
 );
 
 -- pages_slug_unique above already creates a unique index usable for slug
@@ -93,35 +112,228 @@ CREATE TABLE IF NOT EXISTS public.pages (
 -- column in this codebase (e.g. idx_lab_resources_owner, idx_collab_posts_owner).
 CREATE INDEX IF NOT EXISTS pages_owner_id_idx ON public.pages (owner_id);
 
+-- ── TABLE: page_members (the team; the owner is NOT stored here) ────────────
+
+CREATE TABLE IF NOT EXISTS public.page_members (
+    page_id     UUID        NOT NULL REFERENCES public.pages (id) ON DELETE CASCADE,
+    user_id     UUID        NOT NULL REFERENCES public.users (id) ON DELETE CASCADE,
+    role        TEXT        NOT NULL,
+    added_by    UUID        REFERENCES public.users (id) ON DELETE SET NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT page_members_pkey PRIMARY KEY (page_id, user_id),
+    CONSTRAINT page_members_role_check CHECK (role IN ('editor', 'viewer'))
+);
+
+-- The PK serves page_id lookups; this one serves "pages I'm a member of".
+CREATE INDEX IF NOT EXISTS page_members_user_id_idx ON public.page_members (user_id);
+
+-- ── ACCESS HELPERS ───────────────────────────────────────────────────────────
+-- SECURITY DEFINER + STABLE + pinned search_path, same shape as
+-- public.is_project_member(). They read `pages` and `page_members` as the
+-- definer, so policies on those tables can call them without recursing.
+
+CREATE OR REPLACE FUNCTION public.can_read_page(p_page_id UUID, p_uid UUID)
+    RETURNS BOOLEAN
+    LANGUAGE sql
+    SECURITY DEFINER
+    STABLE
+    SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.pages p
+        WHERE p.id = p_page_id
+          AND (
+              p.visibility = 'public'
+              OR p.owner_id = p_uid
+              OR (
+                  p.visibility = 'team'
+                  AND EXISTS (
+                      SELECT 1 FROM public.page_members pm
+                      WHERE pm.page_id = p.id AND pm.user_id = p_uid
+                  )
+              )
+          )
+    );
+$$;
+
+CREATE OR REPLACE FUNCTION public.can_edit_page(p_page_id UUID, p_uid UUID)
+    RETURNS BOOLEAN
+    LANGUAGE sql
+    SECURITY DEFINER
+    STABLE
+    SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1
+        FROM public.pages p
+        WHERE p.id = p_page_id
+          AND (
+              p.owner_id = p_uid
+              OR (
+                  p.visibility = 'team'
+                  AND EXISTS (
+                      SELECT 1 FROM public.page_members pm
+                      WHERE pm.page_id = p.id AND pm.user_id = p_uid AND pm.role = 'editor'
+                  )
+              )
+          )
+    );
+$$;
+
+-- Owner-only actions (delete page, change visibility, manage members).
+CREATE OR REPLACE FUNCTION public.is_page_owner(p_page_id UUID, p_uid UUID)
+    RETURNS BOOLEAN
+    LANGUAGE sql
+    SECURITY DEFINER
+    STABLE
+    SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.pages p
+        WHERE p.id = p_page_id AND p.owner_id = p_uid
+    );
+$$;
+
+-- Owner, or a page_members row on a 'team' page: who may see the member
+-- list. Unlike can_read_page() this is NOT true just because a page is public.
+CREATE OR REPLACE FUNCTION public.is_page_participant(p_page_id UUID, p_uid UUID)
+    RETURNS BOOLEAN
+    LANGUAGE sql
+    SECURITY DEFINER
+    STABLE
+    SET search_path = public
+AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.pages p
+        WHERE p.id = p_page_id
+          AND (
+              p.owner_id = p_uid
+              OR (
+                  p.visibility = 'team'
+                  AND EXISTS (
+                      SELECT 1 FROM public.page_members pm
+                      WHERE pm.page_id = p.id AND pm.user_id = p_uid
+                  )
+              )
+          )
+    );
+$$;
+
+-- Owner-only email lookup for adding a member (the page counterpart of
+-- find_account_id_by_email_for_project, 2026-08-19): returns the id of a
+-- CONFIRMED account with that email, or NULL; returns NULL unless the caller
+-- owns the page. page_members.user_id is NOT NULL, so there is no "pending
+-- by email" state: an email with no account is simply not found.
+CREATE OR REPLACE FUNCTION public.find_account_id_by_email_for_page(
+    p_page_id UUID,
+    p_email TEXT
+)
+    RETURNS UUID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    STABLE
+    SET search_path = public
+AS $$
+DECLARE
+    v_uid UUID;
+BEGIN
+    IF NOT public.is_page_owner(p_page_id, auth.uid()) THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT id INTO v_uid
+    FROM auth.users
+    WHERE lower(email) = lower(p_email)
+      AND email_confirmed_at IS NOT NULL
+    LIMIT 1;
+
+    RETURN v_uid;
+END;
+$$;
+
+-- can_read_page is the one helper signed-out visitors may call: it is what
+-- lets a public page be read without an account.
+REVOKE ALL ON FUNCTION public.can_read_page(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.can_read_page(UUID, UUID) TO anon, authenticated;
+
+REVOKE ALL ON FUNCTION public.can_edit_page(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.can_edit_page(UUID, UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION public.can_edit_page(UUID, UUID) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_page_owner(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_page_owner(UUID, UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION public.is_page_owner(UUID, UUID) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.is_page_participant(UUID, UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.is_page_participant(UUID, UUID) FROM anon;
+GRANT EXECUTE ON FUNCTION public.is_page_participant(UUID, UUID) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.find_account_id_by_email_for_page(UUID, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.find_account_id_by_email_for_page(UUID, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.find_account_id_by_email_for_page(UUID, TEXT) TO authenticated;
+
+-- ── RLS: pages ───────────────────────────────────────────────────────────────
+
 ALTER TABLE public.pages ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Pages: read public or own" ON public.pages;
-CREATE POLICY "Pages: read public or own"
+DROP POLICY IF EXISTS "Pages: read" ON public.pages;
+CREATE POLICY "Pages: read"
     ON public.pages FOR SELECT
-    USING (visibility = 'public' OR owner_id = auth.uid());
+    USING (public.can_read_page(id, auth.uid()));
 
 -- Browser-side creation always attaches the signed-in user as owner; an
--- anonymous page (owner_id NULL) is created only by the server via the
--- service-role key, which bypasses RLS entirely — no INSERT policy is
--- offered for a NULL owner_id here.
+-- ownerless page is created only by the server via the service-role key.
 DROP POLICY IF EXISTS "Pages: insert own" ON public.pages;
 CREATE POLICY "Pages: insert own"
     ON public.pages FOR INSERT
     TO authenticated
     WITH CHECK (owner_id = auth.uid());
 
-DROP POLICY IF EXISTS "Pages: update own" ON public.pages;
-CREATE POLICY "Pages: update own"
+-- Owner only (title, visibility, refresh settings). WITH CHECK also pins
+-- owner_id so a page cannot be handed to someone else or orphaned.
+DROP POLICY IF EXISTS "Pages: owner update" ON public.pages;
+CREATE POLICY "Pages: owner update"
     ON public.pages FOR UPDATE
     TO authenticated
-    USING (owner_id = auth.uid())
+    USING (public.is_page_owner(id, auth.uid()))
     WITH CHECK (owner_id = auth.uid());
 
-DROP POLICY IF EXISTS "Pages: delete own" ON public.pages;
-CREATE POLICY "Pages: delete own"
+DROP POLICY IF EXISTS "Pages: owner delete" ON public.pages;
+CREATE POLICY "Pages: owner delete"
     ON public.pages FOR DELETE
     TO authenticated
-    USING (owner_id = auth.uid());
+    USING (public.is_page_owner(id, auth.uid()));
+
+-- ── RLS: page_members ────────────────────────────────────────────────────────
+
+ALTER TABLE public.page_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Page members: participant read" ON public.page_members;
+CREATE POLICY "Page members: participant read"
+    ON public.page_members FOR SELECT
+    TO authenticated
+    USING (public.is_page_participant(page_id, auth.uid()));
+
+-- Only the owner adds members, and never themselves (the inserter is the
+-- owner, so user_id <> auth.uid() keeps the owner out of this table).
+DROP POLICY IF EXISTS "Page members: owner insert" ON public.page_members;
+CREATE POLICY "Page members: owner insert"
+    ON public.page_members FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        public.is_page_owner(page_id, auth.uid())
+        AND user_id <> auth.uid()
+        AND added_by = auth.uid()
+    );
+
+DROP POLICY IF EXISTS "Page members: owner delete" ON public.page_members;
+CREATE POLICY "Page members: owner delete"
+    ON public.page_members FOR DELETE
+    TO authenticated
+    USING (public.is_page_owner(page_id, auth.uid()));
+
+-- No UPDATE policy: changing a role is remove + re-add by the owner.
 
 DROP TRIGGER IF EXISTS pages_touch_updated_at ON public.pages;
 CREATE TRIGGER pages_touch_updated_at
@@ -156,46 +368,30 @@ CREATE INDEX IF NOT EXISTS page_notes_page_id_idx ON public.page_notes (page_id)
 
 ALTER TABLE public.page_notes ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Page notes: read public or own" ON public.page_notes;
-CREATE POLICY "Page notes: read public or own"
+DROP POLICY IF EXISTS "Page notes: read" ON public.page_notes;
+CREATE POLICY "Page notes: read"
     ON public.page_notes FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.pages p
-            WHERE p.id = page_id
-              AND (p.visibility = 'public' OR p.owner_id = auth.uid())
-        )
-    );
+    USING (public.can_read_page(page_id, auth.uid()));
 
-DROP POLICY IF EXISTS "Page notes: owner insert" ON public.page_notes;
-CREATE POLICY "Page notes: owner insert"
+DROP POLICY IF EXISTS "Page notes: editor insert" ON public.page_notes;
+CREATE POLICY "Page notes: editor insert"
     ON public.page_notes FOR INSERT
     TO authenticated
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
--- Owner-only, per the task's explicit note that "page_notes updates only by
--- the owner" — unlike wiki_notes (any project member), a living page has no
--- team to extend update rights to.
-DROP POLICY IF EXISTS "Page notes: owner update" ON public.page_notes;
-CREATE POLICY "Page notes: owner update"
+-- Owner or a page_members editor (can_edit_page).
+DROP POLICY IF EXISTS "Page notes: editor update" ON public.page_notes;
+CREATE POLICY "Page notes: editor update"
     ON public.page_notes FOR UPDATE
     TO authenticated
-    USING (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    )
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    USING (public.can_edit_page(page_id, auth.uid()))
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
 DROP POLICY IF EXISTS "Page notes: owner delete" ON public.page_notes;
 CREATE POLICY "Page notes: owner delete"
     ON public.page_notes FOR DELETE
     TO authenticated
-    USING (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    USING (public.is_page_owner(page_id, auth.uid()));
 
 DROP TRIGGER IF EXISTS page_notes_touch_updated_at ON public.page_notes;
 CREATE TRIGGER page_notes_touch_updated_at
@@ -231,41 +427,32 @@ CREATE INDEX IF NOT EXISTS page_evidence_page_id_idx ON public.page_evidence (pa
 
 ALTER TABLE public.page_evidence ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Page evidence: read public or own" ON public.page_evidence;
-CREATE POLICY "Page evidence: read public or own"
+DROP POLICY IF EXISTS "Page evidence: read" ON public.page_evidence;
+CREATE POLICY "Page evidence: read"
     ON public.page_evidence FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.pages p
-            WHERE p.id = page_id
-              AND (p.visibility = 'public' OR p.owner_id = auth.uid())
-        )
-    );
+    USING (public.can_read_page(page_id, auth.uid()));
 
-DROP POLICY IF EXISTS "Page evidence: owner insert" ON public.page_evidence;
-CREATE POLICY "Page evidence: owner insert"
+DROP POLICY IF EXISTS "Page evidence: editor insert" ON public.page_evidence;
+CREATE POLICY "Page evidence: editor insert"
     ON public.page_evidence FOR INSERT
     TO authenticated
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
 -- UPDATE needed for the same upsert-on-(page_id, item_id) re-sighting bump
 -- of last_seen_at that project_evidence_items' own UPDATE policy exists for.
-DROP POLICY IF EXISTS "Page evidence: owner update" ON public.page_evidence;
-CREATE POLICY "Page evidence: owner update"
+DROP POLICY IF EXISTS "Page evidence: editor update" ON public.page_evidence;
+CREATE POLICY "Page evidence: editor update"
     ON public.page_evidence FOR UPDATE
     TO authenticated
-    USING (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    )
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    USING (public.can_edit_page(page_id, auth.uid()))
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
--- No DELETE policy — same reasoning as project_evidence_items: nothing in
--- this feature deletes an evidence row directly; it ages out with the page
--- (ON DELETE CASCADE) or a future pruning pass.
+-- Owner-only delete (pruning); the row also goes with the page (CASCADE).
+DROP POLICY IF EXISTS "Page evidence: owner delete" ON public.page_evidence;
+CREATE POLICY "Page evidence: owner delete"
+    ON public.page_evidence FOR DELETE
+    TO authenticated
+    USING (public.is_page_owner(page_id, auth.uid()));
 
 -- ── TABLE: page_note_evidence (mirrors wiki_note_evidence) ──────────────────
 
@@ -324,34 +511,24 @@ CREATE TRIGGER trg_set_page_note_evidence_page_id
 
 ALTER TABLE public.page_note_evidence ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Page note evidence: read public or own" ON public.page_note_evidence;
-CREATE POLICY "Page note evidence: read public or own"
+DROP POLICY IF EXISTS "Page note evidence: read" ON public.page_note_evidence;
+CREATE POLICY "Page note evidence: read"
     ON public.page_note_evidence FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.pages p
-            WHERE p.id = page_id
-              AND (p.visibility = 'public' OR p.owner_id = auth.uid())
-        )
-    );
+    USING (public.can_read_page(page_id, auth.uid()));
 
-DROP POLICY IF EXISTS "Page note evidence: owner insert" ON public.page_note_evidence;
-CREATE POLICY "Page note evidence: owner insert"
+DROP POLICY IF EXISTS "Page note evidence: editor insert" ON public.page_note_evidence;
+CREATE POLICY "Page note evidence: editor insert"
     ON public.page_note_evidence FOR INSERT
     TO authenticated
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
--- A human may un-file a bad assignment without touching the note or item
+-- The owner may un-file a bad assignment without touching the note or item
 -- itself — same as wiki_note_evidence's own DELETE-only-beyond-insert shape.
 DROP POLICY IF EXISTS "Page note evidence: owner delete" ON public.page_note_evidence;
 CREATE POLICY "Page note evidence: owner delete"
     ON public.page_note_evidence FOR DELETE
     TO authenticated
-    USING (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    USING (public.is_page_owner(page_id, auth.uid()));
 
 -- No UPDATE policy — a filing is either there or it isn't, same reasoning
 -- as wiki_note_evidence.
@@ -380,31 +557,21 @@ CREATE INDEX IF NOT EXISTS page_updates_page_id_idx ON public.page_updates (page
 
 ALTER TABLE public.page_updates ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Page updates: read public or own" ON public.page_updates;
-CREATE POLICY "Page updates: read public or own"
+DROP POLICY IF EXISTS "Page updates: read" ON public.page_updates;
+CREATE POLICY "Page updates: read"
     ON public.page_updates FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM public.pages p
-            WHERE p.id = page_id
-              AND (p.visibility = 'public' OR p.owner_id = auth.uid())
-        )
-    );
+    USING (public.can_read_page(page_id, auth.uid()));
 
-DROP POLICY IF EXISTS "Page updates: owner insert" ON public.page_updates;
-CREATE POLICY "Page updates: owner insert"
+DROP POLICY IF EXISTS "Page updates: editor insert" ON public.page_updates;
+CREATE POLICY "Page updates: editor insert"
     ON public.page_updates FOR INSERT
     TO authenticated
-    WITH CHECK (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    WITH CHECK (public.can_edit_page(page_id, auth.uid()));
 
 -- No UPDATE policy — append-only, "never updated in place" per the task's
--- own instruction. A human may still delete a bad entry outright.
+-- own instruction. The owner may still delete a bad entry outright.
 DROP POLICY IF EXISTS "Page updates: owner delete" ON public.page_updates;
 CREATE POLICY "Page updates: owner delete"
     ON public.page_updates FOR DELETE
     TO authenticated
-    USING (
-        EXISTS (SELECT 1 FROM public.pages p WHERE p.id = page_id AND p.owner_id = auth.uid())
-    );
+    USING (public.is_page_owner(page_id, auth.uid()));

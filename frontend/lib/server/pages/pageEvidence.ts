@@ -1,7 +1,7 @@
 // lib/server/pages/pageEvidence.ts — page_evidence + page_note_evidence
 // persistence, copied and adapted from lib/server/wikiEvidence.ts's
 // saveEvidence() for the new `pages` feature
-// (supabase/migrations/2026-09-30_living_pages.sql). See that file's own
+// (database/migrations/2026-10-20_living_pages.sql). See that file's own
 // header comment for the full "every retrieved candidate is upserted,
 // whether filed under a note or not" rationale this mirrors.
 //
@@ -143,7 +143,7 @@ export async function savePageEvidence(
 
   // page_updates — one row per evidence item with a real date_iso, per this
   // feature's own spec (append-only dated timeline, see
-  // 2026-09-30_living_pages.sql's own "page_updates is the one genuinely new
+  // 2026-10-20_living_pages.sql's own "page_updates is the one genuinely new
   // shape" note). evidence_id links back to the page_evidence row just
   // upserted above when we have its id; occurred_on is DATE, not
   // TIMESTAMPTZ, so only the date portion of date_iso is kept.

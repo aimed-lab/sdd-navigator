@@ -1,6 +1,6 @@
 // lib/server/pages/pageNotes.ts — page_notes persistence, copied and adapted
 // from lib/server/wikiNotes.ts's saveWikiNotes() for the new `pages` feature
-// (supabase/migrations/2026-09-30_living_pages.sql). See that file's own
+// (database/migrations/2026-10-20_living_pages.sql). See that file's own
 // header comment for the full "writes directly, no approval step" and
 // human-edit-guard rationale this mirrors.
 //
@@ -8,7 +8,7 @@
 //   * `page_id` instead of `project_id` throughout.
 //   * Uses the SERVICE-ROLE client (getPagesServiceRoleClient), not
 //     requireCurrentUser()'s session-scoped one — a page can be created with
-//     no signed-in caller at all (owner_id NULL), and 2026-09-30_living_pages.sql
+//     no signed-in caller at all (owner_id NULL), and 2026-10-20_living_pages.sql
 //     deliberately offers no INSERT/UPDATE policy for a NULL-owner page, so
 //     writing its notes can only be done from the server, bypassing RLS.
 //   * `updated_by` is omitted — there is no session user id to attribute an

@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { getPagesServiceRoleClient, newPageSlug, titleFromTopic } from "@/lib/server/pages/pagesDb";
+import {
+  DEFAULT_PAGE_VISIBILITY,
+  getPagesServiceRoleClient,
+  isPageVisibility,
+  newPageSlug,
+  titleFromTopic,
+} from "@/lib/server/pages/pagesDb";
+import { getCurrentUser } from "@/lib/auth";
 import { savePageNotes, type PageNoteProposal } from "@/lib/server/pages/pageNotes";
 import { savePageEvidence, type PageEvidenceFilingsBySlug, type PageEvidenceItemInput } from "@/lib/server/pages/pageEvidence";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
@@ -8,7 +15,7 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 // topic string in, a page whose wiki notes + evidence have already been
 // researched and written out.
 //
-// MODELED ON THE PROJECT AGENT FLOW, BUT SYNCHRONOUS AND UNAUTHENTICATED,
+// MODELED ON THE PROJECT AGENT FLOW, BUT SYNCHRONOUS,
 // PER THIS TASK'S OWN INSTRUCTION. The project flow
 // (app/api/project-agent/start + .../status) is a start/poll pair because a
 // signed-in researcher is sitting on a project page watching real progress
@@ -37,10 +44,16 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 // uses — no duplicated agent/search/grounding logic, just a different, much
 // smaller orchestration on top for a bare topic.
 //
-// NO AUTH REQUIRED: owner_id is always null (anonymous), visibility is
-// always 'public' — this route is the one place in the codebase besides
+// VISIBILITY: the body takes `visibility` ('private' | 'team' | 'public',
+// default 'private'). A private or team page needs a signed-in caller, who
+// becomes its owner (owner_id = the session user, never a body field). A
+// public page may also be created with no session: owner_id is then null (a
+// site-created topic page; the table's CHECK allows a null owner only when
+// public). A signed-in caller creating a public page owns it.
+//
+// This route is the one place in the codebase besides
 // lib/auth.ts's deleteAccount() that reaches for a service-role Supabase
-// client, because 2026-09-30_living_pages.sql deliberately offers no INSERT
+// client, because 2026-10-20_living_pages.sql deliberately offers no INSERT
 // policy for a NULL-owner page (see that migration's own OWNERSHIP MODEL
 // note) — there is no session to scope a normal request-scoped client to
 // here at all.
@@ -78,6 +91,24 @@ export async function POST(req: Request) {
   }
   const { topic } = validated;
 
+  const visibilityField =
+    body && typeof body === "object" ? (body as Record<string, unknown>).visibility : undefined;
+  if (visibilityField !== undefined && !isPageVisibility(visibilityField)) {
+    return NextResponse.json(
+      { error: "visibility must be 'private', 'team' or 'public'." },
+      { status: 400 }
+    );
+  }
+  const visibility = isPageVisibility(visibilityField) ? visibilityField : DEFAULT_PAGE_VISIBILITY;
+
+  const user = await getCurrentUser();
+  if (!user && visibility !== "public") {
+    return NextResponse.json(
+      { error: "Sign in to create a private or team page." },
+      { status: 401 }
+    );
+  }
+
   const db = getPagesServiceRoleClient();
   if (!db) {
     return NextResponse.json(
@@ -106,8 +137,8 @@ export async function POST(req: Request) {
         title,
         seed_type: "topic",
         seed_input: topic,
-        owner_id: null,
-        visibility: "public",
+        owner_id: user?.id ?? null,
+        visibility,
       })
       .select("id, slug")
       .single();
@@ -186,6 +217,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     slug,
+    visibility,
     pageId,
     notes: savedNotes.saved,
     evidence: savedEvidence.itemsUpserted,
