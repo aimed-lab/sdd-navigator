@@ -221,11 +221,20 @@ async def _resolve_entity(client: httpx.AsyncClient, term: str, entity: str) -> 
     """`term` -> Open Targets id for the given `entity` ("target" or
     "disease") via Open Targets' own `search` query. Zero-match returns None
     — handled by the caller as an empty result / a fallback to try, same
-    pattern as chembl.py's target-search-miss handling."""
+    pattern as chembl.py's target-search-miss handling.
+
+    For "target" only a hit whose `name` equals `term` (case-insensitive,
+    trimmed) is accepted. Open Targets fuzzy-matches any text against
+    targets, so a disease word like "glioblastoma" would otherwise resolve to
+    an unrelated gene (KRTAP3-3). No exact match returns None so the caller
+    falls through to the disease path. "disease" keeps first-hit behavior."""
     data = await _post_graphql(client, _SEARCH_QUERY, {"q": term, "entityNames": [entity]})
     hits = ((data.get("search") or {}).get("hits")) or []
+    wanted = (term or "").strip().casefold()
     for hit in hits:
         if hit.get("entity") == entity and hit.get("id"):
+            if entity == "target" and (hit.get("name") or "").strip().casefold() != wanted:
+                continue
             return hit["id"]
     return None
 

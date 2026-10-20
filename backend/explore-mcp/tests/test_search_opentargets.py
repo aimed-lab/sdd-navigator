@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sources.opentargets import fetch_opentargets  # noqa: E402
+from sources.opentargets import _resolve_entity, fetch_opentargets  # noqa: E402
 
 _FORBIDDEN = ("email", "transcript", "contact_info")
 
@@ -300,6 +300,18 @@ def test_opentargets_tractability_drops_pr_data_availability_noise():
 
     assert ("Half-life Data", "PR") not in labels_modalities
     assert ("Literature", "PR") not in labels_modalities
+
+
+def test_resolve_target_rejects_fuzzy_non_exact_hit():
+    # Open Targets fuzzy-matches a disease word to an unrelated gene.
+    fuzzy = {"search": {"hits": [{"id": "ENSG00000244537", "name": "KRTAP3-3", "entity": "target"}]}}
+    client = _FakeClient({"target": fuzzy})
+    assert asyncio.run(_resolve_entity(client, "glioblastoma", "target")) is None
+
+
+def test_resolve_target_accepts_exact_name_case_insensitive():
+    client = _FakeClient({"target": _TARGET_HIT})
+    assert asyncio.run(_resolve_entity(client, " phgdh ", "target")) == "ENSG00000092621"
 
 
 if __name__ == "__main__":
