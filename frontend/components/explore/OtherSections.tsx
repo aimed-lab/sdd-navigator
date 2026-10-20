@@ -58,7 +58,7 @@ export default function OtherSections({
   /** Show gene sets open instead of behind the "Show gene sets" button (the Gene sets chip). */
   expandGenesets?: boolean;
 }) {
-  const [showGenesets, setShowGenesets] = useState(expandGenesets);
+  const [showGenesets, setShowGenesets] = useState(false);
   const withItems = sections.filter((s) => s.items.length > 0);
   const normal = withItems.filter((s) => s.kind !== "geneset");
   const genesets = withItems.filter((s) => s.kind === "geneset");
@@ -78,7 +78,7 @@ export default function OtherSections({
 
       {genesetCount > 0 && (
         <section>
-          {showGenesets ? (
+          {expandGenesets || showGenesets ? (
             <>
               <SectionHeading title="Gene sets" />
               {genesets.map((s) => (
