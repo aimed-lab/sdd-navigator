@@ -43,6 +43,7 @@ from cache import (
 )
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
+from tools.search_fda import search_fda_async
 from tools.search_grants import search_grants_async
 from tools.search_lab_resources import search_lab_resources
 from tools.search_news import search_news_async
@@ -176,6 +177,7 @@ _TOOL_DESCRIPTIONS: dict[str, str] = {
     "search_preprints":     "PREPRINTS not yet peer-reviewed (bioRxiv, medRxiv, Research Square, ...), newest first — Europe PMC",
     "search_news":          "industry news headlines from biopharma RSS feeds (BioPharma Dive, STAT, Endpoints), newest first",
     "search_trials":        "clinical trials — ClinicalTrials.gov",
+    "search_fda":           "FDA-APPROVED drugs whose label indication mentions the disease — openFDA",
     "search_grants":        "federal funding opportunities — Grants.gov",
     "search_tools":         "open-source software tools / repositories — GitHub",
     "search_datasets":      "gene-expression / functional-genomics DATASETS (not papers) — NCBI GEO",
@@ -212,6 +214,8 @@ _ROUTING_SYSTEM = (
     "funding activity worth surfacing — same reasoning as why a disease/gene alone "
     "already triggers datasets and pager above, not only when the user's own wording "
     "happens to say 'clinical trials' or 'funding'.\n"
+    "  • Whenever the scope names a DISEASE → ALSO include search_fda (drugs already "
+    "FDA-approved for it), same rule as search_trials.\n"
     "  • An explicit funding ask with NO disease named ('funding for a CRISPR screen', "
     "'grant for a high-throughput assay') → grants (and relevant tools) even though the "
     "disease-triggered rule above doesn't apply to it.\n"
@@ -248,6 +252,7 @@ def _heuristic_tools(scope: dict) -> list[str]:
         chosen.append("search_preprints")
     if scope["diseases"]:
         chosen.append("search_trials")
+        chosen.append("search_fda")
         chosen.append("search_grants")
     if methody:
         chosen.append("search_tools")
@@ -411,6 +416,7 @@ _QUERY_SLICES: dict[str, tuple[str, ...]] = {
     "search_preprints":     ("diseases", "genes"),            # VESTIGIAL - _query_for special-cases this to _preprints_query() (terms joined with AND, as Europe PMC expects). Left here as a record of the slice.
     "search_papers":        ("diseases", "topics", "genes"),  # richest slice — broadest kind; own fan-out handles dilution separately
     "search_news":          ("topics", "diseases"),           # the field, not a target — no genes
+    "search_fda":           ("diseases",),                    # VESTIGIAL - _query_for special-cases this to the FIRST disease only (openFDA phrase-matches the label's indication text).
     "search_trials":        ("diseases",),                    # STRICT matcher — condition ONLY; even one gene term can zero out a real trial (see note above)
     "search_grants":        ("diseases", "genes"),            # checked for trials' same failure mode, did not find it — Grants.gov didn't reduce results when a gene was added (see note above); kept
     "search_tools":         ("methods", "genes"),             # VESTIGIAL — _query_for special-cases this to _single_method_query(), which drops genes entirely. Left here as a record: "RNA ASO preclinical ATXN2 TARDBP" (this slice's output) returned 0 GitHub repos; RNA/ASO/preclinical alone each returned 16-20, ATXN2/TARDBP alone each returned 0 — genes are actively harmful here, not just diluting, since GitHub indexes what a repo DOES, not what gene it studies.
@@ -454,6 +460,7 @@ _KINDS: dict[str, str] = {
     "search_preprints": "preprint",
     "search_news": "news",
     "search_trials": "trial",
+    "search_fda": "approval",
     "search_grants": "grant",
     "search_tools": "tool",
     "search_datasets": "dataset",
@@ -647,6 +654,9 @@ def _preprints_query(scope: dict) -> str:
 def _query_for(name: str, scope: dict) -> str:
     if name == "search_preprints":
         return _preprints_query(scope)
+    if name == "search_fda":
+        diseases = [d.strip() for d in (scope.get("diseases") or []) if d and d.strip()]
+        return diseases[0] if diseases else ""
     if name == "search_tools":
         return _single_method_query(scope)
     if name == "search_datasets":
@@ -827,6 +837,8 @@ def _dispatch(name: str, query: str):
         return search_news_async(query, _NET_LIMIT)
     if name == "search_preprints":
         return search_preprints_async(query, _NET_LIMIT)
+    if name == "search_fda":
+        return search_fda_async(query, _NET_LIMIT)
     if name == "search_trials":
         return search_trials_async(query, _NET_LIMIT)
     if name == "search_grants":
@@ -883,8 +895,8 @@ async def _execute(
             specs.append((name, _KINDS[name], papers_query_display))
             continue
         query = _query_for(name, scope)
-        if name == "search_preprints" and not query:
-            continue   # nothing to search on (no disease, gene or topic)
+        if name in ("search_preprints", "search_fda") and not query:
+            continue   # nothing to search on
         if name == "search_opentargets":
             # Thread the disease term through as a SEPARATE parameter
             # alongside the gene, not concatenated into `query` — see
@@ -1034,6 +1046,15 @@ async def _explore_uncached(
     if (input_text or "").strip() and "search_papers" in chosen \
             and "search_preprints" not in chosen and _preprints_query(scope):
         chosen.append("search_preprints")
+    # FDA approvals ride along with any disease in a typed search (a router that
+    # skipped it would hide approved drugs for a named disease).
+    if (
+        (input_text or "").strip()
+        and scope.get("diseases")
+        and "search_fda" not in chosen
+        and _query_for("search_fda", scope)
+    ):
+        chosen.append("search_fda")
     # Same for news: always look, it's a cheap filter over cached RSS feeds and
     # returns nothing (section hidden) when no headline matches.
     if (input_text or "").strip() and "search_news" not in chosen:
