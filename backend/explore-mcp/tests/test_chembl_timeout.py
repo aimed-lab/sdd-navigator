@@ -36,7 +36,11 @@ class _FakeResponse:
         return self._payload
 
 
-_TARGET = {"targets": [{"target_chembl_id": "CHEMBL2189121"}]}
+_TARGET = {"targets": [{
+    "target_chembl_id": "CHEMBL2189121", "organism": "Homo sapiens", "target_type": "SINGLE PROTEIN",
+    "target_components": [{"target_component_synonyms": [
+        {"component_synonym": "KRAS", "syn_type": "GENE_SYMBOL"}]}],
+}]}
 _MECH = {"mechanisms": [{"molecule_chembl_id": "CHEMBL1", "mechanism_of_action": "inhibitor",
                          "action_type": "INHIBITOR", "max_phase": 4}]}
 _ACT = {"activities": []}

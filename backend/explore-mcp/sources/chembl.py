@@ -92,14 +92,29 @@ async def _resolve_target(client: httpx.AsyncClient, gene_symbol: str) -> str | 
     """Gene symbol -> target_chembl_id via ChEMBL's target search. Zero-match
     (unknown gene, ChEMBL has no target record for it) returns None — handled
     by the caller as an empty result, same pattern as every other source's
-    empty-result handling."""
-    url = f"{_TARGET_SEARCH}?q={quote(gene_symbol)}&format=json"
+    empty-result handling.
+
+    The search is fuzzy and its first hit is often the wrong kind of record
+    (q=EGFR returns protein-protein-interaction and mouse targets before the
+    human protein CHEMBL203). So take the first target that is a Homo sapiens
+    SINGLE PROTEIN whose GENE_SYMBOL synonym equals `gene_symbol`
+    (case-insensitive); with no such target, return None rather than a wrong
+    one."""
+    url = f"{_TARGET_SEARCH}?q={quote(gene_symbol)}&limit=20&format=json"
     data = await get_json(client, url, timeout=CHEMBL_TIMEOUT)
-    targets = (data or {}).get("targets") or []
-    if not targets:
-        return None
-    target_id = targets[0].get("target_chembl_id")
-    return target_id or None
+    wanted = gene_symbol.strip().lower()
+    for target in (data or {}).get("targets") or []:
+        if target.get("organism") != "Homo sapiens" or target.get("target_type") != "SINGLE PROTEIN":
+            continue
+        symbols = {
+            (syn.get("component_synonym") or "").strip().lower()
+            for comp in target.get("target_components") or []
+            for syn in comp.get("target_component_synonyms") or []
+            if syn.get("syn_type") == "GENE_SYMBOL"
+        }
+        if wanted in symbols and target.get("target_chembl_id"):
+            return target["target_chembl_id"]
+    return None
 
 
 async def _resolve_molecule_names(
