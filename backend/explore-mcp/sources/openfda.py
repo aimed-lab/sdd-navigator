@@ -54,21 +54,33 @@ _GENERIC_WORDS = {
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
+# Dropping "cancer" from "pancreatic cancer" would let non-cancer drugs for the
+# same organ through (PANCREAZE/ZENPEP treat exocrine pancreatic insufficiency).
+# So when a cancer word was dropped, the label must ALSO use some cancer wording.
+_CANCER_WORDS = {"cancer", "cancers", "carcinoma", "tumor", "tumour", "tumors", "neoplasm"}
+_CANCER_GROUP = (
+    "(cancer+OR+carcinoma+OR+adenocarcinoma+OR+tumor+OR+tumors+OR+neoplasm+OR+neoplasms"
+    "+OR+malignant+OR+malignancy+OR+metastatic+OR+lymphoma+OR+leukemia+OR+sarcoma+OR+myeloma)"
+)
+
+
 def _indication_clause(disease: str) -> str:
     """The indications_and_usage search clause for `disease`: ALL of its
     meaningful words (AND), not the exact phrase, because a label's wording
     rarely matches the searched phrase ("pancreatic cancer" vs "metastatic
     pancreatic adenocarcinoma"). Lowercased, possessive 's removed, generic
     words (cancer, disease, ...) dropped; if nothing is left (just "cancer"),
-    the original phrase is searched instead."""
+    the original phrase is searched instead. If a cancer word was dropped, the
+    cancer wording group (_CANCER_GROUP) is one more required term."""
     cleaned = _POSSESSIVE_RE.sub("", disease.lower())
-    words = [w for w in _NON_ALNUM_RE.split(cleaned) if w and w not in _GENERIC_WORDS]
-    words = list(dict.fromkeys(words))   # de-duplicate, keep order
+    tokens = [w for w in _NON_ALNUM_RE.split(cleaned) if w]
+    words = list(dict.fromkeys(w for w in tokens if w not in _GENERIC_WORDS))   # keep order
     if not words:
         return f'indications_and_usage:"{quote(disease, safe="")}"'
-    if len(words) == 1:
-        return f"indications_and_usage:{words[0]}"
-    return f"indications_and_usage:({'+AND+'.join(words)})"
+    required = [*words, _CANCER_GROUP] if any(w in _CANCER_WORDS for w in tokens) else words
+    if len(required) == 1:
+        return f"indications_and_usage:{required[0]}"
+    return f"indications_and_usage:({'+AND+'.join(required)})"
 
 
 def _api_key_param() -> str:

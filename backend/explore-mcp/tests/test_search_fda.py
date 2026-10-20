@@ -92,16 +92,19 @@ def test_label_search_is_restricted_to_nda_and_bla():
 
 
 def test_indication_search_uses_meaningful_words_not_the_exact_phrase():
-    from sources.openfda import _indication_clause
-    assert _indication_clause("pancreatic cancer") == "indications_and_usage:pancreatic"
+    from sources.openfda import _CANCER_GROUP, _indication_clause
+    # a dropped cancer word becomes one more required group
+    assert _indication_clause("pancreatic cancer") == f"indications_and_usage:(pancreatic+AND+{_CANCER_GROUP})"
     assert _indication_clause("idiopathic pulmonary fibrosis") == (
         "indications_and_usage:(idiopathic+AND+pulmonary+AND+fibrosis)"
     )
     assert _indication_clause("Alzheimer's disease") == "indications_and_usage:alzheimer"
     assert _indication_clause("Alzheimer’s disease") == "indications_and_usage:alzheimer"   # curly apostrophe
     assert _indication_clause("non-small cell lung cancer") == (
-        "indications_and_usage:(non+AND+small+AND+cell+AND+lung)"
+        f"indications_and_usage:(non+AND+small+AND+cell+AND+lung+AND+{_CANCER_GROUP})"
     )
+    assert _indication_clause("pulmonary fibrosis") == "indications_and_usage:(pulmonary+AND+fibrosis)"
+    assert _indication_clause("glioblastoma") == "indications_and_usage:glioblastoma"
 
 
 def test_indication_search_falls_back_to_the_phrase_when_only_generic_words_remain():
@@ -110,9 +113,18 @@ def test_indication_search_falls_back_to_the_phrase_when_only_generic_words_rema
     assert _indication_clause("Tumor of the disease") == 'indications_and_usage:"Tumor%20of%20the%20disease"'
 
 
-def test_label_url_uses_the_word_search_for_a_real_disease_phrase():
+def test_cancer_group_matches_all_the_cancer_wording():
+    from sources.openfda import _CANCER_GROUP
+    for w in ("cancer", "carcinoma", "adenocarcinoma", "tumor", "tumors", "neoplasm", "neoplasms",
+              "malignant", "malignancy", "metastatic", "lymphoma", "leukemia", "sarcoma", "myeloma"):
+        assert f"{w}+OR+" in _CANCER_GROUP or _CANCER_GROUP.endswith(f"{w})")
+
+
+def test_label_url_for_a_cancer_search_requires_the_cancer_group():
+    from sources.openfda import _CANCER_GROUP
     c, _ = _run(disease="pancreatic cancer")
-    assert "&search=indications_and_usage:pancreatic+AND+(openfda" in unquote(c.urls[0])
+    url = unquote(c.urls[0])
+    assert f"&search=indications_and_usage:(pancreatic+AND+{_CANCER_GROUP})+AND+(openfda" in url
 
 
 def test_biosimilars_collapse_to_the_originator_and_non_nda_bla_is_dropped():
