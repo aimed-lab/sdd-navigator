@@ -238,11 +238,14 @@ def _raise_for_status_redacted(resp: httpx.Response, url: str) -> None:
         ) from None
 
 
-async def get_json(client: httpx.AsyncClient, url: str, headers: dict | None = None) -> Any:
+async def get_json(
+    client: httpx.AsyncClient, url: str, headers: dict | None = None, timeout: float | None = None
+) -> Any:
     """GET `url` with the shared timeout and raise on non-2xx (mirrors the TS
     `if (!res.ok) throw`). Returns the parsed JSON body. Optional per-request
-    headers (only passed through when set, to stay compatible with simple fakes)."""
-    kwargs: dict[str, Any] = {"timeout": FETCH_TIMEOUT}
+    headers (only passed through when set, to stay compatible with simple fakes).
+    `timeout` overrides FETCH_TIMEOUT for one slow source (see chembl.py)."""
+    kwargs: dict[str, Any] = {"timeout": timeout if timeout is not None else FETCH_TIMEOUT}
     if headers:
         kwargs["headers"] = headers
     resp = await client.get(url, **kwargs)

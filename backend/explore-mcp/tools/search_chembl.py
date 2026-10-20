@@ -16,11 +16,17 @@ import logging
 
 import httpx
 
-from cache import STALE_SOURCE, TTL_SOURCE, cache, normalize_key
+from cache import cache, normalize_key
 from models import Item
 from sources.chembl import fetch_chembl
 
 logger = logging.getLogger(__name__)
+
+# ChEMBL data changes rarely and its API is slow, so a populated result is kept
+# for a day. An empty result is NOT held that long: cache.py's EMPTY-RESULT
+# GUARD shortens any empty collection to TTL_EMPTY automatically.
+_TTL_CHEMBL = 24 * 60 * 60
+_STALE_CHEMBL = 48 * 60 * 60
 
 
 async def search_chembl_async(query: str, limit: int = 20) -> list[Item]:
@@ -29,7 +35,7 @@ async def search_chembl_async(query: str, limit: int = 20) -> list[Item]:
     orchestrator composes this tool's query."""
     key = normalize_key(f"chembl:{limit}", query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit), _TTL_CHEMBL, _STALE_CHEMBL
     )
 
 

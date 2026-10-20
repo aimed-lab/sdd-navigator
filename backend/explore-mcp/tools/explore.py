@@ -862,6 +862,35 @@ def _dispatch(name: str, query: str):
     raise ValueError(f"unknown tool: {name}")
 
 
+# Overall cap per tool when fanning out. A tool that exceeds it yields an empty
+# section so the page still loads, but its fetch keeps running (shielded) and
+# lands in the per-tool cache for the next search.
+_TOOL_TIMEOUT = 20.0
+_TIMED_OUT = object()
+
+
+def _consume_exception(task: "asyncio.Future") -> None:
+    """Mark a shielded tool's outcome as retrieved so an exception that lands
+    after the cap does not log 'Task exception was never retrieved'."""
+    if not task.cancelled():
+        task.exception()
+
+
+async def _capped(tool: str, query: str, awaitable):
+    task = asyncio.ensure_future(awaitable)
+    task.add_done_callback(_consume_exception)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), _TOOL_TIMEOUT)
+    except asyncio.TimeoutError:
+        if task.done():   # the tool itself raised a timeout; not the cap
+            raise
+        logger.warning(
+            "explore: tool %s exceeded %.0fs for query=%r; returning an empty section "
+            "(the fetch keeps running and will fill the cache)", tool, _TOOL_TIMEOUT, query,
+        )
+        return _TIMED_OUT
+
+
 async def _execute(
     chosen: list[str], scope: dict, since_year: int | None = None,
     status_filter: list[str] | None = None, papers_include_methods: bool = False,
@@ -954,7 +983,13 @@ async def _execute(
             tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))
 
-    results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+    results = (
+        await asyncio.gather(
+            *(_capped(tool, query, t) for (tool, _kind, query), t in zip(specs, tasks)),
+            return_exceptions=True,
+        )
+        if tasks else []
+    )
 
     sections: list[dict] = []
     for (tool, kind, query), result in zip(specs, results):
@@ -968,6 +1003,12 @@ async def _execute(
             logger.exception(
                 "explore: tool %s failed for query=%r", tool, query, exc_info=result
             )
+        elif result is _TIMED_OUT:
+            # Over the per-tool cap: empty section, page still loads.
+            section["items"] = []
+            if tool == "search_papers":
+                section["items_key"] = []
+            section["timed_out"] = True
         elif tool == "search_papers":
             # search_papers_multi_dual_async returns (latest, key) — TWO
             # orderings of the SAME already-ranked pool (see that function's
@@ -1140,11 +1181,16 @@ async def explore_async(
     ttl, stale = (
         (TTL_DEFAULT_FEED, STALE_DEFAULT_FEED) if blank else (TTL_TOPIC, STALE_TOPIC)
     )
-    return await cache.get_or_compute(
+    result = await cache.get_or_compute(
         key,
         lambda: _explore_uncached(input_text, terms, since_year, status_filter),
         ttl, stale,
     )
+    if any(s.get("timed_out") for s in result.get("sections", [])):
+        # A section timed out: don't pin this page for the full TTL while its
+        # fetch finishes in the background (see _capped).
+        await cache.expire_soon(key)
+    return result
 
 
 def explore(

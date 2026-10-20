@@ -154,6 +154,19 @@ class Cache(ABC):
     @abstractmethod
     async def clear(self) -> None: ...
 
+    async def expire_soon(self, key: str, ttl_seconds: float | None = None) -> None:
+        """Cut an existing entry's freshness window to `ttl_seconds` (default
+        TTL_EMPTY) so it is recomputed soon. For a page that was assembled
+        while some part of it timed out: it must not be served for the full
+        hour while the background fetch it triggered fills the per-tool cache."""
+        ttl = TTL_EMPTY if ttl_seconds is None else ttl_seconds
+        entry = await self._load(key)
+        if entry is not None:
+            await self._store(key, _Entry(
+                value=entry.value, stored_at=entry.stored_at,
+                ttl=min(entry.ttl, ttl), stale_ttl=min(entry.stale_ttl, ttl),
+            ))
+
     def _lock_for(self, key: str) -> asyncio.Lock:
         lock = self._locks.get(key)
         if lock is None:
