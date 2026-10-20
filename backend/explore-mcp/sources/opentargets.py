@@ -398,6 +398,19 @@ async def _fetch_by_gene(
                 tractability=tractability, index=0, matched_query_disease=True,
             )
 
+    if disease_efo_id:
+        # The rest of the slots come from the disease path: other genes for the
+        # query's own disease, not this gene's unrelated diseases (Noonan, ...).
+        # cap + 1 because this gene may come back too and is skipped. Those
+        # items carry no matched_query_disease flag (they ARE on-topic). Only if
+        # the disease path yields nothing do we fall back to the gene's other
+        # diseases below.
+        disease_items = await _fetch_by_disease(client, disease_efo_id, cap + 1)
+        other_genes = [it for it in disease_items if it.raw.get("target_ensembl_id") != ensembl_id]
+        if other_genes:
+            head = [matched_item] if matched_item else []
+            return (head + other_genes)[:cap]
+
     items: list[Item] = []
     if matched_item:
         items.append(matched_item)
