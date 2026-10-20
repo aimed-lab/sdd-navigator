@@ -26,23 +26,28 @@ _HEADERS = {"Accept": "application/json"}
 
 
 async def search_trials_async(
-    query: str, limit: int = 20, status_filter: list[str] | None = None
+    query: str, limit: int = 20, status_filter: list[str] | None = None,
+    condition_only: bool = False,
 ) -> list[Item]:
     """Cached + single-flighted (see _fetch). `status_filter` (e.g.
     ["TERMINATED", "WITHDRAWN"]) is part of the cache key — a status-filtered
     search and an unfiltered one for the same term are different results and
-    must not share a cache entry."""
+    must not share a cache entry. `condition_only` (query.cond instead of
+    query.term) is keyed the same way."""
     status_key = ",".join(status_filter) if status_filter else ""
-    key = normalize_key(f"trials:{limit}:{status_key}", query)
+    mode_key = "cond" if condition_only else "term"
+    key = normalize_key(f"trials:{limit}:{status_key}:{mode_key}", query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit, status_filter), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit, status_filter, condition_only), TTL_SOURCE, STALE_SOURCE
     )
 
 
-async def _fetch(query: str, limit: int, status_filter: list[str] | None = None) -> list[Item]:
+async def _fetch(
+    query: str, limit: int, status_filter: list[str] | None = None, condition_only: bool = False
+) -> list[Item]:
     try:
         async with httpx.AsyncClient(headers=_HEADERS) as client:
-            return await fetch_trials(client, query, limit, status_filter)
+            return await fetch_trials(client, query, limit, status_filter, condition_only)
     except Exception:
         logger.exception("search_trials: clinicaltrials.gov fetch failed for query=%r", query)
         return []   # per-source isolation

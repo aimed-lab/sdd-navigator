@@ -37,8 +37,10 @@ class _FakeResponse:
 class _FakeClient:
     def __init__(self, payload):
         self._payload = payload
+        self.urls: list[str] = []
 
     async def get(self, url, timeout=None, headers=None):
+        self.urls.append(url)
         return _FakeResponse(self._payload)
 
 
@@ -86,6 +88,20 @@ def test_trials_empty_summary_falls_back_to_status():
     ]})
     items = asyncio.run(fetch_trials(client, "x", 10))
     assert items[0].summary == "COMPLETED clinical trial."
+
+
+def test_trials_condition_only_uses_query_cond_else_query_term():
+    cond = _FakeClient({"studies": []})
+    asyncio.run(fetch_trials(cond, "glioblastoma", 10, ["RECRUITING"], condition_only=True))
+    assert "query.cond=glioblastoma" in cond.urls[0]
+    assert "query.term" not in cond.urls[0]
+    assert "sort=LastUpdatePostDate:desc" in cond.urls[0]
+    assert "filter.overallStatus=RECRUITING" in cond.urls[0]
+
+    term = _FakeClient({"studies": []})
+    asyncio.run(fetch_trials(term, "glioblastoma", 10))
+    assert "query.term=glioblastoma" in term.urls[0]
+    assert "query.cond" not in term.urls[0]
 
 
 if __name__ == "__main__":

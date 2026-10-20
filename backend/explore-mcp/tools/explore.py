@@ -874,11 +874,20 @@ async def _execute(
             # user actually typed instead.
             news_query = query or scope.get("_raw_input") or ""
             tasks.append(search_news_async(news_query, _NET_LIMIT, match=not scope.get("is_default")))
-        elif name == "search_trials" and status_filter:
+        elif name == "search_trials":
+            # The query came from the `diseases` slice (the only primary slice)
+            # exactly when scope has diseases; otherwise it is the methods
+            # fallback, which stays on free-text query.term.
+            condition_only = bool(scope.get("diseases"))
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
             # search_trials_async -> ClinicalTrials.gov's filter.overallStatus.
-            tasks.append(search_trials_async(query, _NET_LIMIT, status_filter=status_filter))
+            tasks.append(
+                search_trials_async(
+                    query, _NET_LIMIT, status_filter=status_filter or None,
+                    condition_only=condition_only,
+                )
+            )
         else:
             tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))

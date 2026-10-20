@@ -43,11 +43,17 @@ def _interventions(arms_module: dict) -> list[dict]:
 
 
 async def fetch_trials(
-    client: httpx.AsyncClient, term: str, cap: int, status_filter: list[str] | None = None
+    client: httpx.AsyncClient, term: str, cap: int, status_filter: list[str] | None = None,
+    condition_only: bool = False,
 ) -> list[Item]:
+    # query.term matches ANY field of the record (eligibility text included), so
+    # a disease searched that way pulls in unrelated basket trials. query.cond
+    # matches the condition field only; callers pass condition_only=True when
+    # the term is known to be a disease/condition name.
+    param = "query.cond" if condition_only else "query.term"
     url = (
         "https://clinicaltrials.gov/api/v2/studies"
-        f"?query.term={quote(term)}&pageSize={cap}&sort=LastUpdatePostDate:desc"
+        f"?{param}={quote(term)}&pageSize={cap}&sort=LastUpdatePostDate:desc"
     )
     if status_filter:
         url += f"&filter.overallStatus={quote(','.join(status_filter))}"
