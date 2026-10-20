@@ -14,6 +14,7 @@ export default function PaperList({
   onMore,
   projectId,
   preprint = false,
+  hideSave = false,
 }: {
   items: ExploreItem[];
   /** All view: show at most this many, then a "More papers" link. */
@@ -24,6 +25,8 @@ export default function PaperList({
   /** Preprint rows: "Preprint · <server>" in place of the journal, and a
    *  "More preprints" link. */
   preprint?: boolean;
+  /** Leave out the bookmark icon on every row. */
+  hideSave?: boolean;
 }) {
   if (items.length === 0) return null;
   const shown = limit ? items.slice(0, limit) : items;
@@ -64,7 +67,7 @@ export default function PaperList({
                     {right}
                   </span>
                 )}
-                <SaveButton item={item} projectId={projectId} />
+                {!hideSave && <SaveButton item={item} projectId={projectId} />}
               </div>
               {right && (
                 <p className="md:hidden col-start-1 text-xs text-secondary">{right}</p>

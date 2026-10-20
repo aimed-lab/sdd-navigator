@@ -41,7 +41,16 @@ function TileShell({ item, children }: { item: ExploreItem; children: React.Reac
   );
 }
 
-export function ResultTile({ item, projectId }: { item: ExploreItem; projectId?: string }) {
+export function ResultTile({
+  item,
+  projectId,
+  hideSave = false,
+}: {
+  item: ExploreItem;
+  projectId?: string;
+  /** Leave out the bookmark (living pages have nothing to save into). */
+  hideSave?: boolean;
+}) {
   const t = TYPE_STYLES[typeKeyForKind(item.kind)];
   const when = relativeTime(item.date_iso);
   const summary = item.summary?.trim();
@@ -51,7 +60,7 @@ export function ResultTile({ item, projectId }: { item: ExploreItem; projectId?:
         <span className="type-label" style={{ color: t.fg }}>
           {kindLabel(item.kind)}
         </span>
-        <SaveButton item={item} projectId={projectId} />
+        {!hideSave && <SaveButton item={item} projectId={projectId} />}
       </div>
       <h3 className="mt-3 font-title text-[20px] leading-tight font-medium text-on-background line-clamp-3">
         {item.title}
@@ -81,7 +90,16 @@ function formatGrantDate(value: string | null | undefined): string | null {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-export function GrantTile({ item, projectId }: { item: ExploreItem; projectId?: string }) {
+export function GrantTile({
+  item,
+  projectId,
+  hideSave = false,
+}: {
+  item: ExploreItem;
+  projectId?: string;
+  /** Leave out the bookmark (living pages have nothing to save into). */
+  hideSave?: boolean;
+}) {
   const t = TYPE_STYLES[typeKeyForKind("grant")];
   const raw = (item.raw ?? {}) as GrantRaw;
   const funder = raw.agency?.trim() || item.summary?.trim();
@@ -99,7 +117,7 @@ export function GrantTile({ item, projectId }: { item: ExploreItem; projectId?: 
         <span className="type-label" style={{ color: t.fg }}>
           {kindLabel("grant")}
         </span>
-        <SaveButton item={item} projectId={projectId} />
+        {!hideSave && <SaveButton item={item} projectId={projectId} />}
       </div>
       <h3 className="mt-3 font-title text-[20px] leading-tight font-medium text-on-background line-clamp-3">
         {item.title}
@@ -135,7 +153,16 @@ function parseYmd(value: string | null | undefined): Date | null {
 
 const NEW_APPROVAL_MS = 365 * 24 * 60 * 60 * 1000;
 
-export function ApprovalTile({ item, projectId }: { item: ExploreItem; projectId?: string }) {
+export function ApprovalTile({
+  item,
+  projectId,
+  hideSave = false,
+}: {
+  item: ExploreItem;
+  projectId?: string;
+  /** Leave out the bookmark (living pages have nothing to save into). */
+  hideSave?: boolean;
+}) {
   const t = TYPE_STYLES[typeKeyForKind("approval")];
   const raw = (item.raw ?? {}) as ApprovalRaw;
   const approved = parseYmd(raw.approval_date) ?? (item.date_iso ? new Date(item.date_iso) : null);
@@ -155,7 +182,7 @@ export function ApprovalTile({ item, projectId }: { item: ExploreItem; projectId
         <span className="type-label" style={{ color: t.fg }}>
           {kindLabel("approval")}
         </span>
-        <SaveButton item={item} projectId={projectId} />
+        {!hideSave && <SaveButton item={item} projectId={projectId} />}
       </div>
       <h3 className="mt-3 font-title text-[24px] leading-tight font-medium text-on-background line-clamp-2">
         {brand}
@@ -181,7 +208,16 @@ export function ApprovalTile({ item, projectId }: { item: ExploreItem; projectId
   );
 }
 
-export function TrialTile({ item, projectId }: { item: ExploreItem; projectId?: string }) {
+export function TrialTile({
+  item,
+  projectId,
+  hideSave = false,
+}: {
+  item: ExploreItem;
+  projectId?: string;
+  /** Leave out the bookmark (living pages have nothing to save into). */
+  hideSave?: boolean;
+}) {
   const t = TYPE_STYLES[typeKeyForKind("trial")];
   const raw = (item.raw ?? {}) as TrialRaw;
   const meta = [raw.nct_id, raw.phase].filter(Boolean).join(" · ");
@@ -199,7 +235,7 @@ export function TrialTile({ item, projectId }: { item: ExploreItem; projectId?: 
             </>
           )}
         </span>
-        <SaveButton item={item} projectId={projectId} />
+        {!hideSave && <SaveButton item={item} projectId={projectId} />}
       </div>
       <h3 className="mt-3 font-title text-[20px] leading-tight font-medium text-on-background line-clamp-4">
         {item.title}

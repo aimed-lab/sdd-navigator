@@ -17,16 +17,13 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-/** pages.visibility. 'private' = the owner only; 'team' = the owner plus
- *  page_members (editors may write, viewers read); 'public' = anyone, signed
- *  out too. page_members rows grant nothing on a private or public page. */
-export type PageVisibility = "private" | "team" | "public";
+import { isVisibility, type PageVisibility } from "@/lib/server/pages/pageViewHelpers";
+
+export type { PageVisibility };
 
 export const DEFAULT_PAGE_VISIBILITY: PageVisibility = "private";
 
-export function isPageVisibility(v: unknown): v is PageVisibility {
-  return v === "private" || v === "team" || v === "public";
-}
+export const isPageVisibility = isVisibility;
 
 /** SERVICE-ROLE client for the `pages` feature only — bypasses RLS entirely,
  *  same as lib/server/supabaseServer.ts's own getServiceRoleClient(). Used
