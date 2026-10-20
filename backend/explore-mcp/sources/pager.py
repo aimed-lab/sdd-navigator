@@ -92,8 +92,10 @@ future PAG-detail view needs gene members, call
 
 from __future__ import annotations
 
+import html
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -257,6 +259,19 @@ def _pag_url(gs_id: str) -> str:
     return _PAG_VIEW_URL.format(gs_id=gs_id)
 
 
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _clean_text(value: str | None) -> str | None:
+    """PAGER returns HTML entities in NAME/DESCRIPTION (e.g. a description that
+    is just "&nbsp;"). Unescape, collapse whitespace (a non-breaking space
+    counts as whitespace here), strip; empty -> None."""
+    if not value:
+        return None
+    cleaned = _WHITESPACE_RE.sub(" ", html.unescape(value)).strip()
+    return cleaned or None
+
+
 async def fetch_pager(client: httpx.AsyncClient, term: str, cap: int) -> list[Item]:
     """Fetch the FULL unsorted PAGER result set for `term`, rank ALL of it by
     nCoCo desc then size desc, and only then return the top `cap` — see
@@ -290,14 +305,14 @@ async def fetch_pager(client: httpx.AsyncClient, term: str, cap: int) -> list[It
             # if it's not a real P/A/G PAG, it doesn't belong in this list.
             continue
 
-        name = rec.get("NAME") or ""
-        if not name.strip():
+        name = _clean_text(rec.get("NAME"))
+        if not name:
             continue
 
         source = rec.get("SOURCE") or None
         size = _to_int(rec.get("GS_SIZE"))
         ncoco = _to_float(rec.get("COCO_V2"))
-        description = rec.get("DESCRIPTION") or None
+        description = _clean_text(rec.get("DESCRIPTION"))
         summary = description or f"{type_label} gene set from {source or 'PAGER'} ({size} genes)."
         url = _pag_url(gs_id)
         date_iso = _parse_record_date(rec.get("RECORD_DATE"))
