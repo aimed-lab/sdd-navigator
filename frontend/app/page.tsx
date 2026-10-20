@@ -19,6 +19,7 @@
 // AND is at least MIN_COUNT_TO_SHOW. Nothing here is a typed-in statistic.
 
 import Link from "next/link";
+import FlywheelSection from "@/components/FlywheelSection";
 import DiscoveryMap from "@/components/DiscoveryMap";
 import PhgdhRouteList from "@/components/PhgdhRouteList";
 import NewsTile from "@/components/explore/NewsTile";
@@ -77,7 +78,7 @@ export default async function Home() {
         <div className={`${WRAP} pt-12 md:pt-16 pb-10 md:pb-12`}>
           <div className="max-w-4xl mx-auto text-center space-y-4">
             <h1 className="font-title text-[40px] md:text-[56px] leading-[1.1] font-medium text-on-background">
-              Explore. Collaborate. Promote.{" "}
+              Explore. Build. Promote.{" "}
               <br className="hidden sm:block" />
               Open drug discovery in one hub.
             </h1>
@@ -102,6 +103,8 @@ export default async function Home() {
           </div>
         </div>
       </section>
+
+      <FlywheelSection />
 
       {/* a2. How it works: the PHGDH case, on the map */}
       <section id="phgdh-route" className="bg-[var(--explore-bg)] scroll-mt-16">

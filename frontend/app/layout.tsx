@@ -20,7 +20,7 @@ const newsreader = Newsreader({
 export const metadata: Metadata = {
   title: "SmartDrugDiscovery",
   description:
-    "Explore, Collaborate, Promote — one platform for the drug-discovery community.",
+    "Explore, Build, Promote — one platform for the drug-discovery community.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
