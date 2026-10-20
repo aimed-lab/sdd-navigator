@@ -6,7 +6,7 @@
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { createLivingPage } from "@/lib/server/pages/createPage";
 import { setPageRefreshEnabled, setPageVisibility } from "@/lib/server/pages/pageAdmin";
-import { addPageMember, removePageMember } from "@/lib/server/pages/pageMembers";
+import { addPageMember, listPageMemberDetails, removePageMember } from "@/lib/server/pages/pageMembers";
 import { getPageView, listMyPages } from "@/lib/server/pages/pageView";
 import { findSimilarPublicPage } from "@/lib/server/pages/similarPages";
 import type { AgentServices } from "./agentHandlers";
@@ -17,6 +17,7 @@ export const realAgentServices: AgentServices = {
   createLivingPage,
   addPageMember,
   removePageMember,
+  listPageMemberDetails,
   setPageVisibility,
   setPageRefreshEnabled,
   findSimilarPublicPage,

@@ -8,12 +8,13 @@
 // update or delete.
 
 import type { setPageRefreshEnabled, setPageVisibility } from "../pages/pageAdmin";
-import type { addPageMember, removePageMember, PageMemberRole } from "../pages/pageMembers";
+import type { addPageMember, listPageMemberDetails, removePageMember, PageMemberRole } from "../pages/pageMembers";
 import type { createLivingPage } from "../pages/createPage";
 import type { getPageView, listMyPages } from "../pages/pageView";
 import type { findSimilarPublicPage } from "../pages/similarPages";
 import type { PageVisibility } from "../pages/pageViewHelpers";
 import type { AgentContext, ToolHandler, ToolResult } from "./agentCore";
+import { OWNER_ALREADY, isOwnerAccount } from "../pages/pageViewHelpers.ts";
 import { pageUrl, shapeMyPages, shapePage, summarizeExplore } from "./agentShapes.ts";
 
 /** The side-effecting operations the handlers use, injected so tests can run
@@ -24,6 +25,7 @@ export type AgentServices = {
   createLivingPage: typeof createLivingPage;
   addPageMember: typeof addPageMember;
   removePageMember: typeof removePageMember;
+  listPageMemberDetails: typeof listPageMemberDetails;
   setPageVisibility: typeof setPageVisibility;
   setPageRefreshEnabled: typeof setPageRefreshEnabled;
   findSimilarPublicPage: typeof findSimilarPublicPage;
@@ -64,6 +66,14 @@ async function loadPage(ctx: AgentContext, slug: string): Promise<PageRef | null
   };
 }
 
+/** The account id for an email, as add_member resolves it (confirmed accounts
+ *  only; the SQL function itself returns null unless the caller owns the page). */
+async function lookupAccountId(ctx: AgentContext, pageId: string, email: string): Promise<string | null> {
+  const { data, error } = await ctx.db.rpc("find_account_id_by_email_for_page", { p_page_id: pageId, p_email: email });
+  if (error) throw error;
+  return (data as string | null) ?? null;
+}
+
 function adminFailure(r: { status: "forbidden" | "error"; error: string }): ToolResult {
   return r.status === "forbidden" ? fail(403, "forbidden", r.error) : fail(400, "request_failed", r.error);
 }
@@ -92,7 +102,9 @@ const getPage: ToolHandler = async ({ ctx, input, origin }) => {
   const r = await svc.getPageView(String(input.slug), c);
   if (r.status === "not_found") return NOT_FOUND;
   if (r.status === "error") return fail(500, "server_error", "Couldn't load that page.");
-  return ok(shapePage(r.view, origin));
+  // The team (with names and emails) is the owner's to see.
+  const members = r.view.viewer.isOwner ? await svc.listPageMemberDetails(r.view.page.id, c) : undefined;
+  return ok(shapePage(r.view, origin, new Date(), members));
 };
 
 // ── write tools (each honors preview) ────────────────────────────────────────
@@ -125,10 +137,14 @@ const addMember: ToolHandler = async ({ ctx, input, preview }) => {
   const role = input.role as PageMemberRole;
   const email = String(input.email).toLowerCase();
 
+  // The owner is never a team member.
+  const accountId = await lookupAccountId(c, page.id, email);
+  if (isOwnerAccount({ resolvedId: accountId, email, ownerId: c.user.id, ownerEmail: c.user.email })) {
+    return fail(400, "cannot_add_owner", OWNER_ALREADY);
+  }
+
   if (preview) {
-    // Read-only lookup of whether an account with that email exists.
-    const { data, error } = await c.db.rpc("find_account_id_by_email_for_page", { p_page_id: page.id, p_email: email });
-    if (error) throw error;
+    const data = accountId;
     return ok({
       would_add: { email, role },
       account_found: !!data,
@@ -147,7 +163,18 @@ const removeMember: ToolHandler = async ({ ctx, input, preview }) => {
   const page = await loadPage(c, String(input.slug));
   if (!page) return NOT_FOUND;
   if (!page.isOwner) return NOT_OWNER("remove members");
-  const userId = String(input.user_id);
+  const hasId = typeof input.user_id === "string";
+  const hasEmail = typeof input.email === "string";
+  if (hasId === hasEmail) {
+    return fail(400, "invalid_input", "Give exactly one of user_id or email.");
+  }
+  // An email is resolved to the account id exactly as add_member does.
+  let userId = hasId ? String(input.user_id) : "";
+  if (hasEmail) {
+    const found = await lookupAccountId(c, page.id, String(input.email).toLowerCase());
+    if (!found) return fail(404, "not_found", "No account with that email address.");
+    userId = found;
+  }
 
   if (preview) {
     const { data, error } = await c.db

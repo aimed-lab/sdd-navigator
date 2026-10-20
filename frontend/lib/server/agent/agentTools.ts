@@ -81,6 +81,7 @@ export const TOOL_SPECS: ToolSpec[] = [
     name: "get_page",
     description:
       "Read one living page: its notes with numbered citations, what was added in the last 30 days, and source counts by kind. " +
+      "When the caller owns the page it also lists the team as members [{user_id, name, email, role}]. " +
       "Returns 404 for a page that does not exist or that the researcher is not allowed to see (the two are indistinguishable on purpose).",
     input_schema: { type: "object", properties: { slug: SLUG }, required: ["slug"], additionalProperties: false },
     needs_user_token: true,
@@ -131,15 +132,18 @@ export const TOOL_SPECS: ToolSpec[] = [
   }),
   tool({
     name: "remove_member",
-    description: "Remove a team member from a page. Owner only. Get the user_id from get_page or list the team first.",
+    description:
+      "Remove a team member from a page. Owner only. Identify the member with EXACTLY ONE of: user_id (the account id shown in get_page's members list, " +
+      "the same id add_member records) or email (the member's account email, resolved the same way add_member does). Give one, not both.",
     input_schema: {
       type: "object",
       properties: {
         slug: SLUG,
-        user_id: { type: "string", description: "The member's user id.", minLength: 8, maxLength: 64 },
+        user_id: { type: "string", description: "The member's account id, from get_page's members list. Use this or email.", minLength: 8, maxLength: 64 },
+        email: { type: "string", description: "The member's account email. Use this or user_id.", minLength: 3, maxLength: 320 },
         preview: PREVIEW,
       },
-      required: ["slug", "user_id"],
+      required: ["slug"],
       additionalProperties: false,
     },
     needs_user_token: true,

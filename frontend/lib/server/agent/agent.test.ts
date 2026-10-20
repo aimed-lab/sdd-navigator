@@ -9,12 +9,22 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { handleAgentCall, type AgentContext, type AgentDeps, type AgentLogEntry } from "./agentCore.ts";
 import { makeAgentHandlers, type AgentServices } from "./agentHandlers.ts";
+import { isOwnerAccount } from "../pages/pageViewHelpers.ts";
 import { shapePage } from "./agentShapes.ts";
 import { TOOL_SPECS, validateInput } from "./agentTools.ts";
 
 const ORIGIN = "https://example.test";
+// Two different ids per person, as in the real system:
+//   LOGIN id   = the JWT sub = auth.uid(); what pages.owner_id and
+//                page_members.added_by hold, and what ctx.user.id is.
+//   ACCOUNT id = what the email lookup (find_account_id_by_email_for_page)
+//                returns and page_members.user_id stores.
+// The two are deliberately never equal, so a comparison of one kind against
+// the other fails a test instead of passing by accident.
 const ALICE = "11111111-aaaa-aaaa-aaaa-111111111111";
+const ALICE_ACCT = "11111111-cccc-cccc-cccc-cccccccc4539";
 const BOB = "22222222-bbbb-bbbb-bbbb-222222222222";
+const BOB_ACCT = "22222222-dddd-dddd-dddd-dddddddd4539";
 
 // ── fakes ────────────────────────────────────────────────────────────────────
 
@@ -36,18 +46,23 @@ function fakeDb(page: { owner_id: string; visibility: string } | null) {
           table === "pages" && page
             ? { id: "page-1", slug: "egfr-abc12", title: "EGFR", refresh_enabled: true, ...page }
             : table === "page_members"
-              ? { user_id: BOB, role: "viewer" }
+              ? { user_id: BOB_ACCT, role: "viewer" }
               : null,
         error: null,
       });
       return b;
     },
-    rpc: async () => ({ data: BOB, error: null }),
+    rpc: async (_name: string, args: { p_email?: string }) => ({
+      data: ({ "bob@x.org": BOB_ACCT, "alice@x.org": ALICE_ACCT } as Record<string, string>)[args.p_email ?? ""] ?? null,
+      error: null,
+    }),
   };
   return { db, writes };
 }
 
 type Calls = string[];
+
+const MEMBERS = [{ user_id: BOB_ACCT, name: "Bob Jones", email: "bob@x.org", role: "viewer" as const }];
 
 function fakeServices(calls: Calls, visiblePageFor: (userId: string) => boolean): AgentServices {
   const rec = <T,>(name: string, value: T) => async (): Promise<T> => (calls.push(name), value);
@@ -60,7 +75,7 @@ function fakeServices(calls: Calls, visiblePageFor: (userId: string) => boolean)
         status: "ok",
         view: {
           page: { id: "page-1", slug: "egfr-abc12", title: "EGFR", created_at: null, visibility: "private", refresh_enabled: true, last_refreshed_at: null },
-          viewer: { signedIn: true, isOwner: true, role: "owner" },
+          viewer: { signedIn: true, isOwner: ctx.user.id === ALICE, role: ctx.user.id === ALICE ? "owner" : "viewer" },
           notes: [],
           evidence: [],
           updates: [],
@@ -69,8 +84,9 @@ function fakeServices(calls: Calls, visiblePageFor: (userId: string) => boolean)
       };
     }) as unknown as AgentServices["getPageView"],
     createLivingPage: rec("createLivingPage", { ok: true, pageId: "p", slug: "new-slug", visibility: "private", notes: 1, evidence: 7, references: [], citationReport: null }) as unknown as AgentServices["createLivingPage"],
-    addPageMember: rec("addPageMember", { status: "ok", member: { page_id: "p", user_id: BOB, role: "viewer" }, active: true }) as unknown as AgentServices["addPageMember"],
-    removePageMember: rec("removePageMember", { status: "ok" }) as unknown as AgentServices["removePageMember"],
+    addPageMember: rec("addPageMember", { status: "ok", member: { page_id: "p", user_id: BOB_ACCT, role: "viewer" }, active: true }) as unknown as AgentServices["addPageMember"],
+    removePageMember: (async (pageId: string, userId: string) => (calls.push(`removePageMember:${userId}`), { status: "ok" })) as unknown as AgentServices["removePageMember"],
+    listPageMemberDetails: (async () => (calls.push("listPageMemberDetails"), MEMBERS)) as unknown as AgentServices["listPageMemberDetails"],
     setPageVisibility: rec("setPageVisibility", { status: "ok" }) as unknown as AgentServices["setPageVisibility"],
     setPageRefreshEnabled: rec("setPageRefreshEnabled", { status: "ok" }) as unknown as AgentServices["setPageRefreshEnabled"],
     findSimilarPublicPage: rec("findSimilarPublicPage", { slug: "other-page", title: "Same topic" }) as unknown as AgentServices["findSimilarPublicPage"],
@@ -118,7 +134,7 @@ const VALID_BODIES: Record<string, Record<string, unknown>> = {
   get_page: { slug: "egfr-abc12" },
   create_page: { title: "EGFR in lung cancer", seed_input: "EGFR lung cancer", visibility: "private" },
   add_member: { slug: "egfr-abc12", email: "bob@x.org", role: "viewer" },
-  remove_member: { slug: "egfr-abc12", user_id: BOB },
+  remove_member: { slug: "egfr-abc12", user_id: BOB_ACCT },
   set_visibility: { slug: "egfr-abc12", visibility: "public" },
   set_auto_update: { slug: "egfr-abc12", enabled: false },
 };
@@ -199,8 +215,10 @@ test("preview:true never writes, for every write tool", async () => {
     const res = await call(deps, tool, { ...VALID_BODIES[tool], preview: true });
     assert.equal(res.status, 200, `${tool}: ${JSON.stringify(res.body)}`);
     assert.equal(res.body.preview, true);
-    const writeCalls = calls.filter((c) =>
-      ["createLivingPage", "addPageMember", "removePageMember", "setPageVisibility", "setPageRefreshEnabled"].includes(c)
+    const writeCalls = calls.filter(
+      (c) =>
+        c.startsWith("removePageMember") ||
+        ["createLivingPage", "addPageMember", "setPageVisibility", "setPageRefreshEnabled"].includes(c)
     );
     assert.deepEqual(writeCalls, [], `${tool} called a write service`);
     assert.deepEqual(dbFor(ALICE).writes, [], `${tool} wrote to the database`);
@@ -222,7 +240,7 @@ test("the same calls without preview do write, and each write is logged with use
   const expected: Record<string, string> = {
     create_page: "createLivingPage",
     add_member: "addPageMember",
-    remove_member: "removePageMember",
+    remove_member: `removePageMember:${BOB_ACCT}`,
     set_visibility: "setPageVisibility",
     set_auto_update: "setPageRefreshEnabled",
   };
@@ -352,4 +370,117 @@ test("get_page shows what's new for the last 30 days only, and no owner id", () 
   assert.equal(body.whats_new_last_30_days.length, 1);
   assert.equal(body.whats_new_last_30_days[0].headline, "Oct 19: 1 new paper");
   assert.ok(!JSON.stringify(body).includes("owner_id"));
+});
+
+// ── get_page lists the team for the owner ────────────────────────────────────
+
+test("get_page: the owner gets members with the account id, name, email and role; others do not", async () => {
+  const { deps, calls } = makeDeps({ page: { owner_id: ALICE, visibility: "team" } });
+  deps.handlers = makeAgentHandlers(fakeServices(calls, () => true)); // both can see the page
+
+  const owner = await call(deps, "get_page", { slug: "egfr-abc12" }, "alice-token");
+  assert.equal(owner.status, 200);
+  assert.deepEqual(owner.body.members, [{ user_id: BOB_ACCT, name: "Bob Jones", email: "bob@x.org", role: "viewer" }]);
+
+  const before = calls.filter((c) => c === "listPageMemberDetails").length;
+  const viewer = await call(deps, "get_page", { slug: "egfr-abc12" }, "bob-token");
+  assert.equal(viewer.status, 200);
+  assert.ok(!("members" in viewer.body), "a non-owner never gets the member list");
+  assert.equal(calls.filter((c) => c === "listPageMemberDetails").length, before, "and the lookup is not even made");
+});
+
+test("the members user_id is exactly what remove_member accepts", async () => {
+  const { deps, calls } = makeDeps({ page: { owner_id: ALICE, visibility: "team" } });
+  const page = await call(deps, "get_page", { slug: "egfr-abc12" }, "alice-token");
+  const userId = (page.body.members as { user_id: string }[])[0].user_id;
+  const res = await call(deps, "remove_member", { slug: "egfr-abc12", user_id: userId });
+  assert.equal(res.status, 200);
+  assert.ok(calls.includes(`removePageMember:${userId}`));
+});
+
+test("the tool descriptions say where to get the id and that email works too", () => {
+  const remove = TOOL_SPECS.find((t) => t.name === "remove_member")!;
+  assert.match(remove.description, /get_page/);
+  assert.match(remove.description, /user_id/);
+  assert.match(remove.description, /email/);
+  assert.deepEqual(remove.input_schema.required, ["slug"]);
+  assert.ok("email" in remove.input_schema.properties && "user_id" in remove.input_schema.properties);
+  assert.match(TOOL_SPECS.find((t) => t.name === "get_page")!.description, /members/);
+});
+
+// ── remove_member by email ───────────────────────────────────────────────────
+
+test("remove_member accepts an email and resolves it to the account id like add_member", async () => {
+  const { deps, calls, dbFor } = makeDeps();
+  const res = await call(deps, "remove_member", { slug: "egfr-abc12", email: "Bob@X.org" });
+  assert.equal(res.status, 200);
+  assert.ok(calls.includes(`removePageMember:${BOB_ACCT}`), "removed by the resolved account id");
+  assert.deepEqual(res.body, { removed: { user_id: BOB_ACCT } });
+
+  // Preview resolves the same way and writes nothing.
+  const preview = await call(deps, "remove_member", { slug: "egfr-abc12", email: "bob@x.org", preview: true });
+  assert.equal(preview.status, 200);
+  assert.deepEqual((preview.body.would_remove as { user_id: string }).user_id, BOB_ACCT);
+  assert.deepEqual(dbFor(ALICE).writes, []);
+});
+
+test("remove_member by email: unknown account -> 404, and exactly one of user_id/email is required", async () => {
+  const { deps, calls } = makeDeps();
+  const unknown = await call(deps, "remove_member", { slug: "egfr-abc12", email: "nobody@x.org" });
+  assert.equal(unknown.status, 404);
+  assert.equal((unknown.body.error as { message: string }).message, "No account with that email address.");
+
+  for (const body of [
+    { slug: "egfr-abc12" },
+    { slug: "egfr-abc12", user_id: BOB_ACCT, email: "bob@x.org" },
+  ]) {
+    const res = await call(deps, "remove_member", body);
+    assert.equal(res.status, 400);
+    assert.match((res.body.error as { message: string }).message, /exactly one of user_id or email/);
+  }
+  assert.ok(!calls.some((c) => c.startsWith("removePageMember")));
+});
+
+// ── the owner cannot be added ────────────────────────────────────────────────
+
+test("add_member refuses the page owner, in preview and for real, by email or by lookup", async () => {
+  for (const preview of [true, false]) {
+    const { deps, calls, logs } = makeDeps();
+    const res = await call(deps, "add_member", { slug: "egfr-abc12", email: "alice@x.org", role: "editor", preview });
+    assert.equal(res.status, 400, `preview=${preview}`);
+    assert.deepEqual(res.body, { error: { code: "cannot_add_owner", message: "You already own this page." } });
+    assert.ok(!calls.includes("addPageMember"), "nothing is added");
+    assert.equal(logs.length, preview ? 0 : 1);
+  }
+});
+
+test("add_member still adds somebody else", async () => {
+  const { deps, calls } = makeDeps();
+  const res = await call(deps, "add_member", VALID_BODIES.add_member);
+  assert.equal(res.status, 200);
+  assert.ok(calls.includes("addPageMember"));
+});
+
+// ── ids of the same kind ─────────────────────────────────────────────────────
+
+test("the fake ids really differ per person", () => {
+  assert.notEqual(ALICE, ALICE_ACCT);
+  assert.notEqual(BOB, BOB_ACCT);
+});
+
+test("an owner who is found under a DIFFERENT account id is still refused, by email", async () => {
+  // alice@x.org resolves to ALICE_ACCT, which is not the login id ALICE that owns the page.
+  const { deps, calls } = makeDeps();
+  const res = await call(deps, "add_member", { slug: "egfr-abc12", email: "Alice@X.org", role: "viewer" });
+  assert.equal(res.status, 400);
+  assert.equal((res.body.error as { code: string }).code, "cannot_add_owner");
+  assert.ok(!calls.includes("addPageMember"));
+});
+
+test("isOwnerAccount: matches on the owner's login id or on the owner's email, never on nothing", () => {
+  assert.equal(isOwnerAccount({ resolvedId: ALICE, email: "x@y.org", ownerId: ALICE, ownerEmail: null }), true);
+  assert.equal(isOwnerAccount({ resolvedId: ALICE_ACCT, email: "ALICE@x.org ", ownerId: ALICE, ownerEmail: "alice@x.org" }), true);
+  assert.equal(isOwnerAccount({ resolvedId: BOB_ACCT, email: "bob@x.org", ownerId: ALICE, ownerEmail: "alice@x.org" }), false);
+  assert.equal(isOwnerAccount({ resolvedId: null, email: "bob@x.org", ownerId: ALICE, ownerEmail: null }), false);
+  assert.equal(isOwnerAccount({ resolvedId: BOB_ACCT, email: "", ownerId: ALICE, ownerEmail: "" }), false);
 });

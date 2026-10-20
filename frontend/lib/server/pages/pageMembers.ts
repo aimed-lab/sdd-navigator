@@ -20,6 +20,7 @@
 
 import { requireCurrentUser } from "@/lib/auth";
 import type { ActingContext, ActingDb } from "@/lib/server/pages/actingContext";
+import { OWNER_ALREADY, isOwnerAccount } from "@/lib/server/pages/pageViewHelpers";
 
 export type PageMemberRole = "editor" | "viewer";
 
@@ -37,6 +38,41 @@ export type RemovePageMemberResult =
   | { status: "ok" }
   | { status: "forbidden"; error: string }
   | { status: "error"; error: string };
+
+export type PageMemberDetail = {
+  user_id: string;
+  name: string | null;
+  email: string | null;
+  role: PageMemberRole;
+};
+
+/** The team of a page with names and emails, for its OWNER (the agent's
+ *  get_page). Names and emails live in tables RLS hides from other users, so
+ *  this uses page_member_details() (database/migrations/2026-10-21_page_member_details.sql),
+ *  which returns rows only to the page's owner. If that function has not been
+ *  applied yet, it degrades to user id + role (name and email null). `user_id`
+ *  is the account id, the same one add_member, remove_member and page_members
+ *  use (public.users.id = auth.users.id). */
+export async function listPageMemberDetails(pageId: string, ctx: ActingContext): Promise<PageMemberDetail[]> {
+  const { data, error } = await ctx.db.rpc("page_member_details", { p_page_id: pageId });
+  if (!error) {
+    return ((data ?? []) as { user_id: string; name: string | null; email: string | null; role: PageMemberRole }[]).map(
+      (m) => ({ user_id: m.user_id, name: m.name || null, email: m.email || null, role: m.role })
+    );
+  }
+  console.error("listPageMemberDetails: page_member_details unavailable, falling back", error);
+  const { data: rows, error: rowsError } = await ctx.db
+    .from("page_members")
+    .select("user_id, role")
+    .eq("page_id", pageId);
+  if (rowsError) throw rowsError;
+  return ((rows ?? []) as { user_id: string; role: PageMemberRole }[]).map((m) => ({
+    user_id: m.user_id,
+    name: null,
+    email: null,
+    role: m.role,
+  }));
+}
 
 function isPageMemberRole(v: unknown): v is PageMemberRole {
   return v === "editor" || v === "viewer";
@@ -87,6 +123,11 @@ export async function addPageMember(
 
   const normalized = email.trim().toLowerCase();
   if (!normalized) return { status: "error", error: "An email address is required." };
+  // The owner is never a page_members row. Say so plainly, even if their own
+  // account could not be found by the lookup below.
+  if (isOwnerAccount({ resolvedId: null, email: normalized, ownerId: user.id, ownerEmail: user.email })) {
+    return { status: "error", error: OWNER_ALREADY };
+  }
 
   const { data: lookup, error: lookupError } = await db.rpc("find_account_id_by_email_for_page", {
     p_page_id: pageId,
@@ -100,8 +141,8 @@ export async function addPageMember(
   if (!memberId) {
     return { status: "error", error: "No account with that email address." };
   }
-  if (memberId === user.id) {
-    return { status: "error", error: "You own this page already." };
+  if (isOwnerAccount({ resolvedId: memberId, email: normalized, ownerId: user.id, ownerEmail: user.email })) {
+    return { status: "error", error: OWNER_ALREADY };
   }
 
   // No .select(): page_members needs only the insert to succeed, and a bare

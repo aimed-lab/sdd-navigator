@@ -20,6 +20,27 @@ export function isVisibility(v: unknown): v is PageVisibility {
   return v === "private" || v === "team" || v === "public";
 }
 
+/** Shown when someone tries to add the page owner to the team. */
+export const OWNER_ALREADY = "You already own this page.";
+
+/** Is this the page owner, among accounts the owner could be invited as?
+ *  Ids are compared only against ids of the SAME kind: `resolvedId` is the
+ *  auth.users id the email lookup returned and `ownerId` is pages.owner_id,
+ *  which RLS forces to equal the owner's auth.uid(). One person can have more
+ *  than one auth identity for the same email (a different id from the lookup),
+ *  so the owner's verified email is compared too. */
+export function isOwnerAccount(args: {
+  resolvedId: string | null;
+  email: string;
+  ownerId: string;
+  ownerEmail: string | null;
+}): boolean {
+  if (args.resolvedId && args.resolvedId === args.ownerId) return true;
+  const email = args.email.trim().toLowerCase();
+  const ownerEmail = (args.ownerEmail ?? "").trim().toLowerCase();
+  return email !== "" && email === ownerEmail;
+}
+
 // ── dates ────────────────────────────────────────────────────────────────────
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

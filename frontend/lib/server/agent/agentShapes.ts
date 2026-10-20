@@ -5,6 +5,7 @@
 // Never includes owner ids or other users' emails.
 
 import type { MyPageRow, PageView } from "../pages/pageView";
+import type { PageMemberDetail } from "../pages/pageMembers";
 import { groupUpdatesByDate } from "../pages/pageViewHelpers.ts";
 
 export const WHATS_NEW_DAYS = 30;
@@ -32,7 +33,12 @@ export function shapeMyPages(pages: MyPageRow[], origin: string) {
 /** One page for get_page: notes with their numbered citations, what was added
  *  in the last WHATS_NEW_DAYS days (refresh-added items only, as on the page),
  *  and source counts by kind. */
-export function shapePage(view: PageView, origin: string, now: Date = new Date()) {
+export function shapePage(
+  view: PageView,
+  origin: string,
+  now: Date = new Date(),
+  members?: PageMemberDetail[]
+) {
   const evidenceById = new Map(view.evidence.map((e) => [e.id, e]));
 
   const notes = view.notes.map((n) => ({
@@ -69,6 +75,8 @@ export function shapePage(view: PageView, origin: string, now: Date = new Date()
     whats_new_last_30_days: whatsNew,
     source_counts: sourceCounts,
     total_sources: view.evidence.length,
+    // Only for the owner (the caller passes members only then).
+    ...(members ? { members } : {}),
   };
 }
 
