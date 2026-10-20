@@ -99,6 +99,7 @@ from tools.find_provider import (
     find_providers_for_project_async,
 )
 from tools.go_deeper import go_deeper_async
+from tools.assistant import UNAVAILABLE_REPLY, run_assistant_turn_async
 from tools.page_agent import run_page_agent_async, run_page_refresh_async
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
@@ -1450,6 +1451,37 @@ async def page_agent_http(request):
             },
             status_code=200,
         )
+
+
+@mcp.custom_route("/api/assistant-turn", methods=["POST"])
+async def assistant_turn_http(request):
+    """One turn of the Explore AI assistant. POST { messages: [{role, content}],
+    context?: { query } } -> { reply, choices?, action? }.
+
+    The model only PROPOSES (tools/assistant.py): `action` is data for the
+    frontend to confirm and execute with the user's own session; nothing here
+    creates anything or touches a database. Same bearer-token auth as every
+    other /api route (BearerAuthMiddleware). An LLM failure is a 200 with an
+    apologetic reply, so the chat never shows a raw error."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return JSONResponse({"error": "Missing required field: messages."}, status_code=400)
+    last = messages[-1]
+    if not isinstance(last, dict) or last.get("role") != "user" or not str(last.get("content") or "").strip():
+        return JSONResponse({"error": "The last message must be a non-empty user message."}, status_code=400)
+
+    try:
+        return JSONResponse(await run_assistant_turn_async(messages, body.get("context")))
+    except Exception:
+        logger.exception("POST /api/assistant-turn failed")
+        return JSONResponse({"reply": UNAVAILABLE_REPLY})
 
 
 @mcp.custom_route("/api/page-refresh", methods=["POST"])

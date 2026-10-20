@@ -66,7 +66,7 @@ export default function TeamPanel({
   };
 
   return (
-    <section className="glass-panel rounded-2xl p-6 flex flex-col gap-4" aria-label="Team">
+    <section id="team" className="glass-panel rounded-2xl p-6 flex flex-col gap-4 scroll-mt-24" aria-label="Team">
       <h2 className="font-label-md text-label-md text-on-background">Team</h2>
 
       {visibility !== "team" && (

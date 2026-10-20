@@ -58,6 +58,9 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 // note) — there is no session to scope a normal request-scoped client to
 // here at all.
 
+// Researching and writing a page takes about a minute; give the platform room.
+export const maxDuration = 300;
+
 const MIN_TOPIC_LEN = 3;
 const MAX_TOPIC_LEN = 200;
 const MAX_SLUG_ATTEMPTS = 3;
@@ -123,7 +126,11 @@ export async function POST(req: Request) {
   // COMMON case this feature expects (no ownership to disambiguate slugs
   // by), so this retries with a fresh suffix on a 23505 rather than only
   // on some rarer failure.
-  const title = titleFromTopic(topic);
+  // The assistant proposes its own page title; use it when it is a sane length,
+  // else derive one from the topic as before.
+  const titleField = body && typeof body === "object" ? (body as Record<string, unknown>).title : undefined;
+  const given = typeof titleField === "string" ? titleField.trim().replace(/\s+/g, " ") : "";
+  const title = given.length >= 3 && given.length <= 120 ? given : titleFromTopic(topic);
   let pageId: string | null = null;
   let slug = "";
   let createError: string | null = null;
