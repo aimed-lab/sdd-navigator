@@ -99,7 +99,7 @@ from tools.find_provider import (
     find_providers_for_project_async,
 )
 from tools.go_deeper import go_deeper_async
-from tools.page_agent import run_page_agent_async
+from tools.page_agent import run_page_agent_async, run_page_refresh_async
 from tools.project_agent import run_project_agent_async
 from tools.search_chembl import search_chembl_async
 from tools.search_datasets import search_datasets_async
@@ -1447,6 +1447,49 @@ async def page_agent_http(request):
                 "tools_called": [],
                 "warnings": [str(exc)],
                 "search_failed": True,
+            },
+            status_code=200,
+        )
+
+
+@mcp.custom_route("/api/page-refresh", methods=["POST"])
+async def page_refresh_http(request):
+    """Daily refresh of one existing living page (called by the Next.js
+    POST /api/pages/refresh job). POST { topic: str, known_item_ids: [str],
+    notes: [{slug, title, body}] } -> { new_items, evidence_filings,
+    unfiled_items, project_level_items, missing_note_suggestions,
+    candidates_found, tools_called, warnings, search_failed }.
+
+    Read-only with respect to notes: they are only used to file new items;
+    persisting anything is the caller's job. Same trust level as
+    /api/page-agent. An upstream failure comes back 200 with
+    search_failed=true so the caller can tell it from "nothing new"."""
+    try:
+        body = await request.json()
+    except Exception:
+        logger.exception("POST /api/page-refresh: request body is not valid JSON")
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    topic = body.get("topic")
+    if not isinstance(topic, str) or not topic.strip():
+        return JSONResponse({"error": "Missing required field: topic."}, status_code=400)
+    known = body.get("known_item_ids")
+    notes = body.get("notes")
+    known = [k for k in known if isinstance(k, str)] if isinstance(known, list) else []
+    notes = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+
+    try:
+        return JSONResponse(await run_page_refresh_async(topic, known, notes))
+    except Exception as exc:
+        logger.exception("POST /api/page-refresh failed: topic=%r", topic)
+        return JSONResponse(
+            {
+                "new_items": [], "evidence_filings": {}, "unfiled_items": [],
+                "project_level_items": [], "missing_note_suggestions": [],
+                "candidates_found": 0, "tools_called": [],
+                "warnings": [str(exc)], "search_failed": True,
             },
             status_code=200,
         )

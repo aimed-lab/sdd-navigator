@@ -31,7 +31,7 @@ import logging
 from tools.explore import explore_async
 from tools.abstracts import enrich_abstracts
 from tools.page_notes import build_page_notes
-from tools.wiki_agent import curate_evidence_item, split_unfiled, suggest_missing_notes
+from tools.wiki_agent import curate_evidence_item, file_evidence, split_unfiled, suggest_missing_notes
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,68 @@ async def run_page_agent_async(topic: str) -> dict:
         "enrichment": enrichment,
         "candidates_in_pool": len(candidates),
         "citation_report": citation_report,
+        "warnings": warnings,
+        "search_failed": search_failed,
+    }
+
+
+async def run_page_refresh_async(topic: str, known_item_ids: list[str], notes: list[dict]) -> dict:
+    """The daily refresh of one existing page: the same search the page agent
+    runs for its seed (explore_async on `topic`), minus everything the page
+    already holds (`known_item_ids`, the ids already in page_evidence), with
+    what is left filed under the page's EXISTING notes and a suggestion list
+    for notes that may be missing.
+
+    `notes` is [{slug, title, body}]. They are only READ, to decide which
+    note each new item is evidence for (tools/wiki_agent.file_evidence);
+    no note is written or rewritten here, so a human-edited note cannot be
+    changed by a refresh. Never raises for an upstream failure: a failed
+    search comes back as search_failed=True with no items.
+
+    Returns {new_items, evidence_filings, unfiled_items, project_level_items,
+    missing_note_suggestions, candidates_found, tools_called, warnings,
+    search_failed}; new_items are curated (curate_evidence_item shape)."""
+    warnings: list[str] = []
+    try:
+        explore_result = await explore_async(_page_goal_text(topic))
+        search_failed = False
+    except Exception:
+        logger.exception("page_refresh: search step failed entirely")
+        explore_result = {"sections": [], "tools_called": []}
+        search_failed = True
+        warnings.append("The search step failed; no candidates were found.")
+
+    # No cap on the flatten: the cap would drop new items that rank below the
+    # items the page already has. Cap AFTER removing the known ones.
+    candidates, failed_tools, timed_out_tools, candidates_found = _flatten_candidates(explore_result)
+    if failed_tools:
+        warnings.append(f"These sources didn't return results: {', '.join(failed_tools)}.")
+    if timed_out_tools:
+        warnings.append(f"These sources timed out and were skipped: {', '.join(timed_out_tools)}.")
+
+    known = set(known_item_ids or [])
+    fresh = [c for c in candidates if c.get("id") not in known][:MAX_CANDIDATES]
+
+    if fresh:
+        await enrich_abstracts(fresh)  # best-effort, never raises
+
+    usable_notes = [
+        {"slug": n["slug"], "title": n.get("title") or "", "body": n.get("body") or ""}
+        for n in (notes or [])
+        if isinstance(n, dict) and n.get("slug")
+    ]
+    filings, unfiled_all = file_evidence(fresh, usable_notes)
+    filings = {slug: items for slug, items in filings.items() if items}
+    unfiled_items, project_level_items = split_unfiled(unfiled_all)
+
+    return {
+        "new_items": [curate_evidence_item(c) for c in fresh],
+        "evidence_filings": filings,
+        "unfiled_items": unfiled_items,
+        "project_level_items": project_level_items,
+        "missing_note_suggestions": suggest_missing_notes(unfiled_items),
+        "candidates_found": candidates_found,
+        "tools_called": explore_result.get("tools_called") or [],
         "warnings": warnings,
         "search_failed": search_failed,
     }

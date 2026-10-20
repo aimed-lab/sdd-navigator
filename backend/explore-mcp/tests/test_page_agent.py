@@ -69,3 +69,38 @@ def test_preprint_author_blurb_is_not_an_abstract():
     assert not has_abstract(p)
     p["summary"] = "We show that EGFR signalling " * 5
     assert has_abstract(p)
+
+
+def test_refresh_returns_only_new_items_filed_under_existing_notes(monkeypatch):
+    result = _explore_result()
+    result["sections"][0]["items"] = [
+        _item("pubmed:1", "paper", "EGFR inhibitor resistance in lung adenocarcinoma " * 3),
+        _item("pubmed:2", "paper", "EGFR inhibitor resistance mechanisms osimertinib " * 3),
+    ]
+
+    async def fake_explore(text):
+        return result
+
+    async def fake_enrich(c):
+        return {}
+
+    monkeypatch.setattr(pa, "explore_async", fake_explore)
+    monkeypatch.setattr(pa, "enrich_abstracts", fake_enrich)
+    notes = [{"slug": "egfr-resistance", "title": "EGFR inhibitor resistance",
+              "body": "Resistance to EGFR inhibitors such as osimertinib in lung adenocarcinoma."}]
+    out = asyncio.run(pa.run_page_refresh_async("EGFR", ["pubmed:1"], notes))
+    ids = [i["item_id"] for i in out["new_items"]]
+    assert "pubmed:1" not in ids and "pubmed:2" in ids
+    assert out["search_failed"] is False
+    assert all(i["item_id"] != "pubmed:1"
+               for items in out["evidence_filings"].values() for i in (f["item"] for f in items))
+    assert any("timed out" in w for w in out["warnings"])
+
+
+def test_refresh_reports_a_failed_search(monkeypatch):
+    async def boom(text):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(pa, "explore_async", boom)
+    out = asyncio.run(pa.run_page_refresh_async("EGFR", [], []))
+    assert out["search_failed"] is True and out["new_items"] == []
