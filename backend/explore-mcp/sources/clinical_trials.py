@@ -44,8 +44,11 @@ def _interventions(arms_module: dict) -> list[dict]:
 
 async def fetch_trials(
     client: httpx.AsyncClient, term: str, cap: int, status_filter: list[str] | None = None,
-    condition_only: bool = False,
+    condition_only: bool = False, extra_term: str | None = None,
 ) -> list[Item]:
+    # `extra_term` (only with condition_only): sent as query.term ALONGSIDE
+    # query.cond, e.g. cond=pancreatic cancer + term=KRAS. (Named extra_term
+    # because `term` is already the positional search string above.)
     # query.term matches ANY field of the record (eligibility text included), so
     # a disease searched that way pulls in unrelated basket trials. query.cond
     # matches the condition field only; callers pass condition_only=True when
@@ -55,6 +58,8 @@ async def fetch_trials(
         "https://clinicaltrials.gov/api/v2/studies"
         f"?{param}={quote(term)}&pageSize={cap}&sort=LastUpdatePostDate:desc"
     )
+    if condition_only and extra_term:
+        url += f"&query.term={quote(extra_term)}"
     if status_filter:
         url += f"&filter.overallStatus={quote(','.join(status_filter))}"
     data = await get_json(client, url)

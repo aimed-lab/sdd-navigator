@@ -51,7 +51,7 @@ from tools.search_pager import search_pager_async
 from tools.search_papers import search_papers_multi_dual_async
 from tools.search_people import search_people
 from tools.search_tools import search_tools_async
-from tools.search_trials import search_trials_async
+from tools.search_trials import search_trials_async, search_trials_with_gene_async
 from tools.search_wiki import search_wiki
 
 SCOPE_KEYS = ["topics", "genes", "diseases", "assets", "methods"]
@@ -885,15 +885,25 @@ async def _execute(
             # exactly when scope has diseases; otherwise it is the methods
             # fallback, which stays on free-text query.term.
             condition_only = bool(scope.get("diseases"))
+            genes = [g.strip() for g in (scope.get("genes") or []) if g and g.strip()]
             # status_filter is UI-only (see explore_async's docstring) — never
             # derived from scope/LLM extraction, forwarded verbatim to
             # search_trials_async -> ClinicalTrials.gov's filter.overallStatus.
-            tasks.append(
-                search_trials_async(
-                    query, _NET_LIMIT, status_filter=status_filter or None,
-                    condition_only=condition_only,
+            if condition_only and genes:
+                # Disease AND gene: gene-matched trials first, then the
+                # condition-only ones (see search_trials_with_gene_async).
+                tasks.append(
+                    search_trials_with_gene_async(
+                        query, genes[0], _NET_LIMIT, status_filter=status_filter or None
+                    )
                 )
-            )
+            else:
+                tasks.append(
+                    search_trials_async(
+                        query, _NET_LIMIT, status_filter=status_filter or None,
+                        condition_only=condition_only,
+                    )
+                )
         else:
             tasks.append(_dispatch(name, query))
         specs.append((name, _KINDS[name], query))

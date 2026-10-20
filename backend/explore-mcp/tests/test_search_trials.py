@@ -14,7 +14,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from models import Item  # noqa: E402
 from sources.clinical_trials import fetch_trials  # noqa: E402
+from tools.search_trials import merge_trials  # noqa: E402
 
 _FORBIDDEN = ("email", "transcript", "contact_info")
 
@@ -102,6 +104,62 @@ def test_trials_condition_only_uses_query_cond_else_query_term():
     asyncio.run(fetch_trials(term, "glioblastoma", 10))
     assert "query.term=glioblastoma" in term.urls[0]
     assert "query.cond" not in term.urls[0]
+
+
+def test_trials_extra_term_sends_both_cond_and_term():
+    c = _FakeClient({"studies": []})
+    asyncio.run(fetch_trials(c, "pancreatic cancer", 10, ["RECRUITING"], condition_only=True, extra_term="KRAS"))
+    assert "query.cond=pancreatic%20cancer" in c.urls[0]
+    assert "query.term=KRAS" in c.urls[0]
+    assert "filter.overallStatus=RECRUITING" in c.urls[0]
+
+    # extra_term is ignored without condition_only (the term is already query.term)
+    t = _FakeClient({"studies": []})
+    asyncio.run(fetch_trials(t, "KRAS", 10, extra_term="x"))
+    assert t.urls[0].count("query.term") == 1 and "query.cond" not in t.urls[0]
+
+
+def _trial(nct):
+    return Item(
+        id=f"clinicaltrials:{nct}", kind="trial", title=nct, summary="s",
+        url=f"https://clinicaltrials.gov/study/{nct}", source="clinicaltrials",
+        dedupe_key=nct, raw={"nct_id": nct},
+    )
+
+
+def test_merge_trials_gene_matched_first_dedupes_and_fills_to_limit():
+    gene = [_trial("NCT1"), _trial("NCT2")]
+    cond = [_trial("NCT2"), _trial("NCT3"), _trial("NCT4")]
+    merged = merge_trials(gene, cond, 4)
+    assert [i.raw["nct_id"] for i in merged] == ["NCT1", "NCT2", "NCT3", "NCT4"]
+    assert [i.raw["nct_id"] for i in merge_trials(gene, cond, 3)] == ["NCT1", "NCT2", "NCT3"]
+
+
+def test_merge_trials_falls_back_to_condition_only_when_gene_search_empty():
+    cond = [_trial("NCT3"), _trial("NCT4")]
+    assert [i.raw["nct_id"] for i in merge_trials([], cond, 10)] == ["NCT3", "NCT4"]
+
+
+def test_search_trials_with_gene_runs_both_searches_and_merges():
+    import tools.search_trials as st
+
+    calls = []
+
+    async def fake(query, limit=20, status_filter=None, condition_only=False, extra_term=None):
+        calls.append((query, status_filter, condition_only, extra_term))
+        return [_trial("NCT9")] if extra_term else [_trial("NCT8"), _trial("NCT9")]
+
+    original = st.search_trials_async
+    st.search_trials_async = fake
+    try:
+        merged = asyncio.run(st.search_trials_with_gene_async("pancreatic cancer", "KRAS", 10, ["RECRUITING"]))
+    finally:
+        st.search_trials_async = original
+    assert [i.raw["nct_id"] for i in merged] == ["NCT9", "NCT8"]
+    # Both searches ran (in parallel, so order is not fixed), both with the status filter.
+    assert len(calls) == 2
+    assert ("pancreatic cancer", ["RECRUITING"], True, None) in calls
+    assert ("pancreatic cancer", ["RECRUITING"], True, "KRAS") in calls
 
 
 if __name__ == "__main__":
