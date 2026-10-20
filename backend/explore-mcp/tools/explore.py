@@ -874,6 +874,12 @@ async def _execute(
             # user actually typed instead.
             news_query = query or scope.get("_raw_input") or ""
             tasks.append(search_news_async(news_query, _NET_LIMIT, match=not scope.get("is_default")))
+        elif name == "search_grants":
+            # Grants.gov's keyword match is loose: require the title to mention
+            # a scope disease or gene. No disease/gene (methods fallback) -> no
+            # filter, as before.
+            mentions = [t.strip() for t in (scope.get("diseases") or []) + (scope.get("genes") or []) if t and t.strip()]
+            tasks.append(search_grants_async(query, _NET_LIMIT, must_mention=mentions or None))
         elif name == "search_trials":
             # The query came from the `diseases` slice (the only primary slice)
             # exactly when scope has diseases; otherwise it is the methods

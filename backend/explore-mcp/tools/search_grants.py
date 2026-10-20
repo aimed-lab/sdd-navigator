@@ -33,27 +33,35 @@ _ACTIVITY_FILTER_POOL_SIZE = 75
 
 
 async def search_grants_async(
-    query: str, limit: int = 20, activity_codes: tuple[str, ...] | None = None
+    query: str, limit: int = 20, activity_codes: tuple[str, ...] | None = None,
+    must_mention: list[str] | None = None,
 ) -> list[Item]:
     """Cached + single-flighted (see _fetch). `activity_codes`, when given,
     is folded into the cache key — a stage-filtered search and an
     unfiltered one for the same query text are genuinely different results
-    and must never share a cache entry."""
+    and must never share a cache entry. `must_mention` (a title-term filter, see
+    sources/grants_gov.py) is keyed the same way."""
     codes_key = "|".join(sorted(c.upper() for c in activity_codes)) if activity_codes else ""
-    key = normalize_key(f"grants:{limit}:{codes_key}", query)
+    mention_key = "|".join(sorted({t.strip().lower() for t in must_mention if t.strip()})) if must_mention else ""
+    key = normalize_key(f"grants:{limit}:{codes_key}:{mention_key}", query)
     return await cache.get_or_compute(
-        key, lambda: _fetch(query, limit, activity_codes), TTL_SOURCE, STALE_SOURCE
+        key, lambda: _fetch(query, limit, activity_codes, must_mention), TTL_SOURCE, STALE_SOURCE
     )
 
 
 async def _fetch(
-    query: str, limit: int, activity_codes: tuple[str, ...] | None = None
+    query: str, limit: int, activity_codes: tuple[str, ...] | None = None,
+    must_mention: list[str] | None = None,
 ) -> list[Item]:
     try:
-        fetch_cap = _ACTIVITY_FILTER_POOL_SIZE if activity_codes else limit
+        # Both filters are post-fetch drops, so fetch a wider pool first.
+        filtered = bool(activity_codes or must_mention)
+        fetch_cap = _ACTIVITY_FILTER_POOL_SIZE if filtered else limit
         async with httpx.AsyncClient(headers={"User-Agent": _USER_AGENT}) as client:
-            items = await fetch_grants(client, query, fetch_cap, activity_codes=activity_codes)
-        return items[:limit] if activity_codes else items
+            items = await fetch_grants(
+                client, query, fetch_cap, activity_codes=activity_codes, must_mention=must_mention
+            )
+        return items[:limit] if filtered else items
     except Exception:
         logger.exception("search_grants: grants.gov fetch failed for query=%r", query)
         return []   # per-source isolation
