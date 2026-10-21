@@ -18,12 +18,17 @@
 // page) — this component only ever copies text to the clipboard.
 
 import { useState } from "react";
+import { markOnboardingStepAction } from "@/app/communities/actions";
 
 export default function CopyLinkButton({
   slug,
   label = "Copy link",
+  communityId,
 }: {
   slug: string;
+  /** Pass for an active member: copying the link ticks "Invite a colleague"
+   *  on their welcome checklist. */
+  communityId?: string;
   /** The idle label, e.g. "Share · copy link". */
   label?: string;
 }) {
@@ -43,6 +48,7 @@ export default function CopyLinkButton({
           // doesn't strand anyone.
         }
         setCopied(true);
+        if (communityId) void markOnboardingStepAction(communityId, "link_copied");
         setTimeout(() => setCopied(false), 2000);
       }}
       className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1.5"

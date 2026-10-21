@@ -8,6 +8,7 @@
 // actions follow.
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { UnauthorizedError } from "@/lib/auth";
 import {
   addCommunityMemberByEmail,
@@ -43,6 +44,14 @@ import {
   type SourceOutcome,
 } from "@/lib/server/communities";
 import type { PublicPreviewLevel, SectionConfig } from "@/lib/communityTypes";
+import { getCommunityBySlug } from "@/lib/server/communities";
+import {
+  dismissOnboarding,
+  joinOpenCommunityByEmail,
+  recordOnboardingStep,
+  updateCommunityIsOpen,
+} from "@/lib/server/communityJoin";
+import { isTrackedStep } from "@/lib/server/communityHome/checklist";
 
 export type ActionResult = { ok: true; slug: string } | { ok: false; error: string };
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
@@ -754,5 +763,82 @@ export async function pinCommunityResourceAction(
     }
     console.error("pinCommunityResourceAction failed", e);
     return { ok: false, error: "Couldn't pin the resource. Please try again." };
+  }
+}
+
+/** Admin: switch a community between "anyone can join" and "request to join". */
+export async function setCommunityOpenAction(
+  communityId: string,
+  isOpen: boolean,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await updateCommunityIsOpen(communityId, isOpen);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("setCommunityOpenAction failed", e);
+    return { ok: false, error: "Couldn't save this setting. Please try again." };
+  }
+}
+
+/** Signed-out visitor: join an OPEN community with just an email. The
+ *  community is looked up by slug on the server; the database function
+ *  re-checks that it is open. Rate limited per IP. */
+export async function joinByEmailAction(
+  slug: string,
+  email: string
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  try {
+    const community = await getCommunityBySlug(slug);
+    if (!community) return { ok: false, error: "Community not found." };
+
+    const h = await headers();
+    const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
+
+    const res = await joinOpenCommunityByEmail(community.id, email, ip);
+    return res.ok ? { ok: true, message: res.message } : { ok: false, error: res.error };
+  } catch (e) {
+    console.error("joinByEmailAction failed", e);
+    return { ok: false, error: "Couldn't add you just now. Please try again." };
+  }
+}
+
+/** A member did one of the checklist's tracked steps (opened the pinned
+ *  resource, copied the share link). Own progress only. */
+export async function markOnboardingStepAction(
+  communityId: string,
+  step: string
+): Promise<SimpleActionResult> {
+  if (!communityId || !isTrackedStep(step)) return { ok: false, error: "Unknown step." };
+  try {
+    const result = await recordOnboardingStep(communityId, step);
+    return result.status === "ok" ? { ok: true } : { ok: false, error: result.error };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in first." };
+    console.error("markOnboardingStepAction failed", e);
+    return { ok: false, error: "Couldn't save your progress." };
+  }
+}
+
+/** Hide the welcome checklist for this member. */
+export async function dismissChecklistAction(communityId: string, slug: string): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+  try {
+    const result = await dismissOnboarding(communityId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in first." };
+    console.error("dismissChecklistAction failed", e);
+    return { ok: false, error: "Couldn't dismiss the checklist." };
   }
 }

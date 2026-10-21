@@ -17,13 +17,16 @@ export default function FocusField({
   communityId,
   slug,
   focus,
+  startEditing = false,
 }: {
   communityId: string;
   slug: string;
   focus: string | null;
+  /** Open the editor straight away (the welcome checklist links here). */
+  startEditing?: boolean;
 }) {
   const router = useRouter();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(startEditing);
   const [value, setValue] = useState(focus ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

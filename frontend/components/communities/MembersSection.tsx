@@ -66,8 +66,10 @@ function MemberCard({
   slug,
   viewerUserId,
   isMember,
+  editFocusOnLoad,
 }: {
   member: MemberRosterEntry;
+  editFocusOnLoad: boolean;
   communityId: string;
   slug: string;
   viewerUserId: string | null;
@@ -107,7 +109,7 @@ function MemberCard({
           than only when there's content to clamp. */}
       <div className="mt-1 min-h-[2.5rem]">
         {isSelf ? (
-          <FocusField communityId={communityId} slug={slug} focus={member.focus} />
+          <FocusField communityId={communityId} slug={slug} focus={member.focus} startEditing={editFocusOnLoad} />
         ) : (
           member.focus && (
             <p className="font-body-sm text-body-sm text-secondary/70 line-clamp-2">
@@ -147,7 +149,10 @@ export default function MembersSection({
   communityId,
   slug,
   viewerUserId,
+  editFocusOnLoad = false,
 }: {
+  /** Open the viewer's own focus editor on load (?editFocus=1). */
+  editFocusOnLoad?: boolean;
   /** Whether the roster renders at all — true for an active member, and
    *  ALSO true for a non-member when this community's public_preview is
    *  'open'. See this file's own top comment on why this is a separate
@@ -192,6 +197,7 @@ export default function MembersSection({
                   slug={slug}
                   viewerUserId={viewerUserId}
                   isMember={isMember}
+                  editFocusOnLoad={editFocusOnLoad}
                 />
               ))}
             </div>
