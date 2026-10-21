@@ -69,11 +69,25 @@ import {
   type ResultCard,
 } from "@/lib/server/assistant/assistantAnswer";
 import type { ExploreResponse, ExploreSection } from "@/types/explore";
+import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
+import {
+  afterDuplicateChoice,
+  needsEarlyDuplicateCheck,
+  newCommunityMessage,
+  isCommunityTurn,
+  pageKey,
+  type CreateCommunityAction,
+} from "@/lib/server/assistant/assistantReply";
+import type { CommunityMatch } from "@/lib/server/assistant/communityMatch";
+import CommunityMatches, { type JoinProgress, type MatchesState } from "./CommunityMatches";
+import CommunityDraft, { type DraftStage } from "./CommunityDraft";
 
 type Phase =
   | { kind: "idle" }
   | { kind: "checking" }
-  | { kind: "duplicate"; slug: string; title: string }
+  // "early": found as soon as Public was picked (before the confirm card);
+  // "late": found at the last step, after Create was clicked (the fallback).
+  | { kind: "duplicate"; slug: string; title: string; stage: "early" | "late" }
   | { kind: "collecting" }
   | { kind: "done"; slug: string; visibility: Visibility }
   | { kind: "error"; message: string };
@@ -295,12 +309,23 @@ export default function AssistantChat() {
   const [focusTick, setFocusTick] = useState(0);
   // True once a page has been created in this chat.
   const [pageCreated, setPageCreated] = useState(false);
+  // Communities: the match cards under an assistant message, what the join
+  // buttons did, whether the matches were shown in this chat (the backend
+  // refuses to draft a community before that), and the draft being edited.
+  const [cards, setCards] = useState<Record<number, MatchesState>>({});
+  const [joinProgress, setJoinProgress] = useState<Record<string, JoinProgress>>({});
+  const [communitiesChecked, setCommunitiesChecked] = useState(false);
+  const [draft, setDraft] = useState<CreateCommunityAction | null>(null);
+  const [draftStage, setDraftStage] = useState<DraftStage>("edit");
+  const [autoSend, setAutoSend] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Topics the save-as-a-page offer was already shown for in this chat.
   const offered = useRef<Set<string>>(new Set());
   // Bumped by New chat so a search still in flight cannot write into the new chat.
   const chatId = useRef(0);
+  // The proposed page whose public-page check was already settled by the researcher.
+  const skipDup = useRef<string | null>(null);
 
   const available = assistantAvailableOn(pathname);
 
@@ -318,6 +343,11 @@ export default function AssistantChat() {
         setMessages(snap.messages);
         setPickerAt(snap.choices ? snap.messages.length - 1 : null);
         setAction(snap.action);
+        if (snap.communityDraft) {
+          setDraft(snap.communityDraft);
+          setDraftStage("confirm"); // they still have to click Create
+        }
+        if (snap.communitiesChecked) setCommunitiesChecked(true);
         setOpen(true);
       }
     } catch {
@@ -330,18 +360,25 @@ export default function AssistantChat() {
   useEffect(() => {
     if (!restored) return;
     try {
-      if (messages.length === 0 || phase.kind === "done") {
+      const communityDone = typeof draftStage === "object" && "done" in draftStage;
+      if (messages.length === 0 || phase.kind === "done" || communityDone) {
         window.sessionStorage.removeItem(CHAT_STORAGE_KEY);
       } else {
         window.sessionStorage.setItem(
           CHAT_STORAGE_KEY,
-          serializeChat({ messages, choices: pickerAt !== null ? VISIBILITIES : null, action })
+          serializeChat({
+            messages,
+            choices: pickerAt !== null ? VISIBILITIES : null,
+            action,
+            communityDraft: draft,
+            communitiesChecked,
+          })
         );
       }
     } catch {
       // Not worth surfacing; the chat just won't survive a reload.
     }
-  }, [restored, messages, pickerAt, action, phase.kind]);
+  }, [restored, messages, pickerAt, action, phase.kind, draft, draftStage, communitiesChecked]);
 
   // Tell the page the panel is open and how wide, so it can make room.
   useEffect(() => {
@@ -389,12 +426,17 @@ export default function AssistantChat() {
     if (!content || typing) return;
     // The search is whatever the backend reports it ran; until then, a guess
     // (used only to pick the progress text, and by an older backend).
-    const guess = topicFromMessage(content);
     const next: ChatMessage[] = [...messages, { role: "user", content }];
+    // A community request (or the answer to "which topic?") is not an Explore
+    // search: no panel search, no page move, no cards / facts / Save page / Related.
+    const communityTurn = isCommunityTurn(next);
+    const guess = communityTurn ? "" : topicFromMessage(content);
     setMessages(next);
     setInput("");
     setPickerAt(null);
     setAction(null);
+    setDraft(null);
+    setDraftStage("edit");
     setPhase({ kind: "idle" });
     setError(null);
     setProgress(guess ? PROGRESS_SEARCH : PROGRESS_THINK);
@@ -406,7 +448,11 @@ export default function AssistantChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: next,
-          context: { ...(query ? { query } : {}), ...(pageCreated ? { page_created: true } : {}) },
+          context: {
+            ...(query ? { query } : {}),
+            ...(pageCreated ? { page_created: true } : {}),
+            ...(communitiesChecked ? { communities_checked: true } : {}),
+          },
         }),
       });
       if (!res.ok) throw new Error(`status ${res.status}`);
@@ -416,7 +462,8 @@ export default function AssistantChat() {
       // The search the main page follows: the backend's own query, else the
       // message's own topic (an older backend sends none). Whatever happens to
       // the panel's search below, the page still moves to the topic.
-      const topic = resolveTopic({ content, backendQuery: parsed.query });
+      // A community step is not an Explore search: the page stays where it is.
+      const topic = parsed.community || communityTurn ? "" : resolveTopic({ content, backendQuery: parsed.query });
       if (topic && topic.toLowerCase() !== query.toLowerCase()) {
         router.push(`/explore/${encodeURIComponent(topic)}`);
       }
@@ -429,7 +476,18 @@ export default function AssistantChat() {
       setAction(parsed.action ?? null);
       // The picker straight away only when they said what they work on or asked
       // for a page. Backend `choices` and a failed search never decide it.
-      setPickerAt(shouldShowPicker(content, !!parsed.action) ? index : null);
+      setPickerAt(!parsed.community && !communityTurn && shouldShowPicker(content, !!parsed.action) ? index : null);
+
+      // A public page is checked against existing public pages right away,
+      // before the confirm card appears.
+      if (parsed.action && needsEarlyDuplicateCheck(parsed.action)) void checkEarly(parsed.action);
+
+      if (parsed.community?.type === "find_communities") {
+        void showMatches(index, parsed.community.query);
+      } else if (parsed.community?.type === "create_community") {
+        setDraft(parsed.community);
+        setDraftStage("edit");
+      }
 
       if (topic) {
         const key = topic.toLowerCase();
@@ -472,6 +530,81 @@ export default function AssistantChat() {
     }
   };
 
+  // After the matches showed there were none, go straight to the draft.
+  useEffect(() => {
+    if (autoSend && !typing) {
+      const text = autoSend;
+      setAutoSend(null);
+      void send(text);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, typing]);
+
+  const showMatches = async (index: number, topic: string) => {
+    const chat = chatId.current;
+    setCards((prev) => ({
+      ...prev,
+      [index]: { query: topic, loading: true, failed: false, signedIn: !!user, matches: [] },
+    }));
+    let matches: CommunityMatch[] = [];
+    let signedIn = !!user;
+    let failed = false;
+    try {
+      const res = await fetch(`/api/communities/match?q=${encodeURIComponent(topic)}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const json = await res.json();
+      signedIn = json?.signedIn === true;
+      matches = (Array.isArray(json?.matches) ? json.matches : []).filter(
+        (m: unknown): m is CommunityMatch =>
+          !!m && typeof m === "object" && typeof (m as CommunityMatch).id === "string" && typeof (m as CommunityMatch).slug === "string" && typeof (m as CommunityMatch).name === "string"
+      );
+    } catch {
+      failed = true;
+    }
+    if (chat !== chatId.current) return; // New chat started meanwhile
+    setCards((prev) => ({ ...prev, [index]: { query: topic, loading: false, failed, signedIn, matches } }));
+    if (failed) return;
+    setCommunitiesChecked(true);
+    if (matches.length === 0) setAutoSend(newCommunityMessage(topic));
+  };
+
+  const joinMatch = async (m: CommunityMatch) => {
+    if (!user) {
+      window.location.assign(`/login?callbackUrl=${encodeURIComponent(pathname + window.location.search)}`);
+      return;
+    }
+    setJoinProgress((p) => ({ ...p, [m.id]: "busy" }));
+    const res = await joinCommunityAction(m.id, m.isOpen, m.slug);
+    setJoinProgress((p) => ({ ...p, [m.id]: res.ok ? (m.isOpen ? "active" : "pending") : { error: res.error } }));
+  };
+
+  const createCommunityNow = async () => {
+    if (!draft) return;
+    if (!user) {
+      // Chat and draft are in sessionStorage (effect above); come back to this page.
+      window.location.assign(`/login?callbackUrl=${encodeURIComponent(pathname + window.location.search)}`);
+      return;
+    }
+    setDraftStage("creating");
+    const res = await createCommunityAction({ name: draft.name, purpose: draft.purpose });
+    setDraftStage(res.ok ? { done: res.slug } : { error: res.error });
+  };
+
+  const checkEarly = async (a: CreatePageAction) => {
+    const chat = chatId.current;
+    setPhase({ kind: "checking" });
+    let match: { slug: string; title: string } | null = null;
+    try {
+      const res = await fetch(`/api/pages/similar?title=${encodeURIComponent(a.title)}&seed=${encodeURIComponent(a.seed_input)}`);
+      const json = res.ok ? await res.json() : null;
+      if (json?.match?.slug) match = { slug: json.match.slug, title: json.match.title };
+    } catch {
+      // The check is a courtesy; if it fails the last-step check still runs.
+    }
+    if (chat !== chatId.current) return;
+    setPhase(match ? { kind: "duplicate", slug: match.slug, title: match.title, stage: "early" } : { kind: "idle" });
+  };
+
   const createPage = async (a: CreatePageAction, skipDuplicateCheck = false) => {
     if (!user) {
       // Chat is already in sessionStorage (effect above); come back to this page.
@@ -480,7 +613,7 @@ export default function AssistantChat() {
       return;
     }
 
-    if (a.visibility === "public" && !skipDuplicateCheck) {
+    if (a.visibility === "public" && !skipDuplicateCheck && skipDup.current !== pageKey(a)) {
       setPhase({ kind: "checking" });
       try {
         const res = await fetch(
@@ -488,7 +621,7 @@ export default function AssistantChat() {
         );
         const json = res.ok ? await res.json() : null;
         if (json?.match?.slug) {
-          setPhase({ kind: "duplicate", slug: json.match.slug, title: json.match.title });
+          setPhase({ kind: "duplicate", slug: json.match.slug, title: json.match.title, stage: "late" });
           return;
         }
       } catch {
@@ -530,6 +663,13 @@ export default function AssistantChat() {
     setPhase({ kind: "idle" });
     setError(null);
     setPageCreated(false);
+    setCards({});
+    setJoinProgress({});
+    setCommunitiesChecked(false);
+    setDraft(null);
+    setDraftStage("edit");
+    setAutoSend(null);
+    skipDup.current = null;
     setInput("");
     offered.current = new Set();
     chatId.current += 1;
@@ -724,6 +864,17 @@ export default function AssistantChat() {
               const ex = extras[i];
               return (
                 <div key={i} className="flex flex-col gap-4">
+                  {cards[i] && (
+                    <CommunityMatches
+                      state={cards[i]}
+                      progress={joinProgress}
+                      busy={busy}
+                      loginHref={`/login?callbackUrl=${encodeURIComponent(pathname)}`}
+                      onJoin={joinMatch}
+                      onCreateNew={() => void send(newCommunityMessage(cards[i].query))}
+                    />
+                  )}
+
                   {ex && ex.chips.length > 0 && (
                     <div className="flex flex-wrap gap-1.5" aria-label="What was searched">
                       {ex.chips.map((c) => (
@@ -837,6 +988,18 @@ export default function AssistantChat() {
               </p>
             )}
 
+            {draft && !typing && (
+              <CommunityDraft
+                draft={draft}
+                stage={draftStage}
+                signedIn={!!user}
+                authLoading={authLoading}
+                onChange={setDraft}
+                onStage={setDraftStage}
+                onCreate={() => void createCommunityNow()}
+              />
+            )}
+
             {action && phase.kind === "idle" && !typing && (
               <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3">
                 <p className="font-body-md text-body-md text-on-background">
@@ -872,21 +1035,46 @@ export default function AssistantChat() {
             {phase.kind === "duplicate" && action && (
               <div className="rounded-xl border border-outline-variant/40 bg-white p-4 flex flex-col gap-3">
                 <p className="font-body-md text-body-md text-on-background">
-                  A public page on this already exists: &lsquo;{phase.title}&rsquo;.
+                  <strong className="font-semibold">A public page on this already exists</strong>
+                  <span className="block text-secondary">&lsquo;{phase.title}&rsquo;. You can follow it instead.</span>
                 </p>
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <a
                     href={`/pages/${phase.slug}`}
                     className="btn-primary px-5 py-2 rounded-lg font-label-md text-label-md"
                   >
-                    Open it
+                    Open
                   </a>
                   <button
                     type="button"
-                    onClick={() => createPage(action, true)}
+                    onClick={() => {
+                      // Same page, private: nothing public to duplicate. It still
+                      // goes through the confirm card below.
+                      const next = afterDuplicateChoice(action, "private");
+                      skipDup.current = pageKey(next.action);
+                      setAction(next.action);
+                      setPhase({ kind: "idle" });
+                    }}
                     className="btn-outline px-5 py-2 rounded-lg font-label-md text-label-md"
                   >
-                    Create mine anyway
+                    Create private
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (phase.stage === "late") {
+                        // Create was already confirmed before this check ran.
+                        skipDup.current = pageKey(action);
+                        void createPage(action, true);
+                      } else {
+                        // Found before the confirm card: go on to it.
+                        skipDup.current = pageKey(action);
+                        setPhase({ kind: "idle" });
+                      }
+                    }}
+                    className="btn-outline px-5 py-2 rounded-lg font-label-md text-label-md"
+                  >
+                    Create anyway
                   </button>
                 </div>
               </div>

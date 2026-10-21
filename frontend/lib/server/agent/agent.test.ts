@@ -64,9 +64,33 @@ type Calls = string[];
 
 const MEMBERS = [{ user_id: BOB_ACCT, name: "Bob Jones", email: "bob@x.org", role: "viewer" as const }];
 
-function fakeServices(calls: Calls, visiblePageFor: (userId: string) => boolean): AgentServices {
+// Two communities: one open, one by request. `membersOf` is who is already in what.
+const COMMUNITIES = [
+  { id: "c-open", slug: "kras-pdac", name: "KRAS in PDAC", purpose: "KRAS in pancreatic cancer", memberCount: 12, isOpen: true, why: ["pancreatic cancer", "KRAS"] },
+  { id: "c-closed", slug: "by-request", name: "Private lab group", purpose: "A closed group", memberCount: 4, isOpen: false, why: ["KRAS"] },
+];
+
+function fakeCommunities(calls: Calls, membersOf: Record<string, "active" | "pending"> = {}): AgentServices["communities"] {
+  return {
+    search: async (_db, query, limit) => (calls.push(`communities.search:${query}`), COMMUNITIES.slice(0, limit)),
+    find: async (_db, slug) => {
+      const c = COMMUNITIES.find((x) => x.slug === slug);
+      return c ? { id: c.id, slug: c.slug, name: c.name, isOpen: c.isOpen } : null;
+    },
+    membership: async (_db, userId, communityId) => membersOf[`${userId}|${communityId}`] ?? null,
+    join: async (_db, _user, c) => (calls.push(`communities.join:${c.id}:${c.isOpen ? "active" : "pending"}`), { ok: true, status: c.isOpen ? "active" : "pending" }),
+    create: async (_db, name) => (calls.push(`communities.create:${name}`), { ok: true, id: "new-id", slug: "new-community" }),
+  };
+}
+
+function fakeServices(
+  calls: Calls,
+  visiblePageFor: (userId: string) => boolean,
+  membersOf: Record<string, "active" | "pending"> = {}
+): AgentServices {
   const rec = <T,>(name: string, value: T) => async (): Promise<T> => (calls.push(name), value);
   return {
+    communities: fakeCommunities(calls, membersOf),
     listMyPages: rec("listMyPages", { status: "ok", pages: [] }),
     getPageView: (async (_slug: string, ctx?: { user: { id: string } }) => {
       calls.push("getPageView");
@@ -96,7 +120,13 @@ function fakeServices(calls: Calls, visiblePageFor: (userId: string) => boolean)
   };
 }
 
-function makeDeps(opts: { page?: { owner_id: string; visibility: string } | null; writeLimit?: number } = {}) {
+function makeDeps(
+  opts: {
+    page?: { owner_id: string; visibility: string } | null;
+    writeLimit?: number;
+    members?: Record<string, "active" | "pending">;
+  } = {}
+) {
   const calls: Calls = [];
   const logs: AgentLogEntry[] = [];
   const dbs = new Map<string, ReturnType<typeof fakeDb>>();
@@ -113,7 +143,7 @@ function makeDeps(opts: { page?: { owner_id: string; visibility: string } | null
       if (token === "explodes") throw new Error("auth service down");
       return null;
     },
-    handlers: makeAgentHandlers(fakeServices(calls, (id) => id === ALICE)),
+    handlers: makeAgentHandlers(fakeServices(calls, (id) => id === ALICE, opts.members)),
     writeLimited: () => ++writes > limit,
     searchLimited: () => false,
     log: (e) => logs.push(e),
@@ -137,6 +167,9 @@ const VALID_BODIES: Record<string, Record<string, unknown>> = {
   remove_member: { slug: "egfr-abc12", user_id: BOB_ACCT },
   set_visibility: { slug: "egfr-abc12", visibility: "public" },
   set_auto_update: { slug: "egfr-abc12", enabled: false },
+  search_communities: { query: "KRAS pancreatic cancer" },
+  join_community: { slug: "kras-pdac" },
+  create_community: { name: "KRAS in Pancreatic Cancer", purpose: "Researchers working on KRAS in PDAC." },
 };
 
 const TOKEN_TOOLS = TOOL_SPECS.filter((t) => t.needs_user_token).map((t) => t.name);
@@ -218,6 +251,8 @@ test("preview:true never writes, for every write tool", async () => {
     const writeCalls = calls.filter(
       (c) =>
         c.startsWith("removePageMember") ||
+        c.startsWith("communities.join") ||
+        c.startsWith("communities.create") ||
         ["createLivingPage", "addPageMember", "setPageVisibility", "setPageRefreshEnabled"].includes(c)
     );
     assert.deepEqual(writeCalls, [], `${tool} called a write service`);
@@ -243,6 +278,8 @@ test("the same calls without preview do write, and each write is logged with use
     remove_member: `removePageMember:${BOB_ACCT}`,
     set_visibility: "setPageVisibility",
     set_auto_update: "setPageRefreshEnabled",
+    join_community: "communities.join:c-open:active",
+    create_community: "communities.create:KRAS in Pancreatic Cancer",
   };
   for (const tool of WRITE_TOOLS) {
     const { deps, calls, logs } = makeDeps();
@@ -483,4 +520,107 @@ test("isOwnerAccount: matches on the owner's login id or on the owner's email, n
   assert.equal(isOwnerAccount({ resolvedId: BOB_ACCT, email: "bob@x.org", ownerId: ALICE, ownerEmail: "alice@x.org" }), false);
   assert.equal(isOwnerAccount({ resolvedId: null, email: "bob@x.org", ownerId: ALICE, ownerEmail: null }), false);
   assert.equal(isOwnerAccount({ resolvedId: BOB_ACCT, email: "", ownerId: ALICE, ownerEmail: "" }), false);
+});
+
+// ── communities ──────────────────────────────────────────────────────────────
+
+test("search_communities: top matches with why, joining mode and the caller's own status", async () => {
+  const { deps } = makeDeps({ members: { [`${ALICE}|c-closed`]: "pending" } });
+  const res = await call(deps, "search_communities", { query: "KRAS pancreatic cancer" });
+  assert.equal(res.status, 200);
+  const list = res.body.communities as Record<string, unknown>[];
+  assert.equal(list.length, 2);
+  assert.deepEqual(list[0], {
+    slug: "kras-pdac",
+    name: "KRAS in PDAC",
+    purpose: "KRAS in pancreatic cancer",
+    member_count: 12,
+    joining: "anyone can join",
+    matches: ["pancreatic cancer", "KRAS"],
+    your_status: "not a member",
+    url: `${ORIGIN}/communities/kras-pdac`,
+  });
+  assert.equal(list[1].joining, "by request");
+  assert.equal(list[1].your_status, "request pending");
+  assert.equal(JSON.stringify(res.body).includes("c-open"), false, "internal ids are not exposed");
+});
+
+test("search_communities needs a token and a real query", async () => {
+  const { deps } = makeDeps();
+  assert.equal((await call(deps, "search_communities", { query: "KRAS" }, null)).status, 401);
+  assert.equal((await call(deps, "search_communities", { query: "ab" })).status, 400);
+});
+
+test("join_community: an open community admits at once, a closed one takes a request (the community decides)", async () => {
+  const open = makeDeps();
+  const a = await call(open.deps, "join_community", { slug: "kras-pdac" });
+  assert.equal(a.body.status, "joined");
+  assert.ok(open.calls.includes("communities.join:c-open:active"));
+
+  const closed = makeDeps();
+  const b = await call(closed.deps, "join_community", { slug: "by-request" });
+  assert.equal(b.body.status, "requested");
+  assert.ok(closed.calls.includes("communities.join:c-closed:pending"), "never 'active' for a closed community");
+});
+
+test("join_community: preview says which it would be and writes nothing", async () => {
+  const { deps, calls, logs } = makeDeps();
+  const open = await call(deps, "join_community", { slug: "kras-pdac", preview: true });
+  const closed = await call(deps, "join_community", { slug: "by-request", preview: true });
+  assert.equal(open.body.would, "join");
+  assert.equal(closed.body.would, "request");
+  assert.deepEqual(calls.filter((c) => c.startsWith("communities.join")), []);
+  assert.deepEqual(logs, []);
+});
+
+test("join_community: already a member or already asked changes nothing; unknown slug is 404", async () => {
+  const { deps, calls } = makeDeps({ members: { [`${ALICE}|c-open`]: "active", [`${ALICE}|c-closed`]: "pending" } });
+  assert.equal((await call(deps, "join_community", { slug: "kras-pdac" })).body.status, "already_member");
+  assert.equal((await call(deps, "join_community", { slug: "by-request" })).body.status, "already_requested");
+  assert.deepEqual(calls.filter((c) => c.startsWith("communities.join")), []);
+  const missing = await call(deps, "join_community", { slug: "nope" });
+  assert.equal(missing.status, 404);
+});
+
+test("join_community: the caller cannot choose the outcome (no is_open or status input)", async () => {
+  const { deps } = makeDeps();
+  for (const extra of [{ is_open: true }, { status: "active" }, { role: "admin" }]) {
+    const res = await call(deps, "join_community", { slug: "by-request", ...extra });
+    assert.equal(res.status, 400, JSON.stringify(extra));
+  }
+});
+
+test("create_community preview: describes the draft, lists similar communities, creates nothing", async () => {
+  const { deps, calls, logs } = makeDeps();
+  const res = await call(deps, "create_community", { ...VALID_BODIES.create_community, preview: true });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.would_create, {
+    name: "KRAS in Pancreatic Cancer",
+    purpose: "Researchers working on KRAS in PDAC.",
+    you_become: "admin",
+    joining: "by request",
+  });
+  const similar = res.body.similar_communities as { slug: string; url: string }[];
+  assert.deepEqual(similar.map((s) => s.slug), ["kras-pdac", "by-request"]);
+  assert.equal(similar[0].url, `${ORIGIN}/communities/kras-pdac`);
+  assert.match(String(res.body.note), /join one before creating/);
+  assert.deepEqual(calls.filter((c) => c.startsWith("communities.create")), []);
+  assert.deepEqual(logs, []);
+});
+
+test("create_community: creates for the caller, returns the link, and logs the write", async () => {
+  const { deps, calls, logs } = makeDeps();
+  const res = await call(deps, "create_community", VALID_BODIES.create_community);
+  assert.deepEqual(res.body, { slug: "new-community", url: `${ORIGIN}/communities/new-community`, you_are: "admin" });
+  assert.ok(calls.includes("communities.create:KRAS in Pancreatic Cancer"));
+  assert.deepEqual(logs, [{ event: "agent_write", user_id: ALICE, tool: "create_community", ok: true, status: 200 }]);
+});
+
+test("create_community: needs a token, a name and a purpose; is rate limited like other writes", async () => {
+  const { deps } = makeDeps({ writeLimit: 1 });
+  assert.equal((await call(deps, "create_community", VALID_BODIES.create_community, null)).status, 401);
+  assert.equal((await call(deps, "create_community", { name: "KR", purpose: "x" })).status, 400);
+  assert.equal((await call(deps, "create_community", { name: "Fine name" })).status, 400);
+  assert.equal((await call(deps, "create_community", VALID_BODIES.create_community)).status, 200);
+  assert.equal((await call(deps, "create_community", VALID_BODIES.create_community)).status, 429);
 });

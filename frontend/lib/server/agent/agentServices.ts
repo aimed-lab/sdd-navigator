@@ -10,6 +10,7 @@ import { addPageMember, listPageMemberDetails, removePageMember } from "@/lib/se
 import { getPageView, listMyPages } from "@/lib/server/pages/pageView";
 import { findSimilarPublicPage } from "@/lib/server/pages/similarPages";
 import type { AgentServices } from "./agentHandlers";
+import { realCommunityOps } from "./agentCommunityOps";
 
 export const realAgentServices: AgentServices = {
   listMyPages,
@@ -21,6 +22,7 @@ export const realAgentServices: AgentServices = {
   setPageVisibility,
   setPageRefreshEnabled,
   findSimilarPublicPage,
+  communities: realCommunityOps,
   async exploreSearch(query) {
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",

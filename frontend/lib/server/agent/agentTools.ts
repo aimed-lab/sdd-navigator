@@ -185,6 +185,60 @@ export const TOOL_SPECS: ToolSpec[] = [
     changes_data: true,
     supports_preview: true,
   }),
+  tool({
+    name: "search_communities",
+    description:
+      "Find existing communities for a topic. Returns up to 3 best matches: name, purpose, member count, whether anyone can join or it is by request, " +
+      "why it matched, the researcher's own status (none, pending, member) and a link. Always run this before create_community.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "The topic, in plain words, e.g. 'KRAS pancreatic cancer'.", minLength: 3, maxLength: 200 } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    needs_user_token: true,
+    changes_data: false,
+    supports_preview: false,
+  }),
+  tool({
+    name: "join_community",
+    description:
+      "Join a community, or request to join it. If the community is open the researcher becomes a member at once; otherwise an admin must approve the request. " +
+      "Which of the two happens is decided by the community, not by you. Joining twice does nothing. Call with preview:true first and show the researcher which it will be.",
+    input_schema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "The community's slug, the last part of its URL (/communities/<slug>).", minLength: 1, maxLength: 200 },
+        preview: PREVIEW,
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    needs_user_token: true,
+    changes_data: true,
+    supports_preview: true,
+  }),
+  tool({
+    name: "create_community",
+    description:
+      "Create a community; the researcher becomes its admin. New communities are by request (private). " +
+      "Search first with search_communities and, if anything similar exists, ask whether they would rather join it. " +
+      "Call with preview:true first: it returns what would be created and any similar existing communities (similar_communities). " +
+      "Show that to the researcher and get a clear yes before calling again without preview.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Community name.", minLength: 3, maxLength: 80 },
+        purpose: { type: "string", description: "One line on what the community is for.", minLength: 3, maxLength: 300 },
+        preview: PREVIEW,
+      },
+      required: ["name", "purpose"],
+      additionalProperties: false,
+    },
+    needs_user_token: true,
+    changes_data: true,
+    supports_preview: true,
+  }),
 ];
 
 export function findTool(name: string): ToolSpec | undefined {

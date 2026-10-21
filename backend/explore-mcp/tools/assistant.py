@@ -4,17 +4,36 @@ resources on a topic and helps a researcher turn "what I work on" into a
 living page.
 
 SAFETY PATTERN, same as the project agent: the model only PROPOSES. This
-module never creates anything and has no database access of any kind. The one
-action it can produce, `create_page`, is returned to the caller as data; the
-frontend shows a confirm card and, after the user clicks Create, executes it
-with the signed-in user's own session (POST /api/pages).
+module never creates anything and has no database access of any kind. The
+actions it can produce are returned to the caller as data; the frontend shows a
+confirm card and, after the user clicks Create, executes them with the signed-in
+user's own session:
+  create_page         -> POST /api/pages
+  find_communities    -> the app searches existing communities and shows the top
+                         matches (Join / Request to join / Preview); nothing is
+                         written
+  create_community    -> a draft name + one-line purpose the researcher edits and
+                         confirms; the app then creates it (creator becomes admin)
 
-Two tools:
+COMMUNITY TURNS ARE HANDLED IN CODE, not left to the model. A message that asks
+to find / create / join a community is never a topic search: no `search` call,
+no sources, no related questions. The topic is read out of the message
+("Create a community for neuro-oncology researchers at UAB" -> "neuro-oncology")
+and the turn returns a `find_communities` action straight away; with no topic
+it asks for one. Once the app has shown the matches (context.communities_checked)
+and the researcher asks for a NEW community, the model drafts the name and
+purpose (with a plain fallback), and the turn returns `create_community`.
+
+Four tools:
   search(query)               runs explore_async and hands the model a compact
                               view: up to 3 NUMBERED sources (title + abstract)
                               to cite, plus approvals, trials and compounds.
                               No result counts: the model must not recite them.
   propose_create_page(...)    records a proposed action. Nothing is created.
+  propose_find_communities(query)   asks the app to show matching communities.
+  propose_create_community(name, purpose)   a draft only; refused until the app
+                              has shown the matching communities (the frontend
+                              sends context.communities_checked = true).
 
 THE RULES ARE ENFORCED HERE IN CODE, not left to the prompt:
   * propose_create_page is refused unless the assistant has already replied
@@ -29,6 +48,8 @@ THE RULES ARE ENFORCED HERE IN CODE, not left to the prompt:
     search.
   * The buttons carry the choices, so a reply never repeats them as text:
     lines that spell out Private / Team / Public are removed from the reply.
+  * propose_create_community is refused unless context.communities_checked is
+    true, so a community is never drafted before the existing ones were shown.
   * Answers cite only sources that exist: a [n] with no matching numbered
     source is removed from the reply.
 
@@ -57,6 +78,8 @@ MAX_MESSAGE_CHARS = 2000
 MAX_TOOL_ROUNDS = 4
 MAX_TITLE_CHARS = 120
 MAX_SEED_CHARS = 200
+MAX_COMMUNITY_NAME_CHARS = 80
+MAX_COMMUNITY_PURPOSE_CHARS = 300
 TOP_TITLES = 3
 
 UNAVAILABLE_REPLY = "Sorry, the assistant isn't available right now. Please try again in a moment."
@@ -65,7 +88,8 @@ _SYSTEM = """You are the AI assistant in SmartDrugDiscovery's side panel. You he
 - Find resources on a topic: papers, preprints, clinical trials, FDA approvals, compounds, datasets, grants and tools.
 - Create a living page for their research: a page that collects those resources on a topic and keeps itself updated. It can be private (only them), team (them and people they invite) or public (anyone can follow it).
 - Show their pages: tell them to use the "Show my pages" starter or open My pages. You cannot list them yourself.
-Communities are coming soon and you cannot help with them yet. If asked for anything else (editing pages, inviting people, answering general questions), say briefly that you can't do that here and offer the list above. Never promise or imply other abilities.
+- Find, join or create a community: a group of researchers on a topic with shared resources and updates. You can look for existing communities and draft a new one. You cannot join for them: the app shows Join or Request to join on each match.
+If asked for anything else (editing pages, inviting people, answering general questions), say briefly that you can't do that here and offer the list above. Never promise or imply other abilities.
 
 How you work:
 1. When the user names a topic, asks a question about a drug, gene, disease or method, or says what they work on, call search(query) first. query is a short topic phrase (for example "EGFR inhibitor resistance lung cancer"), not the whole question. Never answer from memory. Set user_work to true only when they said what THEY work on or want to keep track of.
@@ -73,6 +97,10 @@ How you work:
 3. After the answer add a line that says exactly RELATED: and then 2 or 3 short follow-up questions the researcher might ask next, one per line, each starting with "- ".
 4. Never ask which kind of page they want and never list Private / Team / Public; the app handles that.
 5. Only AFTER the user has picked Private, Team or Public, call propose_create_page(title, seed_input, visibility). Never call it before they pick. title is a short page title; seed_input is the topic phrase to research; visibility is exactly what they picked. Then say in one short sentence that they can confirm below.
+
+6. Communities. When the user wants to find or create a community on a topic, FIRST call propose_find_communities(query), where query is a short topic phrase. The app then shows the best existing matches itself; never describe, name or invent communities yourself, and say only one short sentence such as that you are checking existing communities first. If they have not named a topic, ask for it in one short sentence.
+   Examples: "Create a community for neuro-oncology researchers at UAB" -> propose_find_communities("neuro-oncology"). "Is there a community for people working on KRAS in pancreatic cancer?" -> propose_find_communities("KRAS pancreatic cancer"). Leave out words like researchers, people working on, and places such as "at UAB"; keep only the topic. Never run search for a community request.
+7. Only after the app has shown the matches (it tells you in the conversation notes) and the user wants a new community, call propose_create_community(name, purpose): a short name and ONE line of purpose drafted from the conversation. The researcher edits both and confirms in the app. Never say a community was created or joined: nothing happens until they confirm or click. Never answer "I need to show you the existing communities first" once the note says they were shown.
 
 Keep every reply short. If the message is not about a topic, answer briefly and invite them to name a topic or their research area."""
 
@@ -101,6 +129,39 @@ _TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_find_communities",
+            "description": (
+                "Ask the app to search existing communities for a topic and show the top matches. "
+                "Use this first whenever the user wants to find or create a community. Creates nothing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "Short topic phrase, e.g. 'KRAS pancreatic cancer'."}},
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_create_community",
+            "description": (
+                "Draft a new community (name and one-line purpose). Creates nothing; the researcher edits it and "
+                "confirms in the UI. Only after the app has shown the matching communities."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Short community name."},
+                    "purpose": {"type": "string", "description": "One line on what it is for."},
+                },
+                "required": ["name", "purpose"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "propose_create_page",
             "description": (
                 "Propose creating a living page. Creates nothing; the user confirms in the UI. "
@@ -118,6 +179,127 @@ _TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+# ── community requests ───────────────────────────────────────────────────────
+
+# Keep in step with COMMUNITY_TOPIC_QUESTION in
+# frontend/lib/server/assistant/assistantReply.ts (the frontend uses it to know
+# that the next message is the answer).
+COMMUNITY_TOPIC_QUESTION = "What topic or research area is the community for?"
+
+_COMMUNITY_REQUEST = re.compile(
+    r"\b(?:create|find|join|start|make|set\s*up|build|looking\s+for|search\s+for|show\s+me|is\s+there|are\s+there)\b"
+    r"[^.?!]{0,40}\bcommunit(?:y|ies)\b"
+    r"|\b(?:a|an|new|existing)\s+(?:[\w-]+\s+){0,2}communit(?:y|ies)\s+(?:for|on|about|of|around)\b",
+    re.I,
+)
+_WANTS_NEW_COMMUNITY = re.compile(r"\bnew\s+communit(?:y|ies)\b", re.I)
+
+_LEAD_PREPOSITION = re.compile(
+    r"^[\s,:;\-]*(?:(?:for|on|about|around|of|in|focused\s+on|centered\s+on|dedicated\s+to|devoted\s+to)\s+)+", re.I
+)
+_PLACE = re.compile(r"\s+(?:at|from|@)\s+\S.*$", re.I)
+_PEOPLE = r"(?:people|researchers?|scientists?|students?|clinicians?|physicians?|investigators?|folks|anyone|those)"
+_LEAD_PEOPLE = re.compile(
+    rf"^(?:{_PEOPLE})\s+(?:who\s+|that\s+)?(?:are\s+)?(?:working\s+on|work\s+on|works\s+on|interested\s+in|studying|study|focused\s+on)\s+",
+    re.I,
+)
+_TRAIL_PEOPLE = re.compile(rf"\s+{_PEOPLE}$", re.I)
+_EMPTY_WORDS = {"research", "my", "our", "the", "and", "group", "team", "lab", "work", "area", "field", "topic", "interests", "interest", "something", "anything", "me", "us", "you"}
+
+
+def _clean_community_topic(raw: str) -> str:
+    s = raw.strip()
+    s = re.split(r"[.?!\n]", s)[0]
+    s = _LEAD_PREPOSITION.sub("", s)
+    s = _PLACE.sub("", s)
+    s = _LEAD_PEOPLE.sub("", s.strip())
+    s = _TRAIL_PEOPLE.sub("", s.strip())
+    s = s.strip(" ,:;-\"'")[:100].strip()
+    words = [w for w in re.findall(r"[A-Za-z0-9][\w/-]*", s) if w.lower() not in _EMPTY_WORDS]
+    return s if any(len(w) >= 3 for w in words) else ""
+
+
+def is_community_request(text: str) -> bool:
+    """Is this message asking to find / create / join a community?"""
+    return bool(_COMMUNITY_REQUEST.search(text))
+
+
+def extract_community_topic(text: str) -> str | None:
+    """The topic in a community request: "Create a community for neuro-oncology
+    researchers at UAB" -> "neuro-oncology". None when the message has none."""
+    m = re.search(r"\bcommunit(?:y|ies)\b(.*)$", text, re.I | re.S)
+    topic = _clean_community_topic(m.group(1)) if m else ""
+    if not topic:
+        # "a neuro-oncology community"
+        before = text[: m.start()] if m else text
+        mm = re.search(r"\b(?:a|an|new|existing)\s+([\w][\w\s/-]{2,60}?)\s*$", before, re.I)
+        topic = _clean_community_topic(mm.group(1)) if mm else ""
+    return topic or None
+
+
+def _awaiting_community_topic(messages: list[dict[str, str]]) -> bool:
+    """Did we just ask which topic the community is for?"""
+    prior = [m for m in messages if m["role"] == "assistant"]
+    return bool(prior) and prior[-1]["content"].strip() == COMMUNITY_TOPIC_QUESTION and messages[-1]["role"] == "user"
+
+
+def _fallback_draft(topic: str) -> dict:
+    name = (topic[:1].upper() + topic[1:] + " Community")[:MAX_COMMUNITY_NAME_CHARS].strip()
+    return {
+        "type": "create_community",
+        "name": name,
+        "purpose": f"Researchers working on {topic}."[:MAX_COMMUNITY_PURPOSE_CHARS],
+    }
+
+
+_COMMUNITY_ONLY_NOTE = (
+    "\n\nConversation note: the app has already shown the matching communities and the researcher wants a NEW one. "
+    "Call propose_create_community(name, purpose) now: a short name and one line of purpose for the topic they named. "
+    "Do not search and do not ask anything."
+)
+
+
+async def _community_turn(convo: list[dict[str, str]], context: Any) -> dict | None:
+    """A community request, answered without any topic search. None when this
+    turn is not about communities."""
+    last = convo[-1]["content"] if convo and convo[-1]["role"] == "user" else ""
+    awaiting = _awaiting_community_topic(convo)
+    if not (is_community_request(last) or awaiting):
+        return None
+
+    checked = isinstance(context, dict) and context.get("communities_checked") is True
+    topic = _clean_community_topic(last) if awaiting else extract_community_topic(last)
+    base: dict[str, Any] = {"query": None, "related": [], "sources": []}
+
+    wants_new = checked and bool(_WANTS_NEW_COMMUNITY.search(last)) and not awaiting
+    if not wants_new:
+        if not topic:
+            return {"reply": COMMUNITY_TOPIC_QUESTION, **base}
+        return {
+            "reply": "Let me check which communities already exist.",
+            **base,
+            "action": {"type": "find_communities", "query": topic[:MAX_SEED_CHARS]},
+        }
+
+    # The matches were shown and they want a new one: draft it.
+    drafted: dict | None = None
+    try:
+        tools = [t for t in _TOOLS if t["function"]["name"] == "propose_create_community"]
+        wire = [{"role": "system", "content": _SYSTEM + _COMMUNITY_ONLY_NOTE}, *convo]
+        resp = await asyncio.to_thread(llm.complete, wire, tools, "auto", temperature=0.2)
+        for call in resp.tool_calls if resp.has_tool_calls else []:
+            if call.name == "propose_create_community":
+                drafted = _build_create_community(call.arguments)
+                break
+    except Exception:
+        logger.exception("assistant: community draft failed")
+    if drafted is None and topic:
+        drafted = _fallback_draft(topic)
+    if drafted is None:
+        return {"reply": COMMUNITY_TOPIC_QUESTION, **base}
+    return {"reply": "Here is a draft. Edit it below if you like.", **base, "action": drafted}
 
 
 # ── input handling ───────────────────────────────────────────────────────────
@@ -416,19 +598,41 @@ def _build_action(args: dict, picked: str) -> dict | None:
     return {"type": "create_page", "title": title, "seed_input": seed, "visibility": picked}
 
 
+def _build_find_communities(args: dict) -> dict | None:
+    query = str(args.get("query") or "").strip()[:MAX_SEED_CHARS]
+    if len(query) < 3:
+        return None
+    return {"type": "find_communities", "query": query}
+
+
+def _build_create_community(args: dict) -> dict | None:
+    name = str(args.get("name") or "").strip()[:MAX_COMMUNITY_NAME_CHARS]
+    purpose = str(args.get("purpose") or "").strip()[:MAX_COMMUNITY_PURPOSE_CHARS]
+    if len(name) < 3 or len(purpose) < 3:
+        return None
+    return {"type": "create_community", "name": name, "purpose": purpose}
+
+
 # ── the turn ─────────────────────────────────────────────────────────────────
 
 
 async def run_assistant_turn_async(messages: Any, context: Any = None) -> dict:
     """One assistant turn. Returns {reply, choices?, action?}."""
     convo = clean_messages(messages)
+    community = await _community_turn(convo, context)
+    if community is not None:
+        return community
     picked = chosen_visibility(convo)
     allow_propose = picked is not None and has_assistant_reply(convo)
+    communities_checked = isinstance(context, dict) and context.get("communities_checked") is True
 
     system = _SYSTEM
     query = context.get("query") if isinstance(context, dict) else None
     if isinstance(query, str) and query.strip():
         system += f"\n\nThe user is currently looking at an Explore search for: {query.strip()[:200]!r}."
+
+    if communities_checked:
+        system += "\n\nConversation note: the app has already shown the matching communities for this conversation."
 
     wire: list[dict[str, Any]] = [{"role": "system", "content": system}, *convo]
     page_created = isinstance(context, dict) and context.get("page_created") is True
@@ -455,6 +659,26 @@ async def run_assistant_turn_async(messages: Any, context: Any = None) -> dict:
                     result, found = await _run_search(q)
                     if found is not None:
                         searched_query, summary = q, found
+                elif call.name == "propose_find_communities":
+                    found = _build_find_communities(call.arguments)
+                    if found is None:
+                        result = json.dumps({"error": "query is required"})
+                    else:
+                        action = found
+                        result = json.dumps({"ok": True, "note": "The app will show the matching communities."})
+                elif call.name == "propose_create_community":
+                    if not communities_checked:
+                        result = json.dumps(
+                            {"error": "Not allowed yet. Call propose_find_communities first; the app must show the "
+                                      "matching communities before a new one is drafted."}
+                        )
+                    else:
+                        drafted = _build_create_community(call.arguments)
+                        if drafted is None:
+                            result = json.dumps({"error": "name and purpose are required"})
+                        else:
+                            action = drafted
+                            result = json.dumps({"ok": True, "note": "Drafted. The researcher edits and confirms in the UI."})
                 elif call.name == "propose_create_page":
                     if not allow_propose:
                         result = json.dumps(
@@ -478,11 +702,14 @@ async def run_assistant_turn_async(messages: Any, context: Any = None) -> dict:
         return {"reply": UNAVAILABLE_REPLY}
 
     if not reply:
-        reply = (
-            "Done. Confirm below to create it."
-            if action
-            else "Tell me what you work on or want to track and I'll look at what exists."
-        )
+        if action and action.get("type") == "find_communities":
+            reply = "Let me check which communities already exist."
+        elif action and action.get("type") == "create_community":
+            reply = "Here is a draft. Edit it below if you like."
+        elif action:
+            reply = "Done. Confirm below to create it."
+        else:
+            reply = "Tell me what you work on or want to track and I'll look at what exists."
 
     reply, related = split_related(reply)
     sources = public_sources(summary) if summary else []
@@ -498,6 +725,9 @@ async def run_assistant_turn_async(messages: Any, context: Any = None) -> dict:
     }
     if action is not None:
         out["action"] = action
+        if action.get("type") in ("find_communities", "create_community"):
+            # A community step is not a topic search: nothing to cite or follow up.
+            out.update({"query": None, "related": [], "sources": []})
     elif should_offer_choices(convo, searched=searched, user_work=user_work, page_created=page_created):
         out["choices"] = list(VISIBILITIES)
         out["reply"] = strip_choice_text(reply)

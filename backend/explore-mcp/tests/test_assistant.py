@@ -273,7 +273,7 @@ def test_strip_choice_text_keeps_the_rest_and_never_returns_empty():
 
 
 def test_the_system_prompt_only_offers_what_it_can_do():
-    for needed in ("Find resources", "Create a living page", "Show their pages", "Communities are coming soon"):
+    for needed in ("Find resources", "Create a living page", "Show their pages", "Find, join or create a community"):
         assert needed in asst._SYSTEM
     assert "never list Private / Team / Public" in asst._SYSTEM
 
@@ -446,3 +446,176 @@ def test_openfda_indication_text_is_trimmed():
     assert openfda._indication_text({"indications_and_usage": ["1 INDICATIONS AND USAGE  BIZENGRI is for NRG1+ cancers."]}) == "BIZENGRI is for NRG1+ cancers."
     assert openfda._indication_text({}) is None
     assert len(openfda._indication_text({"indications_and_usage": ["x " * 400]})) <= 301
+
+
+# ── communities: find first, then draft ─────────────────────────────────────────
+
+def _callj(tool, args):
+    return ToolCall(id=f"c-{tool}", name=tool, arguments=args, arguments_json=json.dumps(args))
+
+
+ASK_COMMUNITY = [{"role": "user", "content": "Create a community on KRAS in pancreatic cancer"}]
+NEW_COMMUNITY = [
+    *ASK_COMMUNITY,
+    {"role": "assistant", "content": "Let me check which communities already exist."},
+    {"role": "user", "content": "Create a new community on KRAS in pancreatic cancer"},
+]
+
+
+def test_prompt_knows_communities_and_forbids_inventing_them():
+    assert "propose_find_communities" in asst._SYSTEM
+    assert "FIRST call propose_find_communities" in asst._SYSTEM
+    assert "never describe, name or invent communities" in asst._SYSTEM
+    assert "Communities are coming soon" not in asst._SYSTEM
+
+
+def test_asking_for_a_community_proposes_a_search_not_a_creation(monkeypatch):
+    Script(
+        monkeypatch,
+        [
+            _tools(_call("propose_find_communities", query="KRAS pancreatic cancer")),
+            _text("Checking existing communities first."),
+        ],
+    )
+    out = _run(ASK_COMMUNITY)
+    assert out["action"] == {"type": "find_communities", "query": "KRAS in pancreatic cancer"}
+    assert "choices" not in out  # no Private / Team / Public buttons for a community
+
+
+def test_a_community_cannot_be_drafted_before_the_matches_were_shown(monkeypatch):
+    # Even if the model tried to draft, a request with no matches shown yet only
+    # ever gets the find step, and the model is not consulted.
+    s = Script(monkeypatch, [_tools(_callj("propose_create_community", {"name": "KRAS Pancreatic", "purpose": "Work on KRAS in PDAC"}))])
+    out = _run(ASK_COMMUNITY)  # no communities_checked in the context
+    assert out["action"]["type"] == "find_communities"
+    assert s.events == []
+
+
+def test_after_the_matches_were_shown_a_draft_is_accepted(monkeypatch):
+    Script(
+        monkeypatch,
+        [
+            _tools(_callj("propose_create_community", {"name": "KRAS in Pancreatic Cancer", "purpose": "Researchers working on KRAS-driven PDAC."})),
+            _text("Here is a draft."),
+        ],
+    )
+    out = _run(NEW_COMMUNITY, {"communities_checked": True})
+    assert out["action"] == {
+        "type": "create_community",
+        "name": "KRAS in Pancreatic Cancer",
+        "purpose": "Researchers working on KRAS-driven PDAC.",
+    }
+
+
+def test_an_unusable_draft_falls_back_to_a_plain_one_from_the_topic(monkeypatch):
+    Script(monkeypatch, [_tools(_callj("propose_create_community", {"name": "KR", "purpose": ""}))])
+    out = _run(NEW_COMMUNITY, {"communities_checked": True})
+    assert out["action"] == {
+        "type": "create_community",
+        "name": "KRAS in pancreatic cancer Community",
+        "purpose": "Researchers working on KRAS in pancreatic cancer.",
+    }
+
+
+def test_communities_checked_must_be_exactly_true(monkeypatch):
+    for flag in ("true", 1, None):
+        s = Script(monkeypatch, [_tools(_callj("propose_create_community", {"name": "Some Name", "purpose": "Some purpose"}))])
+        out = _run(NEW_COMMUNITY, {"communities_checked": flag})
+        assert out["action"]["type"] == "find_communities", flag  # never a draft
+        assert s.events == [], flag
+
+
+# ── community requests are never topic searches ─────────────────────────────────
+
+
+def test_extract_community_topic_strips_people_and_places():
+    ex = asst.extract_community_topic
+    assert ex("Create a community for neuro-oncology researchers at UAB") == "neuro-oncology"
+    assert ex("Create a new community on neuro-oncology") == "neuro-oncology"
+    assert ex("Find a community for people working on KRAS in pancreatic cancer") == "KRAS in pancreatic cancer"
+    assert ex("Is there a community for scientists studying EGFR resistance?") == "EGFR resistance"
+    assert ex("Start a community on CAR-T cell therapy from MD Anderson") == "CAR-T cell therapy"
+    assert ex("I'd like to find or create a community.") is None
+    assert ex("Create a community for my research") is None
+    assert ex("Create a community") is None
+
+
+def test_is_community_request():
+    yes = ["Create a community for neuro-oncology researchers at UAB", "I'd like to find or create a community.", "Is there a community on KRAS?"]
+    no = ["What are microbial communities in the gut?", "I need info on microbial communities", "Summarize KRAS in pancreatic cancer"]
+    assert all(asst.is_community_request(t) for t in yes)
+    assert not any(asst.is_community_request(t) for t in no)
+
+
+def test_a_community_request_with_a_topic_goes_straight_to_the_match_check_with_no_search(monkeypatch):
+    s = Script(monkeypatch, [])  # the model is never consulted and nothing is searched
+    out = _run([{"role": "user", "content": "Create a community for neuro-oncology researchers at UAB"}])
+    assert out["action"] == {"type": "find_communities", "query": "neuro-oncology"}
+    assert out["query"] is None and out["related"] == [] and out["sources"] == []
+    assert "choices" not in out
+    assert s.events == [] and s.searches == []
+
+
+def test_the_chip_message_has_no_topic_so_it_asks_for_one_without_searching(monkeypatch):
+    s = Script(monkeypatch, [])
+    out = _run([{"role": "user", "content": "I'd like to find or create a community."}])
+    assert out["reply"] == asst.COMMUNITY_TOPIC_QUESTION
+    assert "action" not in out and out["query"] is None and out["sources"] == []
+    assert s.events == []
+
+
+def test_the_answer_to_the_topic_question_is_the_topic_not_a_search(monkeypatch):
+    s = Script(monkeypatch, [])
+    out = _run(
+        [
+            {"role": "user", "content": "I'd like to find or create a community."},
+            {"role": "assistant", "content": asst.COMMUNITY_TOPIC_QUESTION},
+            {"role": "user", "content": "neuro-oncology researchers at UAB"},
+        ]
+    )
+    assert out["action"] == {"type": "find_communities", "query": "neuro-oncology"}
+    assert s.events == [] and s.searches == []
+
+
+def test_create_a_new_community_after_the_matches_goes_to_the_draft_not_back_to_the_check(monkeypatch):
+    Script(
+        monkeypatch,
+        [_tools(_callj("propose_create_community", {"name": "Neuro-oncology at UAB", "purpose": "Neuro-oncology researchers."})), _text("x")],
+    )
+    out = _run(
+        [
+            {"role": "user", "content": "Create a community for neuro-oncology researchers at UAB"},
+            {"role": "assistant", "content": "Let me check which communities already exist."},
+            {"role": "user", "content": "Create a new community on neuro-oncology"},
+        ],
+        {"communities_checked": True},
+    )
+    assert out["action"] == {"type": "create_community", "name": "Neuro-oncology at UAB", "purpose": "Neuro-oncology researchers."}
+    assert "existing communities first" not in out["reply"]
+    assert out["query"] is None and out["sources"] == []
+
+
+def test_a_different_find_request_after_the_check_is_a_find_again_not_a_draft(monkeypatch):
+    Script(monkeypatch, [])
+    out = _run(
+        [
+            {"role": "user", "content": "Find a community on KRAS"},
+            {"role": "assistant", "content": "Let me check which communities already exist."},
+            {"role": "user", "content": "Find a community on EGFR"},
+        ],
+        {"communities_checked": True},
+    )
+    assert out["action"] == {"type": "find_communities", "query": "EGFR"}
+
+
+def test_a_model_proposed_community_action_carries_no_search_extras(monkeypatch):
+    # A phrasing the code does not recognise, where the model itself proposes the check.
+    Script(monkeypatch, [_tools(_callj("propose_find_communities", {"query": "KRAS"})), _text("Checking.")])
+    out = _run([{"role": "user", "content": "Any group for KRAS people?"}])
+    assert out["action"] == {"type": "find_communities", "query": "KRAS"}
+    assert out["query"] is None and out["related"] == [] and out["sources"] == []
+
+
+def test_prompt_has_the_community_examples_and_never_searches_for_them():
+    assert "neuro-oncology" in asst._SYSTEM
+    assert "Never run search for a community request" in asst._SYSTEM
