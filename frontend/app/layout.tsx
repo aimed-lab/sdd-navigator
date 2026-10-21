@@ -7,6 +7,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import GeneralFeedback from "@/components/feedback/GeneralFeedback";
+import AssistantChat from "@/components/explore/AssistantChat";
 
 // Serif for editorial titles (Explore, homepage tiles). Exposed as --font-title,
 // used by the `font-title` Tailwind class. Body and labels keep Inter/Geist.
@@ -47,6 +48,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Floating, out of normal flow — available on every page, unlike
               the per-page card it replaced. See its own docstring. */}
           <GeneralFeedback />
+          {/* The AI assistant side panel: mounted once so the chat survives
+              moving between Explore and /pages. Renders only on those routes. */}
+          <AssistantChat />
         </AuthProvider>
         <Analytics />
         <SpeedInsights />

@@ -20,7 +20,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { labelForKind } from "@/components/CategoryStrip";
+import { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
 import CommunityTiles from "@/components/explore/CommunityTiles";
 import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
@@ -112,7 +112,13 @@ function SearchResults() {
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  // ?category=<kind> opens that section (the assistant's quick facts link here).
+  const categoryParam = searchParams.get("category");
+  const validCategory = categoryParam && CATEGORIES.some((c) => c.kind === categoryParam) ? categoryParam : null;
+  const [selected, setSelected] = useState<string | null>(validCategory);
+  useEffect(() => {
+    if (validCategory) setSelected(validCategory);
+  }, [validCategory]);
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is

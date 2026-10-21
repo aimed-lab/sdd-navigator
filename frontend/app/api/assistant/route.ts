@@ -43,12 +43,16 @@ export async function POST(req: Request) {
   }
   const ctx = record.context && typeof record.context === "object" ? (record.context as Record<string, unknown>) : {};
   const query = typeof ctx.query === "string" ? ctx.query.trim().slice(0, 200) : "";
+  const pageCreated = ctx.page_created === true;
 
   try {
     const res = await fetch(`${EXPLORE_API_URL}/api/assistant-turn`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({ messages, context: query ? { query } : {} }),
+      body: JSON.stringify({
+        messages,
+        context: { ...(query ? { query } : {}), ...(pageCreated ? { page_created: true } : {}) },
+      }),
     });
     if (!res.ok) throw new Error(`assistant backend responded ${res.status}`);
     return NextResponse.json(await res.json());
