@@ -19,7 +19,14 @@
 
 import { useState } from "react";
 
-export default function CopyLinkButton({ slug }: { slug: string }) {
+export default function CopyLinkButton({
+  slug,
+  label = "Copy link",
+}: {
+  slug: string;
+  /** The idle label, e.g. "Share · copy link". */
+  label?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   return (
@@ -41,7 +48,7 @@ export default function CopyLinkButton({ slug }: { slug: string }) {
       className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1.5"
     >
       <span className="material-symbols-outlined text-base">{copied ? "check" : "link"}</span>
-      {copied ? "Link copied" : "Copy link"}
+      {copied ? "Link copied" : label}
     </button>
   );
 }

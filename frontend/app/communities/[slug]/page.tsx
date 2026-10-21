@@ -1,7 +1,17 @@
-// Community detail — /communities/[slug]. Purpose, request/leave, the
-// project list, and — admin only — the pending-requests queue, add-by-email,
-// and the member roster (roles + remove). Not a redirect for a signed-out
-// visitor: communities are publicly readable, same as /communities itself.
+// Community detail — /communities/[slug]. A banner header (name, purpose, Join,
+// Share, QR code) over a tab bar: Home, Resources, Living pages, Events,
+// Members, Showcase. Tabs follow the community's configured sections
+// (lib/server/communityHome: visibleTabs); the tab is `?tab=`.
+//
+// Not a redirect for a signed-out visitor: communities are publicly readable.
+// What a non-member sees is the community's public_preview level:
+//   'minimal'  — name and purpose.
+//   'standard' — plus counts and a small feed preview (CommunityPublicPreview).
+//   'open'     — also the roster, the Explore feed, and the pinned resource
+//                (and its files, once the pinned-resource migration is
+//                applied), look-only, with a "Join to get updates" prompt.
+// Admins also get the Manage community card (sections, preview level, feed
+// config, requests, add-by-email, roster, leave / delete) at the foot of Home.
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -11,18 +21,27 @@ import {
   getCommunityFeedPreview,
   getCommunityStats,
   getMembership,
+  getPinnedResource,
   listAnnouncements,
   listCommunityFeedItems,
   listCommunityMembers,
   listCommunityProjects,
   listCommunityResources,
+  listMemberLivingPages,
   listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
 import { listShowcaseByCommunity } from "@/lib/server/showcase";
 import { resolveExploreSources, resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
+import {
+  buildUpdates,
+  latestDate,
+  membersWorkingOn,
+  resolveTab,
+  viewerAccess,
+  visibleTabs,
+} from "@/lib/server/communityHome/communityHome";
 import { getCurrentUser } from "@/lib/auth";
-import JoinLeaveControl from "@/components/communities/JoinLeaveControl";
 import AddMemberByEmailForm from "@/components/communities/AddMemberByEmailForm";
 import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel";
 import MemberRoster from "@/components/communities/MemberRoster";
@@ -34,15 +53,20 @@ import ExploreSection from "@/components/communities/ExploreSection";
 import EmptySection from "@/components/communities/EmptySection";
 import CollapsibleSection from "@/components/communities/CollapsibleSection";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
-import PageHeader, { PageShell } from "@/components/PageHeader";
+import { PageShell } from "@/components/PageHeader";
 import DeleteCommunityButton from "@/components/communities/DeleteCommunityButton";
-import CopyLinkButton from "@/components/communities/CopyLinkButton";
 import LeaveButton from "@/components/communities/LeaveButton";
 import ManageCommunityCard from "@/components/communities/ManageCommunityCard";
 import SectionsEditor from "@/components/communities/SectionsEditor";
 import ExploreFeedEditor from "@/components/communities/ExploreFeedEditor";
 import PublicPreviewEditor from "@/components/communities/PublicPreviewEditor";
 import CommunityPublicPreview from "@/components/communities/CommunityPublicPreview";
+import CommunityHeader from "@/components/communities/CommunityHeader";
+import CommunityTabs from "@/components/communities/CommunityTabs";
+import PinnedResourceCard from "@/components/communities/PinnedResourceCard";
+import UpdatesList from "@/components/communities/UpdatesList";
+import LivingPagesList from "@/components/communities/LivingPagesList";
+import { DigestCard, MembersWorkingOnCard, UpcomingEventsCard } from "@/components/communities/HomeSideCards";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -54,162 +78,102 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 export default async function CommunityDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string; join?: string }>;
 }) {
   const { slug } = await params;
+  const query = await searchParams;
   const community = await getCommunityBySlug(slug);
   if (!community) notFound();
 
   // Claim any community_members row added by email before this account
-  // existed or before it was ever linked — normally done by
-  // listCommunities() (via the SAME RPC), but a direct link or a QR code
-  // straight to this page never goes through that. Must finish before
-  // getMembership() below reads this viewer's row, so it's awaited here,
-  // not folded into the Promise.all — a race between the two would read
-  // stale (still-unlinked) membership state.
+  // existed (a direct link or a QR code straight to this page never goes
+  // through listCommunities()). Awaited BEFORE getMembership() reads this
+  // viewer's row, not folded into the Promise.all: a race would read stale,
+  // still-unlinked membership state.
   await claimPendingCommunityMemberships();
 
-  const [user, membership, projects, stats] = await Promise.all([
+  const [user, membership, stats] = await Promise.all([
     getCurrentUser(),
     getMembership(community.id),
-    listCommunityProjects(community.id),
     getCommunityStats(community.id),
   ]);
 
-  // NULL community.sections -> the full default order, every section
-  // enabled (see resolveSections' own comment) — every community that
-  // predates this feature renders exactly as it did before, unchanged.
   const orderedSections = resolveSections(community.sections);
-
-  // Admin-only reads — listPendingRequests/listCommunityMembers already
-  // degrade to [] for a non-admin caller (RLS), so this isn't the real
-  // gate, just avoids firing them for a viewer who can't see anything back.
-  const [pendingRequests, members] = membership.isAdmin
-    ? await Promise.all([listPendingRequests(community.id), listCommunityMembers(community.id)])
-    : [[], []];
-
   const isMember = membership.state === "active";
+  const viewer = { isMember, publicPreview: community.public_preview };
+  const access = viewerAccess(viewer);
 
-  // What a non-member sees before joining
-  // (2026-09-18_community_public_preview.sql, extended by
-  // 2026-09-20_community_public_roster.sql) — three levels now:
-  //   'minimal'  — name and purpose only.
-  //   'standard' — the above plus member/feed COUNTS and a 3-4 item feed
-  //                PREVIEW (CommunityPublicPreview below).
-  //   'open'     — the SAME Members and Explore sections a member sees,
-  //                full roster (names/institution/focus, no Connect) and
-  //                full feed (every item, but look-only — no click-
-  //                through, no bookmark, no "Show all"). Replaces the
-  //                'standard' preview card entirely, doesn't add to it.
-  // Applies to ANY non-member — signed out or signed in — not just a
-  // signed-out visitor; `isMember` alone (not session presence) is what
-  // this branches on throughout the page.
-  const openPreview = !isMember && community.public_preview === "open";
+  const tabs = visibleTabs(orderedSections, viewer);
+  const tab = resolveTab(query.tab, tabs);
+  const sectionOn = (key: string) => orderedSections.some((s) => s.key === key && s.enabled);
+
+  // 'standard': the small preview card for a non-member. Replaced outright by
+  // the real content under 'open'.
   const showPublicPreview = !isMember && community.public_preview === "standard";
-
-  // Members AND Explore share one gate: an active member always sees
-  // both; a non-member sees both together only under 'open', never one
-  // without the other (there's no partial state in the spec this
-  // implements). listMemberRoster/listCommunityFeedItems both now work
-  // signed-out too (see their own comments) — RLS/the RPC's own WHERE
-  // clause is what actually decides whether anything comes back for a
-  // non-member, this flag just decides whether to bother asking.
-  const canSeeMembersAndFeed = isMember || openPreview;
-
-  // Member-facing roster (name + role, admins first) for the Members
-  // section below. listMemberRoster degrades to [] for anyone the RPC
-  // doesn't cover (not a member, and not an 'open' community) — fetched
-  // only when it might show something, same "avoid firing it for a viewer
-  // who can't see anything back" reasoning as the admin-only reads above.
-  const memberRoster = canSeeMembersAndFeed ? await listMemberRoster(community.id) : [];
-
-  // The Members section header's own count — deliberately NOT
-  // stats.memberCount whenever the real roster is visible.
-  // getCommunityStats() / community_member_stats() is a public,
-  // signed-out-safe activity number (COUNT(*) WHERE status = 'active')
-  // used all over the app — the /communities grid, the home page,
-  // CommunityCard — and it has no idea `hidden` exists; it counts a
-  // hidden staff row same as anyone else's. Whenever the roster itself is
-  // visible (a member, or a non-member on an 'open' community), the
-  // header above it has to match what's rendered below it, or it reads
-  // as the exact bug this section fixes ("says twelve, renders eleven")
-  // — so this is memberRoster.length (the SAME hidden-aware,
-  // signed-up-included list MembersSection renders) whenever
-  // canSeeMembersAndFeed, and only falls back to the public stat for a
-  // non-member who can't see the roster at all, who never sees
-  // roster.length in the first place (memberRoster is [] for them, not a
-  // smaller true count).
-  const membersSectionCount = canSeeMembersAndFeed ? memberRoster.length : stats.memberCount;
-
-  // getCommunityFeedPreview goes through the SAME community_feed_items
-  // table listCommunityFeedItems reads below, via RLS
-  // ("Community feed items: public preview select") rather than a
-  // service-role bypass — see that function's own comment. Only ever the
-  // 'standard' case's capped 3-4 items; 'open' uses the full
-  // listCommunityFeedItems read instead (below), same as a member gets.
   const feedPreview = showPublicPreview
     ? await getCommunityFeedPreview(community.id)
     : { count: 0, items: [] };
 
-  // Announcements — same "only fetch when isMember" reasoning as
-  // memberRoster above; a non-member's fetch would return [] anyway
-  // (community_announcements' own is_community_member() SELECT policy),
-  // this just avoids firing it for a viewer who can't see anything back.
-  // Author names are resolved through the SAME roster fetched above
-  // (community_member_roster), never a raw email — see AnnouncementsSection's
-  // own comment on why.
-  const announcements = isMember ? await listAnnouncements(community.id) : [];
+  // Admin-only reads (they degrade to [] for anyone else anyway).
+  const [pendingRequests, members, projects] = await Promise.all([
+    membership.isAdmin ? listPendingRequests(community.id) : Promise.resolve([]),
+    membership.isAdmin ? listCommunityMembers(community.id) : Promise.resolve([]),
+    isMember ? listCommunityProjects(community.id) : Promise.resolve([]),
+  ]);
 
-  // Resources — same "only fetch when isMember" reasoning as announcements.
-  // added_by isn't resolved to a name here right now: ResourcesSection
-  // doesn't render "Added by" (see its own comment on why and when it
-  // comes back), so there's nothing here that needs authorNames yet.
-  const resources = isMember ? await listCommunityResources(community.id) : [];
-
-  // The stored Explore feed — gated on canSeeMembersAndFeed, not isMember
-  // alone, so an 'open' community's non-member also gets the full feed
-  // (rendered non-interactively — see ExploreSection's own `interactive`
-  // prop below). Rendered by its own Explore section (ExploreSection),
-  // separate from Resources — see that component's own comment for why
-  // the two split.
-  const feedItems = canSeeMembersAndFeed ? await listCommunityFeedItems(community.id) : [];
-
-  // Showcase — UNLIKE resources/announcements/the feed above, fetched
-  // unconditionally, not only for an active member: this lists PUBLISHED
-  // Promote articles (listShowcaseByCommunity's own .eq("published", true)),
-  // which stay publicly readable regardless of community membership — see
-  // database/migrations/2026-09-13_promote_showcase_community.sql. Gating
-  // this fetch on isMember the way the others are would wrongly hide a
-  // community's own published content from a signed-out visitor.
-  const showcaseEntries = await listShowcaseByCommunity(community.id);
-
+  // The roster, when this viewer may see it. Its length (not the public stat)
+  // is the member count whenever the roster is visible, so the header matches
+  // what the Members tab lists (hidden staff rows are not in it).
+  const memberRoster = access.seesMembers ? await listMemberRoster(community.id) : [];
+  const memberCount = access.seesMembers ? memberRoster.length : stats.memberCount;
   const authorNames: Record<string, string> = Object.fromEntries(
-    memberRoster.map((m) => [m.user_id, m.display_name])
+    memberRoster.filter((m) => m.user_id).map((m) => [m.user_id as string, m.display_name])
   );
 
-  // True only when the viewer IS an admin and the roster (fetched above,
-  // admin-only) shows no OTHER active admin. Meaningless for any other
-  // role — JoinLeaveControl only ever reads this when membership.role is
-  // "admin". Computed here, not in the component, because `members` is
-  // only ever fetched for an admin viewer in the first place.
+  // Living pages made by members (public ones, plus team pages this viewer can
+  // read — the pages table's own RLS decides). Only where the roster is visible.
+  const livingPages = access.seesMembers
+    ? await listMemberLivingPages(memberRoster.flatMap((m) => (m.user_id ? [m.user_id] : [])))
+    : [];
+
+  // The pinned resource and the updates stream, where this viewer may see them.
+  const pinned = access.seesPinned ? await getPinnedResource(community.id) : null;
+  const needUpdates = tab === "home" && access.seesUpdates;
+  const [announcements, feedItems] = await Promise.all([
+    tab === "home" && access.seesUpdates ? listAnnouncements(community.id) : Promise.resolve([]),
+    access.seesUpdates && (tab === "home" || tab === "resources") ? listCommunityFeedItems(community.id) : Promise.resolve([]),
+  ]);
+  const resources = tab === "resources" && access.seesResources ? await listCommunityResources(community.id) : [];
+  const showcaseEntries = tab === "showcase" ? await listShowcaseByCommunity(community.id) : [];
+
+  const updates = needUpdates ? buildUpdates(announcements, feedItems) : [];
+  const updatedAt = latestDate([
+    community.explore_refreshed_at,
+    announcements[0]?.created_at,
+    pinned?.updated_at,
+    ...livingPages.map((p) => p.last_refreshed_at ?? p.updated_at),
+  ]);
+
   const isLastAdmin =
     membership.isAdmin && !members.some((m) => m.role === "admin" && m.user_id !== user?.id);
 
+  const hrefFor = (t: string) => `/communities/${slug}?tab=${t}`;
+  // Where "Join to get updates" goes: sign in (back to the join prompt) when
+  // signed out, else straight to the join prompt.
+  const joinHref =
+    membership.state === "signed_out"
+      ? `/login?callbackUrl=${encodeURIComponent(`/communities/${slug}?join=1`)}`
+      : `/communities/${slug}?join=1`;
+  const showJoinNotice = query.join === "1" && !isMember && membership.state !== "pending";
+
   return (
     <PageShell>
-      {/* Way back to the community list — same breadcrumb pattern as
-          Explore's own back-to-project link
-          (app/explore/[topic]/page.tsx), and the project page's own
-          back-to-community link above it. Its own div, outside the gap-12
-          section stack below, so its spacing to the header is set directly
-          (mb-4, matching the project page's own back-link wrapper) instead
-          of inherited from that stack's gap. */}
       <div className="mb-4">
         {/* Communities is a category of Explore now, not its own nav
-            destination (see components/explore/CommunitiesResultsSection.tsx) —
-            this returns there rather than to /communities, which still
-            works as a URL but is no longer where anyone arrives from. */}
+            destination — this returns there. */}
         <Link
           href="/explore#communities"
           className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
@@ -219,203 +183,182 @@ export default async function CommunityDetailPage({
         </Link>
       </div>
 
-      <div className="flex flex-col gap-12">
-        <PageHeader
-          title={community.name}
-          subtitle={community.description || undefined}
-          className="mb-0"
-          action={
-            <div className="flex flex-col items-start sm:items-end gap-3">
-              <JoinLeaveControl
-                communityId={community.id}
-                communityName={community.name}
-                slug={community.slug}
-                isOpen={community.is_open}
-                membership={membership}
-              />
-              {/* Any active member, not just admins: the point is members
-                  can bring people in themselves. */}
-              {isMember && <CopyLinkButton slug={community.slug} />}
-            </div>
-          }
+      <div className="flex flex-col gap-6">
+        <CommunityHeader
+          community={community}
+          membership={membership}
+          memberNames={memberRoster.map((m) => m.display_name)}
+          memberCount={memberCount}
+          pageCount={access.seesMembers ? livingPages.length : null}
+          updatedAt={updatedAt}
         />
 
-        {/* The pitch for a non-member on a 'standard' community — see
-            CommunityPublicPreview's own comment on why this sits here
-            (right under the header, before anyone has to click into a
-            section) rather than as one more CollapsibleSection. Absent
-            entirely, not an empty version of itself, when public_preview
-            is 'minimal' (nothing to show), the viewer is already a member
-            (who sees the real sections below instead), OR public_preview
-            is 'open' — there, the real Members/Explore sections below
-            replace this card outright rather than sitting alongside it. */}
-        {showPublicPreview && (
-          <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />
+        {showJoinNotice && (
+          <p className="rounded-xl bg-primary/10 text-primary px-4 py-3 font-body-md text-body-md">
+            You opened a join link.{" "}
+            {membership.state === "signed_out"
+              ? "Sign in to join this community."
+              : community.is_open
+                ? "Use the Join button above to join."
+                : "Use the button above to send a request to join."}
+          </p>
         )}
 
-        {/* Enabled sections, in the configured order (default: every
-            section, projects first — the same position it's always
-            rendered in), each a card (CollapsibleSection — glass-panel,
-            same disclosure idiom as ManageCommunityCard below, which is
-            deliberately on a quieter surface than these). Projects starts
-            open; everything else starts closed. Only "projects", "members",
-            "announcements", "resources", and "explore" have real content
-            today, per spec; the rest render a "nothing here yet"
-            placeholder deliberately, not as something to hide — and have
-            no count or action to show while collapsed, unlike those five.
+        <CommunityTabs slug={slug} tabs={tabs} active={tab} />
 
-            Resources (hand-curated) and Explore (Explore's generated
-            findings) are deliberately TWO sections, not one — a community
-            can enable either independently: curated tools with no feed, or
-            a feed with nothing curated yet. See ResourcesSection.tsx's own
-            comment for why they split.
+        {/* ── Home ───────────────────────────────────────────────────── */}
+        {tab === "home" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
+              {showPublicPreview && (
+                <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />
+              )}
+              {pinned && <PinnedResourceCard resource={pinned} />}
+              {access.seesUpdates ? (
+                <UpdatesList
+                  updates={updates}
+                  linked={isMember}
+                  showJoinPrompt={access.joinPrompt}
+                  joinHref={isMember ? "" : joinHref}
+                />
+              ) : (
+                !showPublicPreview && (
+                  <section className="rounded-2xl glass-panel p-5 flex flex-col gap-2">
+                    <h2 className="font-headline-sm text-headline-sm text-on-background">Updates</h2>
+                    <p className="font-body-md text-body-md text-secondary">
+                      Join to get this community&apos;s announcements and new findings.
+                    </p>
+                  </section>
+                )
+              )}
 
-            Announcements, Resources, and Explore each render themselves
-            (own their own CollapsibleSection) rather than being wrapped
-            here. Announcements/Resources need that because their header
-            action ("New announcement" / "Add resource") and create/add
-            form share one piece of client state (see their own comments);
-            Explore has no add form at all — it renders itself only so its
-            "no items yet" copy and per-kind grouping live next to the data
-            they describe, not scattered into this switch. Projects doesn't
-            need any of that: its action is a plain link, so the page
-            (server) builds it and hands it straight to CollapsibleSection's
-            `action` prop here.
+              {isMember && sectionOn("announcements") && (
+                <AnnouncementsSection
+                  title={SECTION_LABEL.announcements}
+                  communityId={community.id}
+                  slug={community.slug}
+                  isAdmin={membership.isAdmin}
+                  announcements={announcements}
+                  authorNames={authorNames}
+                />
+              )}
 
-            NON-MEMBER FILTER: a signed-out visitor (or any non-member) is
-            member-gated OUT of every section here except "showcase" —
-            projects, announcements, and resources all resolve to an empty
-            fetch for them (their own RLS policies, not a check here), so
-            rendering those headers just shows a collapsed disclosure with
-            nothing behind it: something to click that goes nowhere,
-            telling a visitor the community is emptier than it is.
-            "showcase" is the one exception because its own read
-            (listShowcaseByCommunity) is deliberately public regardless of
-            membership — see that fetch's own comment above. "members" and
-            "explore" join it too, but ONLY when canSeeMembersAndFeed
-            ('open' — see that flag's own comment): those two DO have real
-            content for such a non-member, unlike the others. The
-            'standard' preview card above is what replaces everything this
-            filter still removes at that level. */}
-        {orderedSections
-          .filter((s) => s.enabled)
-          .filter(
-            (s) =>
-              isMember ||
-              s.key === "showcase" ||
-              (canSeeMembersAndFeed && (s.key === "members" || s.key === "explore"))
-          )
-          .map((s) => {
-            switch (s.key) {
-              case "projects":
-                return (
-                  <CollapsibleSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    defaultOpen
-                    action={
-                      isMember ? (
-                        <Link
-                          href={`/projects/new?community=${community.id}`}
-                          className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm flex items-center gap-1.5 shrink-0"
-                        >
-                          <span className="material-symbols-outlined text-[18px]">add</span>
-                          New project
-                        </Link>
-                      ) : null
-                    }
-                  >
-                    <CommunityProjectsList projects={projects} />
-                  </CollapsibleSection>
-                );
-              case "members":
-                // Reachable for a non-member again, but only when
-                // canSeeMembersAndFeed (the sections filter above already
-                // enforces that) — `canView` is what actually lets
-                // MembersSection render real cards instead of "Join to
-                // see"; `isMember` stays separate so a non-member on an
-                // 'open' community still gets no Connect button and no
-                // self-editing controls (see that component's own comment).
-                return (
-                  <CollapsibleSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    count={membersSectionCount}
-                  >
-                    <MembersSection
-                      canView={canSeeMembersAndFeed}
-                      isMember={isMember}
-                      roster={memberRoster}
-                      communityId={community.id}
-                      slug={slug}
-                      viewerUserId={user?.id ?? null}
-                    />
-                  </CollapsibleSection>
-                );
-              case "announcements":
-                return (
-                  <AnnouncementsSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    communityId={community.id}
-                    slug={community.slug}
-                    isAdmin={membership.isAdmin}
-                    announcements={announcements}
-                    authorNames={authorNames}
-                  />
-                );
-              case "resources":
-                return (
-                  <ResourcesSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    communityId={community.id}
-                    slug={community.slug}
-                    isAdmin={membership.isAdmin}
-                    resources={resources}
-                  />
-                );
-              case "explore":
-                return (
-                  <ExploreSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    feedItems={feedItems}
-                    // Only a real member gets the interactive view
-                    // (click-through, bookmark, "Show all") — a non-member
-                    // on an 'open' community sees the same items but
-                    // strictly look-only, per spec.
-                    interactive={isMember}
-                  />
-                );
-              case "showcase":
-                return (
-                  <CollapsibleSection
-                    key={s.key}
-                    title={SECTION_LABEL[s.key]}
-                    count={showcaseEntries.length}
-                  >
-                    {showcaseEntries.length === 0 ? (
-                      <EmptySection />
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {showcaseEntries.map((e) => (
-                          <ShowcaseCard key={e.id} entry={e} />
-                        ))}
-                      </div>
-                    )}
-                  </CollapsibleSection>
-                );
-              default:
-                return (
-                  <CollapsibleSection key={s.key} title={SECTION_LABEL[s.key]}>
-                    <EmptySection />
-                  </CollapsibleSection>
-                );
-            }
-          })}
+              {isMember && sectionOn("projects") && (
+                <CollapsibleSection
+                  title={SECTION_LABEL.projects}
+                  defaultOpen
+                  action={
+                    <Link
+                      href={`/projects/new?community=${community.id}`}
+                      className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm flex items-center gap-1.5 shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">add</span>
+                      New project
+                    </Link>
+                  }
+                >
+                  <CommunityProjectsList projects={projects} />
+                </CollapsibleSection>
+              )}
+            </div>
 
-        {membership.isAdmin && (
+            <aside className="flex flex-col gap-6 min-w-0">
+              {sectionOn("events") && <UpcomingEventsCard />}
+              {access.seesMembers && (
+                <MembersWorkingOnCard
+                  rows={membersWorkingOn(memberRoster)}
+                  membersHref={tabs.includes("members") ? hrefFor("members") : null}
+                />
+              )}
+              <DigestCard />
+            </aside>
+          </div>
+        )}
+
+        {/* ── Resources (hand-curated) and the Explore feed ──────────── */}
+        {tab === "resources" && (
+          <div className="flex flex-col gap-6">
+            {sectionOn("resources") && (
+              <ResourcesSection
+                title={SECTION_LABEL.resources}
+                communityId={community.id}
+                slug={community.slug}
+                defaultOpen
+                isAdmin={membership.isAdmin}
+                resources={resources}
+                pinnedId={pinned?.id ?? null}
+              />
+            )}
+            {sectionOn("explore") && (
+              <ExploreSection
+                title={SECTION_LABEL.explore}
+                feedItems={feedItems}
+                // Only a member gets click-through / bookmark; a non-member
+                // on an 'open' community sees the same items, look-only.
+                interactive={isMember}
+              />
+            )}
+            {access.joinPrompt && (
+              <p className="font-body-md text-body-md text-secondary">
+                <Link href={isMember ? hrefFor("resources") : joinHref} className="text-primary hover:underline underline-offset-4">
+                  Join to get updates
+                </Link>{" "}
+                and open the community&apos;s shared files.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── Living pages made by members ───────────────────────────── */}
+        {tab === "pages" && <LivingPagesList pages={livingPages} />}
+
+        {/* ── Events (empty for now) ─────────────────────────────────── */}
+        {tab === "events" && (
+          <div className="rounded-2xl glass-panel p-6">
+            <h2 className="font-headline-sm text-headline-sm text-on-background mb-1">Events</h2>
+            <p className="font-body-md text-body-md text-secondary">
+              No events yet. Talks and meetups will be listed here.
+            </p>
+          </div>
+        )}
+
+        {/* ── Members ────────────────────────────────────────────────── */}
+        {tab === "members" && (
+          <div className="flex flex-col gap-6">
+            <CollapsibleSection title={SECTION_LABEL.members} count={memberCount} defaultOpen>
+              <MembersSection
+                canView={access.seesMembers}
+                isMember={isMember}
+                roster={memberRoster}
+                communityId={community.id}
+                slug={slug}
+                viewerUserId={user?.id ?? null}
+              />
+            </CollapsibleSection>
+            {isMember && sectionOn("who_can_help") && (
+              <CollapsibleSection title={SECTION_LABEL.who_can_help}>
+                <EmptySection />
+              </CollapsibleSection>
+            )}
+          </div>
+        )}
+
+        {/* ── Showcase (public) ──────────────────────────────────────── */}
+        {tab === "showcase" && (
+          <CollapsibleSection title={SECTION_LABEL.showcase} count={showcaseEntries.length} defaultOpen>
+            {showcaseEntries.length === 0 ? (
+              <EmptySection />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {showcaseEntries.map((e) => (
+                  <ShowcaseCard key={e.id} entry={e} />
+                ))}
+              </div>
+            )}
+          </CollapsibleSection>
+        )}
+
+        {membership.isAdmin && tab === "home" && (
           <ManageCommunityCard>
             <SectionsEditor
               communityId={community.id}
@@ -458,14 +401,8 @@ export default async function CommunityDetailPage({
               />
             </div>
 
-            {/* Below the member list, separated — Leave and Delete
-                community are the two "leave this behind" actions,
-                together on one line. Leave is here (not in the header
-                corner) because that corner was stacking too many
-                controls; it only ever moves here for an ADMIN — a
-                non-admin member never sees this card at all (admin-only),
-                so their own Leave stays up in the header
-                (JoinLeaveControl). */}
+            {/* Leave and Delete community, together below the member list. A
+                non-admin's own Leave stays in the header (JoinLeaveControl). */}
             <div className="border-t border-outline-variant/20 pt-6 flex items-center gap-6">
               <LeaveButton
                 communityId={community.id}

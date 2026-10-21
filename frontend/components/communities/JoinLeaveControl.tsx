@@ -43,10 +43,12 @@ export default function JoinLeaveControl({
   if (membership.state === "signed_out") {
     return (
       <Link
-        href={`/login?callbackUrl=${encodeURIComponent(`/communities/${slug}`)}`}
-        className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm"
+        // ?join=1 survives the sign-in round trip, so someone who scanned the
+        // QR code lands back on the page with the join prompt showing.
+        href={`/login?callbackUrl=${encodeURIComponent(`/communities/${slug}?join=1`)}`}
+        className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md text-center"
       >
-        Sign in to request to join
+        {isOpen ? "Sign in to join" : "Sign in to request to join"}
       </Link>
     );
   }
@@ -120,7 +122,7 @@ export default function JoinLeaveControl({
         }}
         className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md disabled:opacity-50"
       >
-        {busy ? "…" : "Request to join"}
+        {busy ? "…" : isOpen ? "Join" : "Request to join"}
       </button>
       {error && <span className="font-body-sm text-body-sm text-error">{error}</span>}
     </div>

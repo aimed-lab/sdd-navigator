@@ -1336,9 +1336,10 @@ export type Announcement = {
 export async function listAnnouncements(communityId: string): Promise<Announcement[]> {
   noStore();
   const session = await getSession();
-  if (!session) return [];
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return [];
 
-  const { data, error } = await session.db
+  const { data, error } = await db
     .from("community_announcements")
     .select("id, community_id, author_id, title, body, created_at, updated_at")
     .eq("community_id", communityId)
@@ -1545,9 +1546,10 @@ function safeResourceUrl(v: string | null | undefined): { ok: true; url: string 
 export async function listCommunityResources(communityId: string): Promise<CommunityResource[]> {
   noStore();
   const session = await getSession();
-  if (!session) return [];
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return [];
 
-  const { data, error } = await session.db
+  const { data, error } = await db
     .from("community_resources")
     .select("id, community_id, added_by, title, resource_type, url, description, created_at, updated_at")
     .eq("community_id", communityId)
@@ -1555,11 +1557,98 @@ export async function listCommunityResources(communityId: string): Promise<Commu
 
   if (error || !data) return [];
 
-  const filesByResource = await listCommunityResourceFilesForCommunity(session.db, communityId);
+  const filesByResource = await listCommunityResourceFilesForCommunity(db, communityId);
   return (data as Omit<CommunityResource, "files">[]).map((r) => ({
     ...r,
     files: filesByResource.get(r.id) ?? [],
   }));
+}
+
+// ── Pinned resource ───────────────────────────────────────────────────────
+// 2026-10-22_community_pinned_resource.sql: `communities.pinned_resource_id`.
+// Read through its own query, NOT folded into getCommunityBySlug's select: if
+// that migration hasn't been applied yet, an unknown column would fail the
+// whole community read and 404 the page. Here a failed read is just "nothing
+// pinned".
+
+export type PinnedResource = CommunityResource;
+
+/** The id of the community's pinned resource, or null (none pinned, or the
+ *  migration isn't applied). Public read, same as the community itself. */
+export async function getPinnedResourceId(communityId: string): Promise<string | null> {
+  const db = getAnonServerClient();
+  if (!db) return null;
+  const { data, error } = await db
+    .from("communities")
+    .select("pinned_resource_id")
+    .eq("id", communityId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return ((data as { pinned_resource_id?: string | null }).pinned_resource_id ?? null) || null;
+}
+
+/** The pinned resource with its files (signed, short-lived URLs). Works
+ *  signed out: RLS decides whether anything comes back (members always; anyone
+ *  when the community is 'open' — the policies in the pinned-resource
+ *  migration). A resource the viewer can't read, or a file that can't be
+ *  signed for them, comes back as null / is left out; never an error. */
+export async function getPinnedResource(communityId: string): Promise<PinnedResource | null> {
+  noStore();
+  const pinnedId = await getPinnedResourceId(communityId);
+  if (!pinnedId) return null;
+
+  const session = await getSession();
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return null;
+
+  const { data, error } = await db
+    .from("community_resources")
+    .select("id, community_id, added_by, title, resource_type, url, description, created_at, updated_at")
+    .eq("id", pinnedId)
+    .eq("community_id", communityId)
+    .maybeSingle();
+  if (error || !data) return null;
+
+  const files = await listCommunityResourceFilesForCommunity(db, communityId, pinnedId);
+  return { ...(data as Omit<CommunityResource, "files">), files: files.get(pinnedId) ?? [] };
+}
+
+export type PinResourceResult = { status: "ok" } | { status: "error"; error: string };
+
+/** Pin one resource (or pass null to unpin) — admin only. "Communities: admin
+ *  update" is the real gate; the migration's trigger refuses a resource from
+ *  another community. Pinning replaces whatever was pinned before: there is
+ *  only ever one. */
+export async function setPinnedResource(
+  communityId: string,
+  resourceId: string | null
+): Promise<PinResourceResult> {
+  const { db } = await requireCurrentUser();
+
+  const membership = await getMembership(communityId);
+  if (!membership.isAdmin) {
+    return { status: "error", error: "Only a community admin can pin a resource." };
+  }
+
+  const { error } = await db
+    .from("communities")
+    .update({ pinned_resource_id: resourceId })
+    .eq("id", communityId);
+
+  if (error) {
+    console.error("setPinnedResource: update failed", error);
+    if (error.code === "P0001" && error.message) {
+      return { status: "error", error: `Couldn't pin — ${error.message}.` };
+    }
+    return {
+      status: "error",
+      error:
+        "Couldn't pin the resource. If this keeps happening, the pinned-resource migration may not have been applied yet (code: " +
+        (error.code ?? "unknown") +
+        ").",
+    };
+  }
+  return { status: "ok" };
 }
 
 export type CreateCommunityResourceResult =
@@ -1778,13 +1867,15 @@ async function signCommunityResourceFilePath(db: Db, path: string): Promise<stri
  *  the list, same posture as listShowcaseMedia. */
 async function listCommunityResourceFilesForCommunity(
   db: Db,
-  communityId: string
+  communityId: string,
+  resourceId?: string
 ): Promise<Map<string, CommunityResourceFile[]>> {
-  const { data, error } = await db
+  let query = db
     .from("community_resource_files")
     .select("id, resource_id, filename, size_bytes, url")
-    .eq("community_id", communityId)
-    .order("created_at", { ascending: true });
+    .eq("community_id", communityId);
+  if (resourceId) query = query.eq("resource_id", resourceId);
+  const { data, error } = await query.order("created_at", { ascending: true });
   if (error || !data) return new Map();
 
   const signed = await Promise.all(
@@ -2396,6 +2487,42 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
   }
 
   return { status: "ok", count: rows.length, emptySources };
+}
+
+// ── Living pages made by members ─────────────────────────────────────────
+
+export type MemberLivingPage = {
+  slug: string;
+  title: string;
+  seed_input: string;
+  visibility: "public" | "team";
+  updated_at: string;
+  last_refreshed_at: string | null;
+};
+
+/** Living pages created by the given members that this viewer may read:
+ *  public pages, plus team pages they can read (the `pages` table's own RLS,
+ *  "Pages: read", is the real gate — a private page never comes back, and a
+ *  team page only to its team). `ownerIds` are the members' user ids; the
+ *  owner id itself is never sent to the browser. */
+export async function listMemberLivingPages(ownerIds: string[]): Promise<MemberLivingPage[]> {
+  noStore();
+  const ids = Array.from(new Set(ownerIds.filter(Boolean)));
+  if (ids.length === 0) return [];
+
+  const session = await getSession();
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return [];
+
+  const { data, error } = await db
+    .from("pages")
+    .select("slug, title, seed_input, visibility, updated_at, last_refreshed_at")
+    .in("owner_id", ids)
+    .in("visibility", ["public", "team"])
+    .order("updated_at", { ascending: false })
+    .limit(60);
+  if (error || !data) return [];
+  return data as MemberLivingPage[];
 }
 
 export type CommunityProject = {
