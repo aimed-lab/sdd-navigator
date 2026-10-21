@@ -14,6 +14,21 @@
   --type-other-bg: #eeece6;     --type-other-fg: #4a4740;
 }
 
+/* The assistant side panel (components/explore/AssistantChat.tsx) sets
+   html[data-assistant-open] while it is open. On desktop the page makes room
+   for it instead of sitting underneath; the fixed nav stays full width, above
+   the panel, so its account menu is never hidden. On a phone the panel fills
+   the screen under the nav and the feedback button steps aside. */
+@media (min-width: 640px) {
+  body { transition: padding-right 0.2s ease; }
+  html[data-assistant-open="true"] body { padding-right: var(--assistant-w, 500px); }
+  html[data-assistant-open="true"] button[aria-label="Give feedback"] { right: calc(var(--assistant-w, 500px) + 1.5rem) !important; }
+  html[data-assistant-open="expanded"] button[aria-label="Give feedback"] { display: none; }
+}
+@media (max-width: 639px) {
+  html[data-assistant-open] button[aria-label="Give feedback"] { display: none; }
+}
+
 @layer base {
   html {
     color-scheme: light;

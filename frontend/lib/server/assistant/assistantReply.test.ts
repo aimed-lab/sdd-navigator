@@ -3,7 +3,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  GREETING,
+  STARTERS,
+  assistantAvailableOn,
   cleanMessagesForSend,
+  exploreQueryFromPath,
   isNearDuplicate,
   parseAssistantReply,
   restoreChat,
@@ -85,4 +89,81 @@ test("chat snapshot: round-trips, and a corrupted or hostile one restores to not
   // A stored action that no longer validates is dropped, the conversation stays.
   const tampered = JSON.stringify({ messages: snap.messages, action: { ...ACTION, visibility: "root" } });
   assert.deepEqual(restoreChat(tampered), { messages: snap.messages, choices: null, action: null });
+});
+
+// -- the greeting and its starter chips --
+
+test("greeting text is exactly the agreed sentence", () => {
+  assert.equal(GREETING, "Hi, I'm your SmartDrugDiscovery assistant. I can help you:");
+});
+
+test("starters: the four chips, in order, and only Communities is greyed out", () => {
+  assert.deepEqual(
+    STARTERS.map((s) => s.label),
+    [
+      "Find resources on a topic",
+      "Create a living page for my research",
+      "Show my pages",
+      "Communities (coming soon)",
+    ]
+  );
+  assert.deepEqual(
+    STARTERS.filter((s) => s.kind === "soon").map((s) => s.id),
+    ["communities"]
+  );
+});
+
+test("starters: each live chip starts a flow or fills the input", () => {
+  const byId = Object.fromEntries(STARTERS.map((s) => [s.id, s]));
+  assert.equal(byId.find.kind, "fill");
+  assert.match((byId.find as { text: string }).text, /^Find resources on /);
+  assert.equal(byId.create.kind, "send");
+  assert.match((byId.create as { text: string }).text, /living page/);
+  assert.deepEqual({ kind: byId.mine.kind, href: (byId.mine as { href: string }).href }, { kind: "go", href: "/pages" });
+  assert.ok(!("text" in byId.communities) && !("href" in byId.communities), "the greyed chip does nothing");
+  assert.match(byId.find.hint ?? "", /papers, trials, FDA approvals, compounds, datasets, grants, tools/);
+  assert.match(byId.create.hint ?? "", /private, team or public, keeps itself updated/);
+});
+
+test("the panel is offered on Explore and the /pages screens only", () => {
+  for (const ok of ["/explore", "/explore/egfr", "/explore/podcast", "/pages", "/pages/egfr-abc12"]) {
+    assert.equal(assistantAvailableOn(ok), true, ok);
+  }
+  for (const no of ["/", "/projects", "/collaborate", "/pagesx", "/exploreme", "", null, undefined]) {
+    assert.equal(assistantAvailableOn(no), false, String(no));
+  }
+});
+
+test("exploreQueryFromPath: the Explore search text, decoded; nothing elsewhere", () => {
+  assert.equal(exploreQueryFromPath("/explore/EGFR%20lung%20cancer"), "EGFR lung cancer");
+  assert.equal(exploreQueryFromPath("/explore"), "");
+  assert.equal(exploreQueryFromPath("/explore/podcast"), "");
+  assert.equal(exploreQueryFromPath("/pages/egfr-abc12"), "");
+  assert.equal(exploreQueryFromPath("/explore/%E0%A4%A"), "");
+});
+
+// -- query, related questions and numbered sources --
+
+test("parseAssistantReply: carries the search query, related questions and sources", () => {
+  const out = parseAssistantReply({
+    reply: "Answer [1].",
+    query: " EGFR lung cancer ",
+    related: ["Which trials are recruiting?", "x", 5, "What drugs are approved?"],
+    sources: [
+      { n: 9, kind: "paper", title: " Paper A ", url: "https://x.org/a", detail: "Src" },
+      { kind: "trial", title: "Trial B", url: "javascript:alert(1)" },
+      { kind: "paper", title: "" },
+    ],
+  });
+  assert.equal(out?.query, "EGFR lung cancer");
+  assert.deepEqual(out?.related, ["Which trials are recruiting?", "What drugs are approved?"]);
+  assert.deepEqual(out?.sources, [
+    { n: 1, kind: "paper", title: "Paper A", url: "https://x.org/a", detail: "Src" },
+    { n: 2, kind: "trial", title: "Trial B", url: null, detail: "" },
+  ]);
+});
+
+test("parseAssistantReply: query null means no search ran; an old backend has no query key at all", () => {
+  assert.equal(parseAssistantReply({ reply: "Hi", query: null })?.query, null);
+  assert.equal("query" in (parseAssistantReply({ reply: "Hi" }) ?? {}), false);
 });

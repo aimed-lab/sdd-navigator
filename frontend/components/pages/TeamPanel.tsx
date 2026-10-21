@@ -153,6 +153,11 @@ export default function TeamPanel({
           </button>
         </form>
       )}
+      {isOwner && (
+        <p className="-mt-2 font-body-sm text-body-sm text-secondary">
+          Use the email they sign in to SmartDrugDiscovery with.
+        </p>
+      )}
 
       {note && (
         <p className="font-body-sm text-body-sm text-secondary" role="status">

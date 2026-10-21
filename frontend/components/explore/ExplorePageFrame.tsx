@@ -5,7 +5,6 @@
 // Both pages render through this, so apart from content (heading text,
 // results) they are indistinguishable. Don't restyle one without the other.
 
-import AssistantChat from "@/components/explore/AssistantChat";
 import CategoryStrip from "@/components/CategoryStrip";
 import PageHeader from "@/components/PageHeader";
 
@@ -62,8 +61,6 @@ export default function ExplorePageFrame({
           </form>
         </section>
 
-        <AssistantChat query={chips.query} />
-
         {scopeChips}
 
         {/* Category strip: horizontal scroll on mobile. The Podcast chip routes to
@@ -76,7 +73,10 @@ export default function ExplorePageFrame({
           />
         </div>
 
-        {children}
+        {/* The assistant's "See all N results" scrolls here. */}
+        <div id="explore-results" className="scroll-mt-24">
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -26,10 +26,17 @@ export type CreatePageAction = {
   visibility: Visibility;
 };
 
+/** A numbered source the answer's [n] refers to (backend `sources`). */
+export type AnswerSource = { n: number; kind: string; title: string; url: string | null; detail: string };
+
 export type AssistantReply = {
   reply: string;
   choices?: Visibility[];
   action?: CreatePageAction;
+  /** The search the assistant actually ran (absent/undefined: none, or an older backend). */
+  query?: string | null;
+  related?: string[];
+  sources?: AnswerSource[];
 };
 
 export const MAX_MESSAGES = 20;
@@ -57,6 +64,33 @@ export function parseAssistantReply(json: unknown): AssistantReply | null {
   const reply = typeof json.reply === "string" ? json.reply.trim() : "";
   if (!reply) return null;
   const out: AssistantReply = { reply };
+
+  if ("query" in json) {
+    out.query = typeof json.query === "string" && json.query.trim() ? json.query.trim().slice(0, MAX_SEED_CHARS) : null;
+  }
+  if (Array.isArray(json.related)) {
+    const related = json.related
+      .filter((q): q is string => typeof q === "string")
+      .map((q) => q.trim())
+      .filter((q) => q.length >= 5 && q.length <= 200)
+      .slice(0, 3);
+    if (related.length > 0) out.related = related;
+  }
+  if (Array.isArray(json.sources)) {
+    const sources: AnswerSource[] = [];
+    for (const x of json.sources.slice(0, 3)) {
+      if (!isRecord(x) || typeof x.title !== "string" || !x.title.trim() || typeof x.kind !== "string") continue;
+      const url = typeof x.url === "string" && /^https?:\/\//i.test(x.url) ? x.url : null;
+      sources.push({
+        n: sources.length + 1,
+        kind: x.kind,
+        title: x.title.trim().slice(0, 200),
+        url,
+        detail: typeof x.detail === "string" ? x.detail.trim().slice(0, 140) : "",
+      });
+    }
+    if (sources.length > 0) out.sources = sources;
+  }
 
   if (isRecord(json.action) && json.action.type === "create_page") {
     const title = typeof json.action.title === "string" ? json.action.title.trim() : "";
@@ -92,6 +126,56 @@ export function cleanMessagesForSend(messages: unknown): ChatMessage[] {
     if (content) out.push({ role: m.role, content });
   }
   return out.slice(-MAX_MESSAGES);
+}
+
+// ── the side panel: greeting chips and where the panel shows ─────────────────
+
+export const GREETING = "Hi, I'm your SmartDrugDiscovery assistant. I can help you:";
+
+/** What a starter chip does when clicked. `fill` puts a starter sentence in the
+ *  input, `send` sends it as the first message, `go` opens a screen (the chat
+ *  stays), `soon` is greyed out and does nothing. */
+export type Starter =
+  | { id: string; label: string; hint?: string; kind: "fill" | "send"; text: string }
+  | { id: string; label: string; hint?: string; kind: "go"; href: string }
+  | { id: string; label: string; hint?: string; kind: "soon" };
+
+// Only things the assistant can really do (keep in step with _SYSTEM in
+// backend/explore-mcp/tools/assistant.py).
+export const STARTERS: Starter[] = [
+  {
+    id: "find",
+    label: "Find resources on a topic",
+    hint: "papers, trials, FDA approvals, compounds, datasets, grants, tools",
+    kind: "fill",
+    text: "Find resources on ",
+  },
+  {
+    id: "create",
+    label: "Create a living page for my research",
+    hint: "private, team or public, keeps itself updated",
+    kind: "send",
+    text: "I'd like to create a living page for my research.",
+  },
+  { id: "mine", label: "Show my pages", kind: "go", href: "/pages" },
+  { id: "communities", label: "Communities (coming soon)", kind: "soon" },
+];
+
+/** The panel is offered on Explore and on the /pages screens only. */
+export function assistantAvailableOn(pathname: string | null | undefined): boolean {
+  if (!pathname) return false;
+  return pathname === "/explore" || pathname.startsWith("/explore/") || pathname === "/pages" || pathname.startsWith("/pages/");
+}
+
+/** The Explore search text in the URL (/explore/<topic>), if any. */
+export function exploreQueryFromPath(pathname: string | null | undefined): string {
+  const m = /^\/explore\/([^/]+)$/.exec(pathname ?? "");
+  if (!m || m[1] === "podcast") return "";
+  try {
+    return decodeURIComponent(m[1]).trim().slice(0, 200);
+  } catch {
+    return "";
+  }
 }
 
 // ── near-duplicate public pages ──────────────────────────────────────────────
