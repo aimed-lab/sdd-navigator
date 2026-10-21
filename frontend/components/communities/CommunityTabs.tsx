@@ -15,7 +15,12 @@ export default function CommunityTabs({
   active: TabKey;
 }) {
   return (
-    <nav aria-label="Community sections" className="border-b border-outline-variant/40 overflow-x-auto">
+    // overflow-x:auto alone makes the box scroll vertically too (the little
+    // up/down widget), so y is clipped; the scrollbar is hidden on every engine.
+    <nav
+      aria-label="Community sections"
+      className="border-b border-outline-variant/40 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+    >
       <ul className="flex gap-1 min-w-max">
         {tabs.map((t) => {
           const on = t === active;
@@ -25,7 +30,7 @@ export default function CommunityTabs({
                 href={t === "home" ? `/communities/${slug}` : `/communities/${slug}?tab=${t}`}
                 aria-current={on ? "page" : undefined}
                 className={
-                  "block px-4 py-3 font-label-md text-label-md border-b-2 -mb-px transition-colors " +
+                  "block whitespace-nowrap px-4 py-3 font-label-md text-label-md border-b-2 transition-colors " +
                   (on
                     ? "border-primary text-primary"
                     : "border-transparent text-secondary hover:text-on-background")

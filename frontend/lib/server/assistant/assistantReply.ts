@@ -17,7 +17,22 @@ export const CHOICE_INFO: Record<Visibility, { label: string; line: string }> = 
   public: { label: "Public", line: "Anyone can find and follow it." },
 };
 
+import type { AnswerExtras } from "./assistantAnswer.ts";
+import { sanitizeExtras } from "./assistantAnswer.ts";
+
 export type ChatMessage = { role: "user" | "assistant"; content: string };
+
+/** Joins sentences into one line with exactly one space between them, adding a
+ *  full stop where a sentence has no ending punctuation of its own:
+ *  joinSentences(["Researchers on neuro-oncology", "You'll be its admin."]) ->
+ *  "Researchers on neuro-oncology. You'll be its admin." */
+export function joinSentences(parts: (string | null | undefined)[]): string {
+  return parts
+    .map((p) => (p ?? "").trim())
+    .filter(Boolean)
+    .map((p) => (/[.!?…]["')\]]*$/.test(p) ? p : p + "."))
+    .join(" ");
+}
 
 export type CreatePageAction = {
   type: "create_page";
@@ -362,6 +377,9 @@ export type ChatSnapshot = {
   communityDraft?: CreateCommunityAction | null;
   /** The matches were shown in this chat (so a new community can be drafted). */
   communitiesChecked?: boolean;
+  /** Source cards, quick facts and related questions under each answer, keyed
+   *  by assistant message index. */
+  extras?: Record<number, AnswerExtras>;
 };
 
 export const CHAT_STORAGE_KEY = "sdd.assistant.v1";
@@ -373,7 +391,21 @@ export function serializeChat(snapshot: ChatSnapshot): string {
     action: snapshot.action,
     ...(snapshot.communityDraft ? { communityDraft: snapshot.communityDraft } : {}),
     ...(snapshot.communitiesChecked ? { communitiesChecked: true } : {}),
+    ...persistedExtras(snapshot),
   });
+}
+
+/** The extras to store. Only the last MAX_MESSAGES messages are kept, so the
+ *  message indexes move down by however many were dropped from the front. */
+function persistedExtras(snapshot: ChatSnapshot): { extras?: Record<number, AnswerExtras> } {
+  if (!snapshot.extras) return {};
+  const offset = Math.max(0, snapshot.messages.length - cleanMessagesForSend(snapshot.messages).length);
+  const shifted: Record<number, AnswerExtras> = {};
+  for (const [key, value] of Object.entries(snapshot.extras)) {
+    const index = Number(key) - offset;
+    if (index >= 0) shifted[index] = value;
+  }
+  return Object.keys(shifted).length > 0 ? { extras: shifted } : {};
 }
 
 /** Parses a stored snapshot; anything malformed restores to nothing. */
@@ -393,8 +425,16 @@ export function restoreChat(raw: string | null): ChatSnapshot | null {
       action: checked?.action ?? null,
       ...(draft ? { communityDraft: draft } : {}),
       ...(data.communitiesChecked === true ? { communitiesChecked: true } : {}),
+      ...restoredExtras(data.extras, messages.length),
     };
   } catch {
     return null;
   }
+}
+
+function restoredExtras(raw: unknown, messageCount: number): { extras?: Record<number, AnswerExtras> } {
+  const all = sanitizeExtras(raw);
+  const kept: Record<number, AnswerExtras> = {};
+  for (const [key, value] of Object.entries(all)) if (Number(key) < messageCount) kept[Number(key)] = value;
+  return Object.keys(kept).length > 0 ? { extras: kept } : {};
 }

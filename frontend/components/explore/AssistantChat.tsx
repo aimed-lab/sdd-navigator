@@ -64,6 +64,7 @@ import {
   sourcesToCards,
   stripChoiceText,
   topicFromMessage,
+  type AnswerExtras,
   type FactRow,
   type Inline,
   type ResultCard,
@@ -92,17 +93,8 @@ type Phase =
   | { kind: "done"; slug: string; visibility: Visibility }
   | { kind: "error"; message: string };
 
-/** What a searched answer carries. Lives in memory only. */
-type Extras = {
-  query: string;
-  chips: { kind: string; text: string }[];
-  cards: ResultCard[];
-  /** Results found by the panel's own search; null when unknown (failed or still running). */
-  total: number | null;
-  facts: FactRow[];
-  related: string[];
-  offerSave: boolean;
-};
+/** What a searched answer carries. Kept with the chat in sessionStorage. */
+type Extras = AnswerExtras;
 
 const RESULTS_ANCHOR = "explore-results";
 const WIDTH_KEY = "sdd.assistant.width";
@@ -348,6 +340,11 @@ export default function AssistantChat() {
           setDraftStage("confirm"); // they still have to click Create
         }
         if (snap.communitiesChecked) setCommunitiesChecked(true);
+        if (snap.extras) {
+          // Source cards, quick facts and related questions come back with the chat.
+          setExtras(snap.extras);
+          Object.values(snap.extras).forEach((x) => offered.current.add(x.query.toLowerCase()));
+        }
         setOpen(true);
       }
     } catch {
@@ -372,13 +369,14 @@ export default function AssistantChat() {
             action,
             communityDraft: draft,
             communitiesChecked,
+            extras,
           })
         );
       }
     } catch {
       // Not worth surfacing; the chat just won't survive a reload.
     }
-  }, [restored, messages, pickerAt, action, phase.kind, draft, draftStage, communitiesChecked]);
+  }, [restored, messages, pickerAt, action, phase.kind, draft, draftStage, communitiesChecked, extras]);
 
   // Tell the page the panel is open and how wide, so it can make room.
   useEffect(() => {
@@ -764,19 +762,20 @@ export default function AssistantChat() {
           )}
 
           <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-outline-variant/30">
-            <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
               <span className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
               </span>
-              <div className="min-w-0 shrink">
+              {/* flex-1 + min-w-0 + truncate: the text takes whatever room the
+                  buttons leave and is cut with an ellipsis, so it never runs
+                  underneath them at any panel width. */}
+              <div className="min-w-0 flex-1">
                 <h2 className="font-title text-[20px] leading-tight font-medium text-on-background truncate">
                   Research assistant
                 </h2>
-                {roomy && (
-                  <p className="hidden min-[480px]:block font-body-sm text-[12px] leading-tight text-secondary whitespace-nowrap">
-                    Searches 12 sources · cites everything
-                  </p>
-                )}
+                <p className="font-body-sm text-[12px] leading-tight text-secondary truncate">
+                  Searches 12 sources · cites everything
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
@@ -864,17 +863,6 @@ export default function AssistantChat() {
               const ex = extras[i];
               return (
                 <div key={i} className="flex flex-col gap-4">
-                  {cards[i] && (
-                    <CommunityMatches
-                      state={cards[i]}
-                      progress={joinProgress}
-                      busy={busy}
-                      loginHref={`/login?callbackUrl=${encodeURIComponent(pathname)}`}
-                      onJoin={joinMatch}
-                      onCreateNew={() => void send(newCommunityMessage(cards[i].query))}
-                    />
-                  )}
-
                   {ex && ex.chips.length > 0 && (
                     <div className="flex flex-wrap gap-1.5" aria-label="What was searched">
                       {ex.chips.map((c) => (
@@ -897,6 +885,18 @@ export default function AssistantChat() {
                       <Markdown text={m.content} maxCite={ex ? ex.cards.length : 0} />
                     </div>
                   </div>
+
+                  {/* The assistant's sentence first, then the matches it introduces. */}
+                  {cards[i] && (
+                    <CommunityMatches
+                      state={cards[i]}
+                      progress={joinProgress}
+                      busy={busy}
+                      loginHref={`/login?callbackUrl=${encodeURIComponent(pathname)}`}
+                      onJoin={joinMatch}
+                      onCreateNew={() => void send(newCommunityMessage(cards[i].query))}
+                    />
+                  )}
 
                   {ex && (
                     <SourceCards

@@ -76,6 +76,11 @@ export function resolveTab(requested: string | null | undefined, visible: TabKey
 
 // ── header ───────────────────────────────────────────────────────────────────
 
+/** The badge on a community card: how people get in. */
+export function joinModeLabel(isOpen: boolean): "Open to join" | "Request to join" {
+  return isOpen ? "Open to join" : "Request to join";
+}
+
 export function eyebrow(isOpen: boolean): string {
   return isOpen ? "COMMUNITY · OPEN TO JOIN" : "COMMUNITY · REQUEST TO JOIN";
 }

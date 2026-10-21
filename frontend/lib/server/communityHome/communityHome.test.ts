@@ -10,6 +10,7 @@ import {
   feedDateLabel,
   initials,
   isImageFile,
+  joinModeLabel,
   joinUrl,
   latestDate,
   membersWorkingOn,
@@ -250,4 +251,9 @@ test("membersWorkingOn: only members who set a focus, never hidden ones", () => 
     { member_id: "4", display_name: "D", focus: "EGFR", hidden: true },
   ]);
   assert.deepEqual(rows, [{ id: "1", name: "A", focus: "KRAS" }]);
+});
+
+test("joinModeLabel: how people get into a community", () => {
+  assert.equal(joinModeLabel(true), "Open to join");
+  assert.equal(joinModeLabel(false), "Request to join");
 });

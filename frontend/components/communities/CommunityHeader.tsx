@@ -37,8 +37,10 @@ export default function CommunityHeader({
 
   return (
     <header className="rounded-2xl bg-primary text-on-primary overflow-hidden">
-      <div className="flex flex-col lg:flex-row lg:items-stretch gap-6 p-6 sm:p-8">
-        <div className="flex-1 min-w-0 flex flex-col gap-4">
+      {/* Height follows the content: the left column does not stretch to the
+          join card, and the banner has only a modest minimum. */}
+      <div className="flex flex-col lg:flex-row lg:items-center gap-6 p-6 sm:p-7 min-h-[11rem]">
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
           <span className="font-label-sm text-label-sm tracking-widest text-on-primary/80">
             {eyebrow(community.is_open)}
           </span>
@@ -47,7 +49,7 @@ export default function CommunityHeader({
             <p className="font-body-lg text-body-lg text-on-primary/90 max-w-2xl">{community.description}</p>
           )}
 
-          <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-2">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
             {shown.length > 0 && (
               <div className="flex -space-x-2" aria-hidden>
                 {shown.map((n, i) => (
@@ -64,7 +66,7 @@ export default function CommunityHeader({
           </div>
         </div>
 
-        <div className="lg:w-64 shrink-0 rounded-xl bg-surface-container-lowest text-on-background p-5 flex flex-col items-stretch gap-4 shadow-sm">
+        <div className="lg:w-64 shrink-0 rounded-xl bg-surface-container-lowest text-on-background p-4 flex flex-col items-stretch gap-3 shadow-sm">
           <JoinLeaveControl
             communityId={community.id}
             communityName={community.name}
@@ -78,7 +80,7 @@ export default function CommunityHeader({
             label="Share · copy link"
             communityId={membership.state === "active" ? community.id : undefined}
           />
-          <div className="border-t border-outline-variant/30 pt-4">
+          <div className="border-t border-outline-variant/30 pt-3">
             <JoinQr slug={community.slug} name={community.name} isAdmin={membership.isAdmin} />
           </div>
         </div>

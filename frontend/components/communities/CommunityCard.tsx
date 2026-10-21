@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Community, CommunityRole } from "@/lib/server/communities";
+import { joinModeLabel } from "@/lib/server/communityHome/communityHome";
 
 /** Admin/Member/Pending, or nothing at all when the viewer has no
  *  relationship to this community yet — "nothing" is a real, intentional
@@ -27,13 +28,11 @@ function membershipBadge(
 }
 
 // One card, everywhere a community is listed (Explore's Communities
-// category, /communities) — no more separate "yours"/"others" rendering:
-// the badge above says which, if either, applies. The join action
-// (Request to join) stays ON the card, in its own slot below the member
-// count, and only shows when there's actually something to request (not a
-// member, not already pending) — requesting itself still happens on the
-// community's own page (JoinLeaveControl), not from here; this stays a
-// plain link everywhere except that one line.
+// category, /communities), in the same look as the community page: a green
+// band with the name, then the one-line purpose, the member count and how
+// people get in ("Open to join" / "Request to join"). The viewer's own
+// relationship (Admin / Member / Pending) sits in the band. The whole card is
+// a link to the community's page; joining itself happens there.
 export default function CommunityCard({
   community,
   member,
@@ -53,44 +52,45 @@ export default function CommunityCard({
   memberCount: number;
 }) {
   const badge = membershipBadge(member, role, pending);
+  const mode = joinModeLabel(community.is_open);
 
   return (
     <Link
       href={`/communities/${community.slug}`}
-      className="relative glass-card rounded-xl p-6 flex flex-col gap-3 hover:border-primary/40 transition-colors"
+      className="group rounded-2xl overflow-hidden bg-surface-container-lowest border border-outline-variant/30 hover:border-primary/50 hover:shadow-sm transition-all flex flex-col"
     >
-      {badge && (
-        <span
-          className={`absolute top-4 right-4 inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-label-sm text-label-sm shrink-0 ${badge.className}`}
-        >
-          <span className="material-symbols-outlined text-sm">{badge.icon}</span>
-          {badge.label}
-        </span>
-      )}
-
-      <h3 className="font-headline-sm text-headline-sm text-on-background pr-24">
-        {community.name}
-      </h3>
-
-      {community.description && (
-        <p className="font-body-sm text-body-sm text-secondary line-clamp-2">
-          {community.description}
-        </p>
-      )}
-
-      <div className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">
-        <span className="material-symbols-outlined text-base">group</span>
-        {memberCount} {memberCount === 1 ? "member" : "members"}
+      <div className="bg-primary text-on-primary px-5 py-4 flex items-start justify-between gap-3">
+        <h3 className="font-headline-sm text-headline-sm text-on-primary break-words min-w-0">{community.name}</h3>
+        {badge && (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-label-sm text-label-sm shrink-0 bg-white/90 text-primary">
+            <span className="material-symbols-outlined text-sm">{badge.icon}</span>
+            {badge.label}
+          </span>
+        )}
       </div>
 
-      {!member && !pending && (
-        <div className="mt-auto pt-2">
-          <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm text-primary">
-            Request to join
-            <span className="material-symbols-outlined text-base">arrow_forward</span>
+      <div className="p-5 flex flex-col gap-3 flex-1">
+        <p className="font-body-sm text-body-sm text-secondary line-clamp-1 min-h-[1.25rem]">
+          {community.description ?? ""}
+        </p>
+
+        <div className="mt-auto flex items-center justify-between gap-3">
+          <span className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">
+            <span className="material-symbols-outlined text-base">group</span>
+            {memberCount} {memberCount === 1 ? "member" : "members"}
+          </span>
+          <span
+            className={
+              "px-2.5 py-1 rounded-full font-label-sm text-label-sm " +
+              (community.is_open
+                ? "bg-primary/10 text-primary"
+                : "border border-outline-variant/50 text-secondary")
+            }
+          >
+            {mode}
           </span>
         </div>
-      )}
+      </div>
     </Link>
   );
 }

@@ -11,6 +11,7 @@ import {
   buildAssistantContext,
   isCommunityRequest,
   isCommunityTurn,
+  joinSentences,
   communityDraftProblem,
   needsEarlyDuplicateCheck,
   newCommunityMessage,
@@ -329,4 +330,66 @@ test("the chat snapshot keeps communitiesChecked across a reload / sign-in", () 
   };
   assert.deepEqual(restoreChat(serializeChat(snap)), snap);
   assert.equal(restoreChat(JSON.stringify({ messages: snap.messages, communitiesChecked: "yes" }))?.communitiesChecked, undefined);
+});
+
+// ── sentences, and answers that survive a reload ─────────────────────────────────
+
+test("joinSentences: one space between sentences, a full stop added where one is missing", () => {
+  assert.equal(joinSentences(["Researchers on neuro-oncology", "You'll be its admin."]), "Researchers on neuro-oncology. You'll be its admin.");
+  assert.equal(joinSentences(["Already ends.", "Next one!"]), "Already ends. Next one!");
+  assert.equal(joinSentences(["  spaced  ", "", null, undefined, "tail"]), "spaced. tail.");
+  assert.equal(joinSentences(['He said "stop?"', "Then left"]), 'He said "stop?" Then left.');
+  assert.equal(joinSentences([]), "");
+  assert.ok(!/\.[A-Za-z]/.test(joinSentences(["For neuro-oncology.", "You'll be admin"])), "never a full stop jammed against a word");
+});
+
+const EXTRAS = {
+  query: "KRAS pancreatic cancer",
+  chips: [{ kind: "paper", text: "12 papers" }],
+  cards: [{ id: "p1", kind: "paper", tag: "Paper", tint: "paper" as const, title: "KRAS in PDAC", detail: "2025", url: "https://example.org/p1" }],
+  total: 40,
+  facts: [{ kind: "approval", label: "Approved", count: 2, text: "Drug A, Drug B" }],
+  related: ["What trials are open for KRAS?"],
+  offerSave: false,
+};
+const MSGS = [
+  { role: "user" as const, content: "KRAS in pancreatic cancer" },
+  { role: "assistant" as const, content: "Here is what I found." },
+];
+
+test("a reload brings back the source cards, quick facts and related questions", () => {
+  const snap = { messages: MSGS, choices: null, action: null, extras: { 1: EXTRAS } };
+  assert.deepEqual(restoreChat(serializeChat(snap)), snap);
+});
+
+test("stored answer extras are untrusted: malformed pieces are dropped, a javascript: link too", () => {
+  const raw = JSON.stringify({
+    messages: MSGS,
+    extras: {
+      1: { ...EXTRAS, cards: [{ ...EXTRAS.cards[0], url: "javascript:alert(1)" }, { id: 5 }, EXTRAS.cards[0]], facts: [{ nope: 1 }, EXTRAS.facts[0]] },
+      9: EXTRAS, // no such message
+      x: EXTRAS,
+      0: { query: "" },
+    },
+  });
+  const restored = restoreChat(raw)!;
+  assert.deepEqual(Object.keys(restored.extras ?? {}), ["1"]);
+  assert.deepEqual(restored.extras![1].cards, [EXTRAS.cards[0]]);
+  assert.deepEqual(restored.extras![1].facts, EXTRAS.facts);
+});
+
+test("extras follow their message when old messages fall off the front of the stored chat", () => {
+  const many = Array.from({ length: 23 }, (_, i) => ({ role: i % 2 === 0 ? ("user" as const) : ("assistant" as const), content: `m${i}` }));
+  const snap = { messages: many, choices: null, action: null, extras: { 21: EXTRAS } };
+  const restored = restoreChat(serializeChat(snap))!;
+  assert.equal(restored.messages.length, 20);
+  assert.equal(restored.messages[18].content, "m21");
+  assert.deepEqual(Object.keys(restored.extras ?? {}), ["18"]);
+  // an answer that fell off the front is simply not kept
+  assert.equal(restoreChat(serializeChat({ ...snap, extras: { 1: EXTRAS } }))!.extras, undefined);
+});
+
+test("a chat with no extras stores and restores none", () => {
+  const snap = { messages: MSGS, choices: null, action: null };
+  assert.equal("extras" in restoreChat(serializeChat(snap))!, false);
 });
