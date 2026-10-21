@@ -54,6 +54,7 @@ import {
   addCommunityResourceFileAction,
   createCommunityResourceAction,
   deleteCommunityResourceAction,
+  pinCommunityResourceAction,
   removeCommunityResourceFileAction,
   updateCommunityResourceAction,
 } from "@/app/communities/actions";
@@ -618,11 +619,14 @@ function ResourceItem({
   communityId,
   slug,
   isAdmin,
+  pinned,
 }: {
   resource: CommunityResource;
   communityId: string;
   slug: string;
   isAdmin: boolean;
+  /** This is the community's ONE pinned resource (shown on Home). */
+  pinned: boolean;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -630,6 +634,16 @@ function ResourceItem({
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+
+  async function togglePin() {
+    setMenuOpen(false);
+    setPinError(null);
+    // Pinning replaces whatever was pinned before: there is only ever one.
+    const res = await pinCommunityResourceAction(communityId, pinned ? null : resource.id, slug);
+    if (res.ok) router.refresh();
+    else setPinError(res.error);
+  }
 
   if (editing) {
     return (
@@ -692,6 +706,13 @@ function ResourceItem({
                 <div className="absolute right-0 mt-1 w-32 rounded-lg bg-surface-container-lowest shadow-lg border border-outline-variant/30 overflow-hidden z-20">
                   <button
                     type="button"
+                    onClick={togglePin}
+                    className="block w-full text-left px-4 py-2 font-label-sm text-label-sm text-on-background hover:bg-surface-container-low"
+                  >
+                    {pinned ? "Unpin" : "Pin to Home"}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => {
                       setMenuOpen(false);
                       setEditing(true);
@@ -724,6 +745,7 @@ function ResourceItem({
             piece of text on the card. The label stays plain tinted text
             beside the circle, not a second pill — one filled shape per
             card reads as a badge; two competing tinted shapes would not. */}
+        {pinError && <p className="font-body-sm text-body-sm text-error">{pinError}</p>}
         <div className="flex items-center gap-3">
           <div
             className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${color.chipBg}`}
@@ -737,6 +759,12 @@ function ResourceItem({
           >
             {TYPE_LABEL[resource.resource_type]}
           </span>
+          {pinned && (
+            <span className="ml-auto inline-flex items-center gap-1 font-label-sm text-label-sm text-primary">
+              <span className="material-symbols-outlined text-[16px]">push_pin</span>
+              Pinned
+            </span>
+          )}
         </div>
 
         {/* Title — a link (with an external-link glyph) when there's a URL;
@@ -858,6 +886,7 @@ export default function ResourcesSection({
   defaultOpen,
   isAdmin,
   resources,
+  pinnedId = null,
 }: {
   title: string;
   communityId: string;
@@ -868,6 +897,8 @@ export default function ResourcesSection({
    *  whether to render the affordance at all. */
   isAdmin: boolean;
   resources: CommunityResource[];
+  /** The community's pinned resource, if any (admins can pin / unpin one). */
+  pinnedId?: string | null;
 }) {
   const [adding, setAdding] = useState(false);
 
@@ -922,6 +953,7 @@ export default function ResourcesSection({
                         communityId={communityId}
                         slug={slug}
                         isAdmin={isAdmin}
+                        pinned={r.id === pinnedId}
                       />
                     ))}
                   </div>

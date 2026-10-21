@@ -34,6 +34,7 @@ import {
   updateCommunityMemberHidden,
   updateCommunityPublicPreview,
   updateCommunityResource,
+  setPinnedResource,
   updateCommunitySections,
   updateMyCommunityFocus,
   updateMyCommunityHidden,
@@ -730,5 +731,28 @@ export async function refreshCommunityFeedAction(
     }
     console.error("refreshCommunityFeedAction failed", e);
     return { ok: false, error: "Couldn't refresh the feed. Please try again.", emptySources: [] };
+  }
+}
+
+/** Pin one community resource (or unpin with null) — admin only. */
+export async function pinCommunityResourceAction(
+  communityId: string,
+  resourceId: string | null,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+
+  try {
+    const result = await setPinnedResource(communityId, resourceId);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) {
+      return { ok: false, error: "Sign in first." };
+    }
+    console.error("pinCommunityResourceAction failed", e);
+    return { ok: false, error: "Couldn't pin the resource. Please try again." };
   }
 }
