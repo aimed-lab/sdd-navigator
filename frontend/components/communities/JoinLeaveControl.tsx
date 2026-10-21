@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { joinCommunityAction, leaveCommunityAction } from "@/app/communities/actions";
 import type { Membership } from "@/lib/server/communities";
 import LeaveButton from "./LeaveButton";
+import EmailJoinForm from "./EmailJoinForm";
 
 export default function JoinLeaveControl({
   communityId,
@@ -29,7 +30,10 @@ export default function JoinLeaveControl({
   slug,
   isOpen,
   membership,
+  autoOpenJoin = false,
 }: {
+  /** Open the email form straight away (the visitor arrived by ?join=1). */
+  autoOpenJoin?: boolean;
   communityId: string;
   communityName: string;
   slug: string;
@@ -40,6 +44,11 @@ export default function JoinLeaveControl({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (membership.state === "signed_out" && isOpen) {
+    // An open community: a visitor can join with just an email, no account.
+    return <EmailJoinForm slug={slug} autoOpen={autoOpenJoin} />;
+  }
+
   if (membership.state === "signed_out") {
     return (
       <Link
@@ -48,7 +57,7 @@ export default function JoinLeaveControl({
         href={`/login?callbackUrl=${encodeURIComponent(`/communities/${slug}?join=1`)}`}
         className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md text-center"
       >
-        {isOpen ? "Sign in to join" : "Sign in to request to join"}
+        Sign in to request to join
       </Link>
     );
   }

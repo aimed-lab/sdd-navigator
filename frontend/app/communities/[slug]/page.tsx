@@ -32,6 +32,8 @@ import {
   listPendingRequests,
 } from "@/lib/server/communities";
 import { listShowcaseByCommunity } from "@/lib/server/showcase";
+import { getMyOnboarding } from "@/lib/server/communityJoin";
+import { buildChecklist, showChecklist } from "@/lib/server/communityHome/checklist";
 import { resolveExploreSources, resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
 import {
   buildUpdates,
@@ -64,6 +66,8 @@ import CommunityPublicPreview from "@/components/communities/CommunityPublicPrev
 import CommunityHeader from "@/components/communities/CommunityHeader";
 import CommunityTabs from "@/components/communities/CommunityTabs";
 import PinnedResourceCard from "@/components/communities/PinnedResourceCard";
+import WelcomeChecklist from "@/components/communities/WelcomeChecklist";
+import IsOpenEditor from "@/components/communities/IsOpenEditor";
 import UpdatesList from "@/components/communities/UpdatesList";
 import LivingPagesList from "@/components/communities/LivingPagesList";
 import { DigestCard, MembersWorkingOnCard, UpcomingEventsCard } from "@/components/communities/HomeSideCards";
@@ -81,7 +85,7 @@ export default async function CommunityDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string; join?: string }>;
+  searchParams: Promise<{ tab?: string; join?: string; editFocus?: string }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -167,7 +171,24 @@ export default async function CommunityDetailPage({
     membership.state === "signed_out"
       ? `/login?callbackUrl=${encodeURIComponent(`/communities/${slug}?join=1`)}`
       : `/communities/${slug}?join=1`;
-  const showJoinNotice = query.join === "1" && !isMember && membership.state !== "pending";
+  // A signed-out visitor of an OPEN community gets the email form (opened by
+  // ?join=1) in the header instead of this notice.
+  const emailJoinOffered = membership.state === "signed_out" && community.is_open;
+  const showJoinNotice =
+    query.join === "1" && !isMember && membership.state !== "pending" && !emailJoinOffered;
+
+  // Welcome checklist: members in their first 14 days, until dismissed.
+  const onboarding = isMember && tab === "home" ? await getMyOnboarding(community.id) : null;
+  const checklist =
+    onboarding &&
+    showChecklist({ isMember, joinedAt: onboarding.joinedAt, dismissed: onboarding.dismissed })
+      ? buildChecklist({
+          slug,
+          focus: onboarding.focus,
+          progress: onboarding.progress,
+          ownsLivingPage: onboarding.ownsLivingPage,
+        })
+      : null;
 
   return (
     <PageShell>
@@ -191,6 +212,7 @@ export default async function CommunityDetailPage({
           memberCount={memberCount}
           pageCount={access.seesMembers ? livingPages.length : null}
           updatedAt={updatedAt}
+          autoOpenJoin={query.join === "1"}
         />
 
         {showJoinNotice && (
@@ -213,7 +235,16 @@ export default async function CommunityDetailPage({
               {showPublicPreview && (
                 <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />
               )}
-              {pinned && <PinnedResourceCard resource={pinned} />}
+              {checklist && (
+                <WelcomeChecklist
+                  communityId={community.id}
+                  slug={community.slug}
+                  items={checklist.items}
+                  done={checklist.done}
+                  total={checklist.total}
+                />
+              )}
+              {pinned && <PinnedResourceCard resource={pinned} trackCommunityId={isMember ? community.id : undefined} />}
               {access.seesUpdates ? (
                 <UpdatesList
                   updates={updates}
@@ -333,6 +364,7 @@ export default async function CommunityDetailPage({
                 communityId={community.id}
                 slug={slug}
                 viewerUserId={user?.id ?? null}
+                editFocusOnLoad={query.editFocus === "1"}
               />
             </CollapsibleSection>
             {isMember && sectionOn("who_can_help") && (
@@ -365,6 +397,8 @@ export default async function CommunityDetailPage({
               slug={community.slug}
               sections={orderedSections}
             />
+
+            <IsOpenEditor communityId={community.id} slug={community.slug} isOpen={community.is_open} />
 
             <PublicPreviewEditor
               communityId={community.id}

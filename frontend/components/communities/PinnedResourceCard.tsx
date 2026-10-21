@@ -4,6 +4,7 @@
 // visitor only gets any when the community is 'open' (see the pinned-resource
 // migration), otherwise the resource itself isn't returned at all.
 
+import TrackStepLink from "./TrackStepLink";
 import type { CommunityResource } from "@/lib/server/communities";
 import { downloadHref, isImageFile } from "@/lib/server/communityHome/communityHome";
 
@@ -20,14 +21,32 @@ const TYPE_ICON: Record<string, string> = {
   other: "push_pin",
 };
 
-export default function PinnedResourceCard({ resource }: { resource: CommunityResource }) {
+/** A View / Download link; records the checklist step when `trackCommunityId` is set. */
+function ActionLink({
+  trackCommunityId,
+  ...props
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & { trackCommunityId?: string }) {
+  if (trackCommunityId) return <TrackStepLink communityId={trackCommunityId} step="pinned_opened" {...props} />;
+  // eslint-disable-next-line jsx-a11y/anchor-has-content
+  return <a {...props} />;
+}
+
+export default function PinnedResourceCard({
+  resource,
+  trackCommunityId,
+}: {
+  resource: CommunityResource;
+  /** Pass for an active member: View / Download tick "Open the pinned slides"
+   *  on their welcome checklist. */
+  trackCommunityId?: string;
+}) {
   const image = resource.files.find((f) => isImageFile(f.filename));
   const first = resource.files[0];
   const viewHref = first?.url ?? resource.url;
   const external = !first && !!resource.url;
 
   return (
-    <section aria-label="Pinned by admin" className="rounded-2xl glass-panel p-5 flex flex-col gap-3">
+    <section id="pinned" aria-label="Pinned by admin" className="rounded-2xl glass-panel p-5 flex flex-col gap-3 scroll-mt-24">
       <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm tracking-widest text-primary">
         <span className="material-symbols-outlined text-[16px]">push_pin</span>
         PINNED BY ADMIN
@@ -52,7 +71,8 @@ export default function PinnedResourceCard({ resource }: { resource: CommunityRe
           )}
           <div className="flex flex-wrap items-center gap-3 mt-auto pt-1">
             {viewHref && (
-              <a
+              <ActionLink
+                trackCommunityId={trackCommunityId}
                 href={viewHref}
                 target="_blank"
                 rel="noopener noreferrer"
@@ -60,16 +80,17 @@ export default function PinnedResourceCard({ resource }: { resource: CommunityRe
               >
                 <span className="material-symbols-outlined text-[18px]">{external ? "open_in_new" : "visibility"}</span>
                 View
-              </a>
+              </ActionLink>
             )}
             {first && (
-              <a
+              <ActionLink
+                trackCommunityId={trackCommunityId}
                 href={downloadHref(first.url, first.filename)}
                 className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm inline-flex items-center gap-1.5"
               >
                 <span className="material-symbols-outlined text-[18px]">download</span>
                 Download
-              </a>
+              </ActionLink>
             )}
             {resource.files.length > 1 && (
               <span className="font-body-sm text-body-sm text-secondary">+{resource.files.length - 1} more file(s)</span>

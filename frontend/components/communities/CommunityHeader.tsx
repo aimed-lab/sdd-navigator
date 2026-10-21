@@ -16,7 +16,9 @@ export default function CommunityHeader({
   memberCount,
   pageCount,
   updatedAt,
+  autoOpenJoin = false,
 }: {
+  autoOpenJoin?: boolean;
   community: Pick<Community, "id" | "slug" | "name" | "description" | "is_open">;
   membership: Membership;
   /** Names to draw initials for; empty when the roster isn't visible to this viewer. */
@@ -69,8 +71,13 @@ export default function CommunityHeader({
             slug={community.slug}
             isOpen={community.is_open}
             membership={membership}
+            autoOpenJoin={autoOpenJoin}
           />
-          <CopyLinkButton slug={community.slug} label="Share · copy link" />
+          <CopyLinkButton
+            slug={community.slug}
+            label="Share · copy link"
+            communityId={membership.state === "active" ? community.id : undefined}
+          />
           <div className="border-t border-outline-variant/30 pt-4">
             <JoinQr slug={community.slug} name={community.name} isAdmin={membership.isAdmin} />
           </div>
