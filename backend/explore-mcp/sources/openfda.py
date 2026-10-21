@@ -122,6 +122,14 @@ def _pretty_date(yyyymmdd: str) -> str:
     return f"{_MONTHS[int(yyyymmdd[4:6]) - 1]} {int(yyyymmdd[6:8])}, {yyyymmdd[:4]}"
 
 
+def _indication_text(label: dict) -> str | None:
+    """A short 'indications and usage' text from a label already fetched, or None."""
+    text = " ".join(str(x) for x in (label.get("indications_and_usage") or []) if x)
+    text = re.sub(r"^\s*\d*\s*INDICATIONS?\s*(AND|&)\s*USAGE:?\s*", "", text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip()
+    return (text[:300].rstrip() + "…") if len(text) > 300 else (text or None)
+
+
 async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int) -> list[Item]:
     disease = (disease or "").replace('"', " ").strip()
     if not disease:
@@ -150,6 +158,7 @@ async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int)
             continue
         seen_app.add(app)
         candidates.append({
+            "indication": _indication_text(r),
             "app": app,
             "generic": generic.lower(),
             "brand": _first(of.get("brand_name")),
@@ -200,6 +209,8 @@ async def fetch_fda_approvals(client: httpx.AsyncClient, disease: str, cap: int)
                     "application_number": c["app"],
                     "approval_date": date,
                     "review_priority": priority,
+                    # From the label already fetched above; no extra request.
+                    "indication": c["indication"],
                 },
             )
         )

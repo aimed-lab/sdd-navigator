@@ -176,6 +176,7 @@ def test_approval_date_comes_from_orig_ap_and_items_are_newest_first():
     assert first.raw == {
         "brand": "RASONQUE", "generic": "daraxonrasib", "sponsor": "REVOLUTION MEDICINES",
         "application_number": "NDA220910", "approval_date": "20260826", "review_priority": "PRIORITY",
+        "indication": None,   # the fixture label has no indications text
     }
 
 
