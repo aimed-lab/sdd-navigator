@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
+import { buildAssistantContext, cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
 
@@ -41,18 +41,15 @@ export async function POST(req: Request) {
   if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
     return NextResponse.json({ error: "The last message must be from the user." }, { status: 400 });
   }
-  const ctx = record.context && typeof record.context === "object" ? (record.context as Record<string, unknown>) : {};
-  const query = typeof ctx.query === "string" ? ctx.query.trim().slice(0, 200) : "";
-  const pageCreated = ctx.page_created === true;
+  // query, page_created and communities_checked, nothing else (the last one
+  // must reach the backend on every turn after the matches were shown).
+  const context = buildAssistantContext(record.context);
 
   try {
     const res = await fetch(`${EXPLORE_API_URL}/api/assistant-turn`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify({
-        messages,
-        context: { ...(query ? { query } : {}), ...(pageCreated ? { page_created: true } : {}) },
-      }),
+      body: JSON.stringify({ messages, context }),
     });
     if (!res.ok) throw new Error(`assistant backend responded ${res.status}`);
     return NextResponse.json(await res.json());

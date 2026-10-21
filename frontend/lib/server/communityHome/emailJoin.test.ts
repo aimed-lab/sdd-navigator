@@ -147,7 +147,7 @@ test("join function: callable by the service role only (no anon, no authenticate
 
 test("progress table: only the member can read or write their own row", () => {
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
-  const policies = sql.match(/CREATE POLICY "Member progress:[\s\S]*?;\n/g) ?? [];
+  const policies = sql.match(/CREATE POLICY "Member progress:[\s\S]*?;\r?\n/g) ?? [];
   assert.equal(policies.length, 3);
   for (const p of policies) assert.match(p, /user_id = auth\.uid\(\)/);
   assert.doesNotMatch(sql, /GRANT[^;]*community_member_progress[^;]*\banon\b/);

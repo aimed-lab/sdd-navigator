@@ -17,6 +17,33 @@ import type { AgentContext, ToolHandler, ToolResult } from "./agentCore";
 import { OWNER_ALREADY, isOwnerAccount } from "../pages/pageViewHelpers.ts";
 import { pageUrl, shapeMyPages, shapePage, summarizeExplore } from "./agentShapes.ts";
 
+/** A community as the agent sees it. */
+export type AgentCommunity = {
+  id: string;
+  slug: string;
+  name: string;
+  purpose: string | null;
+  memberCount: number;
+  isOpen: boolean;
+  why: string[];
+};
+
+/** Community operations, all run with the researcher's own token-bound `db`. */
+export type CommunityOps = {
+  /** Best matches for a topic (at most `limit`), strictest-first. */
+  search(db: AgentContext["db"], query: string, limit: number): Promise<AgentCommunity[]>;
+  find(db: AgentContext["db"], slug: string): Promise<{ id: string; slug: string; name: string; isOpen: boolean } | null>;
+  /** The researcher's own row in that community, if any. */
+  membership(db: AgentContext["db"], userId: string, communityId: string): Promise<"active" | "pending" | null>;
+  /** Insert the researcher's own row: 'active' for an open community, else 'pending'. */
+  join(
+    db: AgentContext["db"],
+    user: AgentContext["user"],
+    community: { id: string; isOpen: boolean }
+  ): Promise<{ ok: true; status: "active" | "pending" } | { ok: false; error: string }>;
+  create(db: AgentContext["db"], name: string, purpose: string): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }>;
+};
+
 /** The side-effecting operations the handlers use, injected so tests can run
  *  the handlers against fakes (agentServices.ts supplies the real ones). */
 export type AgentServices = {
@@ -31,6 +58,7 @@ export type AgentServices = {
   findSimilarPublicPage: typeof findSimilarPublicPage;
   /** The raw Explore backend JSON for a query. Throws on failure. */
   exploreSearch(query: string): Promise<unknown>;
+  communities: CommunityOps;
 };
 
 const fail = (status: number, code: string, message: string): ToolResult => ({ ok: false, status, code, message });
@@ -105,6 +133,91 @@ const getPage: ToolHandler = async ({ ctx, input, origin }) => {
   // The team (with names and emails) is the owner's to see.
   const members = r.view.viewer.isOwner ? await svc.listPageMemberDetails(r.view.page.id, c) : undefined;
   return ok(shapePage(r.view, origin, new Date(), members));
+};
+
+// ── communities ──────────────────────────────────────────────────────────────
+
+const COMMUNITY_MATCHES = 3;
+const communityUrl = (origin: string, slug: string) => `${origin}/communities/${slug}`;
+
+const searchCommunitiesTool: ToolHandler = async ({ ctx, input, origin }) => {
+  const c = needCtx(ctx);
+  const found = await svc.communities.search(c.db, String(input.query), COMMUNITY_MATCHES);
+  const mine = await Promise.all(found.map((f) => svc.communities.membership(c.db, c.user.id, f.id)));
+  return ok({
+    query: input.query,
+    communities: found.map((f, i) => ({
+      slug: f.slug,
+      name: f.name,
+      purpose: f.purpose,
+      member_count: f.memberCount,
+      joining: f.isOpen ? "anyone can join" : "by request",
+      matches: f.why,
+      your_status: mine[i] === "active" ? "member" : mine[i] === "pending" ? "request pending" : "not a member",
+      url: communityUrl(origin, f.slug),
+    })),
+    note: found.length === 0 ? "No existing community matches. It is fine to offer to create one." : undefined,
+  });
+};
+
+const joinCommunityTool: ToolHandler = async ({ ctx, input, preview, origin }) => {
+  const c = needCtx(ctx);
+  const community = await svc.communities.find(c.db, String(input.slug));
+  if (!community) return fail(404, "not_found", "Community not found.");
+  const url = communityUrl(origin, community.slug);
+
+  // Already in (or already asked): nothing to do, and nothing is written.
+  const existing = await svc.communities.membership(c.db, c.user.id, community.id);
+  if (existing === "active") return ok({ community: community.name, status: "already_member", url });
+  if (existing === "pending") return ok({ community: community.name, status: "already_requested", url });
+
+  // Open communities admit at once; others take a request. The community's own
+  // setting decides, never the caller.
+  const outcome = community.isOpen ? "join" : "request";
+  if (preview) {
+    return ok({
+      community: community.name,
+      would: outcome,
+      note: community.isOpen
+        ? "This community is open: the researcher would become a member immediately."
+        : "This community is by request: an admin would have to approve before the researcher is a member.",
+      url,
+    });
+  }
+
+  const r = await svc.communities.join(c.db, c.user, { id: community.id, isOpen: community.isOpen });
+  if (!r.ok) return fail(400, "request_failed", r.error);
+  return ok({ community: community.name, status: r.status === "active" ? "joined" : "requested", url });
+};
+
+const createCommunityTool: ToolHandler = async ({ ctx, input, preview, origin }) => {
+  const c = needCtx(ctx);
+  const name = String(input.name);
+  const purpose = String(input.purpose);
+
+  if (preview) {
+    const similar = await svc.communities.search(c.db, `${name} ${purpose}`, COMMUNITY_MATCHES);
+    return ok({
+      would_create: { name, purpose, you_become: "admin", joining: "by request" },
+      similar_communities: similar.map((s) => ({
+        slug: s.slug,
+        name: s.name,
+        purpose: s.purpose,
+        member_count: s.memberCount,
+        joining: s.isOpen ? "anyone can join" : "by request",
+        matches: s.why,
+        url: communityUrl(origin, s.slug),
+      })),
+      note:
+        similar.length > 0
+          ? "Similar communities already exist. Ask whether the researcher would rather join one before creating."
+          : undefined,
+    });
+  }
+
+  const r = await svc.communities.create(c.db, name, purpose);
+  if (!r.ok) return fail(400, "request_failed", r.error);
+  return ok({ slug: r.slug, url: communityUrl(origin, r.slug), you_are: "admin" });
 };
 
 // ── write tools (each honors preview) ────────────────────────────────────────
@@ -238,5 +351,8 @@ return {
   remove_member: removeMember,
   set_visibility: setVisibility,
   set_auto_update: setAutoUpdate,
+  search_communities: searchCommunitiesTool,
+  join_community: joinCommunityTool,
+  create_community: createCommunityTool,
 };
 }

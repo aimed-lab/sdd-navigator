@@ -2,9 +2,20 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   GREETING,
   STARTERS,
+  COMMUNITY_TOPIC_QUESTION,
+  afterDuplicateChoice,
+  buildAssistantContext,
+  isCommunityRequest,
+  isCommunityTurn,
+  communityDraftProblem,
+  needsEarlyDuplicateCheck,
+  newCommunityMessage,
+  pageKey,
+  parseCommunityDraft,
   assistantAvailableOn,
   cleanMessagesForSend,
   exploreQueryFromPath,
@@ -97,20 +108,17 @@ test("greeting text is exactly the agreed sentence", () => {
   assert.equal(GREETING, "Hi, I'm your SmartDrugDiscovery assistant. I can help you:");
 });
 
-test("starters: the four chips, in order, and only Communities is greyed out", () => {
+test("starters: the four chips, in order, all live (Communities is a real option now)", () => {
   assert.deepEqual(
     STARTERS.map((s) => s.label),
     [
       "Find resources on a topic",
       "Create a living page for my research",
       "Show my pages",
-      "Communities (coming soon)",
+      "Find or create a community",
     ]
   );
-  assert.deepEqual(
-    STARTERS.filter((s) => s.kind === "soon").map((s) => s.id),
-    ["communities"]
-  );
+  assert.deepEqual(STARTERS.filter((s) => s.kind === "soon"), []);
 });
 
 test("starters: each live chip starts a flow or fills the input", () => {
@@ -120,7 +128,8 @@ test("starters: each live chip starts a flow or fills the input", () => {
   assert.equal(byId.create.kind, "send");
   assert.match((byId.create as { text: string }).text, /living page/);
   assert.deepEqual({ kind: byId.mine.kind, href: (byId.mine as { href: string }).href }, { kind: "go", href: "/pages" });
-  assert.ok(!("text" in byId.communities) && !("href" in byId.communities), "the greyed chip does nothing");
+  assert.equal(byId.communities.kind, "send");
+  assert.match((byId.communities as { text: string }).text, /community/);
   assert.match(byId.find.hint ?? "", /papers, trials, FDA approvals, compounds, datasets, grants, tools/);
   assert.match(byId.create.hint ?? "", /private, team or public, keeps itself updated/);
 });
@@ -166,4 +175,158 @@ test("parseAssistantReply: carries the search query, related questions and sourc
 test("parseAssistantReply: query null means no search ran; an old backend has no query key at all", () => {
   assert.equal(parseAssistantReply({ reply: "Hi", query: null })?.query, null);
   assert.equal("query" in (parseAssistantReply({ reply: "Hi" }) ?? {}), false);
+});
+
+// ── communities ──────────────────────────────────────────────────────────────
+
+test("parseAssistantReply: a find_communities action is kept; a bad one is dropped", () => {
+  const ok = parseAssistantReply({ reply: "Checking.", action: { type: "find_communities", query: "KRAS pancreatic cancer" } });
+  assert.deepEqual(ok?.community, { type: "find_communities", query: "KRAS pancreatic cancer" });
+  assert.equal(ok?.action, undefined, "it is not a page action");
+  assert.equal(parseAssistantReply({ reply: "x", action: { type: "find_communities", query: "ab" } })?.community, undefined);
+  assert.equal(parseAssistantReply({ reply: "x", action: { type: "find_communities" } })?.community, undefined);
+});
+
+test("parseAssistantReply: a community draft is validated and trimmed", () => {
+  const ok = parseAssistantReply({ reply: "Draft.", action: { type: "create_community", name: "  KRAS in PDAC ", purpose: " Work on KRAS. " } });
+  assert.deepEqual(ok?.community, { type: "create_community", name: "KRAS in PDAC", purpose: "Work on KRAS." });
+  for (const bad of [
+    { type: "create_community", name: "KR", purpose: "fine purpose" },
+    { type: "create_community", name: "Fine name", purpose: "" },
+    { type: "create_community", name: "x".repeat(81), purpose: "fine purpose" },
+    { type: "create_community", name: "Fine name", purpose: "y".repeat(301) },
+    { type: "create_community", name: 5, purpose: "fine purpose" },
+  ]) {
+    assert.equal(parseAssistantReply({ reply: "x", action: bad })?.community, undefined, JSON.stringify(bad));
+  }
+});
+
+test("community draft: edits are checked before the confirm step", () => {
+  assert.equal(communityDraftProblem("KRAS in PDAC", "Researchers on KRAS."), null);
+  assert.match(communityDraftProblem("  ", "Researchers on KRAS.") ?? "", /name/);
+  assert.match(communityDraftProblem("KRAS in PDAC", " ") ?? "", /what it is for/);
+  assert.match(communityDraftProblem("x".repeat(81), "fine") ?? "", /name/);
+  assert.equal(parseCommunityDraft({ type: "create_community", name: "ab", purpose: "cd" }), null);
+});
+
+test("newCommunityMessage names the topic", () => {
+  assert.equal(newCommunityMessage("  KRAS pancreatic cancer "), "Create a new community on KRAS pancreatic cancer");
+});
+
+test("a community draft survives the sign-in round trip in the chat snapshot", () => {
+  const snap = {
+    messages: [{ role: "user" as const, content: "Create a community on KRAS" }],
+    choices: null,
+    action: null,
+    communityDraft: { type: "create_community" as const, name: "KRAS in PDAC", purpose: "Work on KRAS." },
+  };
+  assert.deepEqual(restoreChat(serializeChat(snap)), snap);
+  const tampered = JSON.stringify({ messages: snap.messages, communityDraft: { type: "create_community", name: "x", purpose: "" } });
+  assert.deepEqual(restoreChat(tampered), { messages: snap.messages, choices: null, action: null });
+});
+
+// ── public pages: the check runs as soon as Public is picked ─────────────────
+
+const PAGE = { type: "create_page" as const, title: "KRAS in PDAC", seed_input: "KRAS pancreatic cancer", visibility: "public" as const };
+
+test("only a public page is checked early", () => {
+  assert.equal(needsEarlyDuplicateCheck(PAGE), true);
+  assert.equal(needsEarlyDuplicateCheck({ ...PAGE, visibility: "private" }), false);
+  assert.equal(needsEarlyDuplicateCheck({ ...PAGE, visibility: "team" }), false);
+});
+
+test("'Create private' turns the page private and skips a pointless check; it creates nothing itself", () => {
+  const r = afterDuplicateChoice(PAGE, "private");
+  assert.equal(r.action.visibility, "private");
+  assert.equal(r.action.title, PAGE.title);
+  assert.equal(r.skipCheck, true);
+  assert.equal(PAGE.visibility, "public", "the original is untouched");
+});
+
+test("'Create anyway' keeps the page public and does not ask again", () => {
+  const r = afterDuplicateChoice(PAGE, "anyway");
+  assert.deepEqual(r.action, PAGE);
+  assert.equal(r.skipCheck, true);
+});
+
+test("pageKey tells proposals apart, ignoring case and spacing", () => {
+  assert.equal(pageKey(PAGE), pageKey({ ...PAGE, title: "  kras in pdac " }));
+  assert.notEqual(pageKey(PAGE), pageKey({ ...PAGE, visibility: "private" }));
+  assert.notEqual(pageKey(PAGE), pageKey({ ...PAGE, seed_input: "EGFR lung cancer" }));
+});
+
+// ── community turns are never searches ──────────────────────────────────────────
+
+test("isCommunityRequest: community requests yes, ordinary science questions no", () => {
+  for (const t of [
+    "Create a community for neuro-oncology researchers at UAB",
+    "I'd like to find or create a community.",
+    "Create a new community on neuro-oncology",
+    "Is there a community on KRAS?",
+  ]) assert.equal(isCommunityRequest(t), true, t);
+  for (const t of [
+    "What are microbial communities in the gut?",
+    "I need info on microbial communities",
+    "Summarize the key findings on KRAS in pancreatic cancer",
+    "Find resources on glioblastoma",
+  ]) assert.equal(isCommunityRequest(t), false, t);
+});
+
+test("isCommunityTurn: the request, and the answer to the topic question, but not other turns", () => {
+  const user = (content: string) => ({ role: "user" as const, content });
+  const bot = (content: string) => ({ role: "assistant" as const, content });
+  assert.equal(isCommunityTurn([user("Create a community for neuro-oncology researchers at UAB")]), true);
+  assert.equal(isCommunityTurn([user("I'd like to find or create a community.")]), true);
+  assert.equal(isCommunityTurn([user("Create a new community on neuro-oncology")]), true);
+  // The answer to "What topic ... is the community for?" has no community word in it.
+  assert.equal(
+    isCommunityTurn([user("I'd like to find or create a community."), bot(COMMUNITY_TOPIC_QUESTION), user("neuro-oncology")]),
+    true
+  );
+  // But the same plain message after a normal answer is a search.
+  assert.equal(isCommunityTurn([user("hi"), bot("Tell me a topic."), user("neuro-oncology")]), false);
+  assert.equal(isCommunityTurn([user("What is known about KRAS?")]), false);
+  assert.equal(isCommunityTurn([]), false);
+});
+
+test("the topic question is the same sentence the backend asks", () => {
+  const py = readFileSync(new URL("../../../../backend/explore-mcp/tools/assistant.py", import.meta.url), "utf8");
+  assert.ok(py.includes(`COMMUNITY_TOPIC_QUESTION = "${COMMUNITY_TOPIC_QUESTION}"`));
+});
+
+test("buildAssistantContext: communities_checked is forwarded on every turn, exactly when true", () => {
+  assert.deepEqual(buildAssistantContext({ communities_checked: true }), { communities_checked: true });
+  assert.deepEqual(
+    buildAssistantContext({ query: " KRAS ", page_created: true, communities_checked: true, junk: 1 }),
+    { query: "KRAS", page_created: true, communities_checked: true }
+  );
+  for (const bad of ["true", 1, null, undefined, false]) {
+    assert.deepEqual(buildAssistantContext({ communities_checked: bad }), {}, String(bad));
+  }
+  assert.deepEqual(buildAssistantContext(null), {});
+  assert.deepEqual(buildAssistantContext("x"), {});
+});
+
+test("the flag survives across turns in the same chat: matches shown, then each later turn still sends it", () => {
+  // The chat component keeps `communitiesChecked` in state until New chat and sends it
+  // through buildAssistantContext (which the API route uses) on every turn.
+  let checked = false;
+  const sent: unknown[] = [];
+  const turn = (text: string) => sent.push(buildAssistantContext({ ...(checked ? { communities_checked: true } : {}) }));
+  turn("Create a community for neuro-oncology researchers at UAB"); // before the matches
+  checked = true; // the match cards appeared
+  turn("Create a new community on neuro-oncology");
+  turn("Change the name");
+  assert.deepEqual(sent, [{}, { communities_checked: true }, { communities_checked: true }]);
+});
+
+test("the chat snapshot keeps communitiesChecked across a reload / sign-in", () => {
+  const snap = {
+    messages: [{ role: "user" as const, content: "Create a community on KRAS" }],
+    choices: null,
+    action: null,
+    communitiesChecked: true,
+  };
+  assert.deepEqual(restoreChat(serializeChat(snap)), snap);
+  assert.equal(restoreChat(JSON.stringify({ messages: snap.messages, communitiesChecked: "yes" }))?.communitiesChecked, undefined);
 });
