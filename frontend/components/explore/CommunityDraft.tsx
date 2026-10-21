@@ -8,6 +8,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
+  joinSentences,
   MAX_COMMUNITY_NAME_CHARS,
   MAX_COMMUNITY_PURPOSE_CHARS,
   communityDraftProblem,
@@ -64,7 +65,7 @@ export default function CommunityDraft({
           Create community &lsquo;{draft.name}&rsquo;?
         </p>
         <p className="font-body-sm text-body-sm text-secondary">
-          {draft.purpose} You&apos;ll be its admin; people ask to join and you approve them.
+          {joinSentences([draft.purpose, "You'll be its admin; people ask to join and you approve them."])}
         </p>
         {!authLoading && !signedIn && (
           <p className="font-body-sm text-body-sm text-secondary">You&apos;ll be asked to sign in first.</p>

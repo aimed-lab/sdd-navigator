@@ -378,6 +378,74 @@ export function countChips(sections: ExploreSection[] | null | undefined): { kin
 
 export type FactRow = { kind: string; label: string; count: number; text: string };
 
+/** What a searched answer carries under it: the chips, source cards, quick
+ *  facts, related questions and the one-time save offer. Kept with the chat in
+ *  sessionStorage so a reload still shows them. */
+export type AnswerExtras = {
+  query: string;
+  chips: { kind: string; text: string }[];
+  cards: ResultCard[];
+  /** Results found by the panel's own search; null when unknown (failed or still running). */
+  total: number | null;
+  facts: FactRow[];
+  related: string[];
+  offerSave: boolean;
+};
+
+const TINTS = ["paper", "dataset", "tool", "news", "podcast", "community", "other"];
+const isStr = (v: unknown, max = 400): v is string => typeof v === "string" && v.length <= max;
+const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function oneExtras(raw: unknown): AnswerExtras | null {
+  if (!isRec(raw) || !isStr(raw.query, 200) || !raw.query.trim()) return null;
+  const chips = (Array.isArray(raw.chips) ? raw.chips : [])
+    .filter((c): c is { kind: string; text: string } => isRec(c) && isStr(c.kind, 60) && isStr(c.text, 120))
+    .slice(0, 12)
+    .map((c) => ({ kind: c.kind, text: c.text }));
+  const cards = (Array.isArray(raw.cards) ? raw.cards : [])
+    .filter(
+      (c): c is ResultCard =>
+        isRec(c) &&
+        isStr(c.id, 200) &&
+        isStr(c.kind, 60) &&
+        isStr(c.tag, 60) &&
+        typeof c.tint === "string" &&
+        TINTS.includes(c.tint) &&
+        isStr(c.title, 400) &&
+        isStr(c.detail, 400) &&
+        (c.url === null || (isStr(c.url, 2000) && /^https?:\/\//i.test(c.url)))
+    )
+    .slice(0, 3)
+    .map((c) => ({ id: c.id, kind: c.kind, tag: c.tag, tint: c.tint, title: c.title, detail: c.detail, url: c.url }));
+  const facts = (Array.isArray(raw.facts) ? raw.facts : [])
+    .filter((f): f is FactRow => isRec(f) && isStr(f.kind, 60) && isStr(f.label, 60) && isStr(f.text, 600) && typeof f.count === "number")
+    .slice(0, 6)
+    .map((f) => ({ kind: f.kind, label: f.label, count: f.count, text: f.text }));
+  const related = (Array.isArray(raw.related) ? raw.related : []).filter((q): q is string => isStr(q, 200)).slice(0, 3);
+  return {
+    query: raw.query.trim(),
+    chips,
+    cards,
+    total: typeof raw.total === "number" && Number.isFinite(raw.total) ? raw.total : null,
+    facts,
+    related,
+    offerSave: raw.offerSave === true,
+  };
+}
+
+/** Stored answer extras, keyed by the index of the assistant message they sit
+ *  under. Anything malformed is dropped (a stored value is untrusted data). */
+export function sanitizeExtras(raw: unknown): Record<number, AnswerExtras> {
+  const out: Record<number, AnswerExtras> = {};
+  if (!isRec(raw)) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const index = Number(key);
+    const extras = oneExtras(value);
+    if (Number.isInteger(index) && index >= 0 && extras) out[index] = extras;
+  }
+  return out;
+}
+
 function namesWithMore(names: string[], shown: number): string {
   const head = names.slice(0, shown).join(", ");
   return names.length > shown ? `${head} and ${names.length - shown} more` : head;

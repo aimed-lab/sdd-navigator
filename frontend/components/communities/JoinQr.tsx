@@ -55,15 +55,18 @@ export default function JoinQr({
   }
 
   return (
-    <div className="flex flex-col items-center gap-1.5">
-      <div className="w-28 h-28 rounded-lg bg-white border border-outline-variant/40 p-1.5 flex items-center justify-center">
+    // QR on the left, its caption and the download on the right: a short row,
+    // so the join card (and the banner around it) stays compact.
+    <div className="flex items-center gap-3">
+      <div className="w-24 h-24 shrink-0 rounded-lg bg-white border border-outline-variant/40 p-1.5 flex items-center justify-center">
         {src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt={`QR code to join ${name}`} width={104} height={104} className="w-full h-full" />
+          <img src={src} alt={`QR code to join ${name}`} width={84} height={84} className="w-full h-full" />
         ) : (
           <span className="material-symbols-outlined text-secondary/40 text-4xl">qr_code_2</span>
         )}
       </div>
+      <div className="flex flex-col items-start gap-1.5 min-w-0">
       <span className="font-label-sm text-label-sm text-secondary">Scan to join</span>
       {isAdmin && (
         <button
@@ -76,6 +79,7 @@ export default function JoinQr({
           Download QR (PNG)
         </button>
       )}
+      </div>
     </div>
   );
 }
