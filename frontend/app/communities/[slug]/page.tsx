@@ -28,11 +28,13 @@ import {
   listCommunityProjects,
   listCommunityResources,
   listMemberLivingPages,
+  listMyLivingPageTexts,
   listMemberRoster,
   listPendingRequests,
 } from "@/lib/server/communities";
 import { listShowcaseByCommunity } from "@/lib/server/showcase";
 import { getMyOnboarding } from "@/lib/server/communityJoin";
+import { buildSimilarity, hasFocus } from "@/lib/server/communityHome/similarMembers";
 import { buildChecklist, showChecklist } from "@/lib/server/communityHome/checklist";
 import { resolveExploreSources, resolveSections, SECTION_LABEL } from "@/lib/communityTypes";
 import {
@@ -85,7 +87,7 @@ export default async function CommunityDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string; join?: string; editFocus?: string }>;
+  searchParams: Promise<{ tab?: string; join?: string; editFocus?: string; sort?: string }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -142,6 +144,26 @@ export default async function CommunityDetailPage({
   const livingPages = access.seesMembers
     ? await listMemberLivingPages(memberRoster.flatMap((m) => (m.user_id ? [m.user_id] : [])))
     : [];
+
+  // Members working on similar things: only for an active member who has set
+  // what they work on. Uses the roster and pages this viewer may already read,
+  // plus their own pages. Everyone else sees today's view.
+  const myRow = user ? memberRoster.find((m) => m.user_id === user.id) : undefined;
+  const viewerHasFocus = isMember && hasFocus(myRow?.focus);
+  const similarity =
+    viewerHasFocus && (tab === "home" || tab === "members")
+      ? buildSimilarity({
+          isMember,
+          viewerUserId: user?.id ?? null,
+          myFocus: myRow?.focus ?? null,
+          myPageTexts: await listMyLivingPageTexts(),
+          roster: memberRoster,
+          pages: livingPages,
+          max: 5,
+        })
+      : null;
+  // "Closest to you" is the default order when it is available.
+  const memberOrder: "closest" | "role" = similarity && query.sort !== "role" ? "closest" : "role";
 
   // The pinned resource and the updates stream, where this viewer may see them.
   const pinned = access.seesPinned ? await getPinnedResource(community.id) : null;
@@ -299,6 +321,8 @@ export default async function CommunityDetailPage({
                 <MembersWorkingOnCard
                   rows={membersWorkingOn(memberRoster)}
                   membersHref={tabs.includes("members") ? hrefFor("members") : null}
+                  similar={similarity ? similarity.items : null}
+                  focusHref={isMember && !viewerHasFocus && tabs.includes("members") ? `${hrefFor("members")}&editFocus=1` : null}
                 />
               )}
               <DigestCard />
@@ -365,6 +389,9 @@ export default async function CommunityDetailPage({
                 slug={slug}
                 viewerUserId={user?.id ?? null}
                 editFocusOnLoad={query.editFocus === "1"}
+                similar={similarity ? similarity.all : null}
+                order={memberOrder}
+                orderHrefs={{ closest: `${hrefFor("members")}&sort=closest`, role: `${hrefFor("members")}&sort=role` }}
               />
             </CollapsibleSection>
             {isMember && sectionOn("who_can_help") && (

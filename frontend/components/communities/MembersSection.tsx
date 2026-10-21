@@ -1,4 +1,6 @@
 import type { CommunityRole, MemberRosterEntry } from "@/lib/server/communities";
+import Link from "next/link";
+import { closestFirst, type SimilarMember } from "@/lib/server/communityHome/similarMembers";
 import ConnectButton from "./ConnectButton";
 import FocusField from "./FocusField";
 import HiddenToggle from "./HiddenToggle";
@@ -67,9 +69,12 @@ function MemberCard({
   viewerUserId,
   isMember,
   editFocusOnLoad,
+  reason,
 }: {
   member: MemberRosterEntry;
   editFocusOnLoad: boolean;
+  /** "Both: KRAS, pancreatic cancer", shown in the Closest-to-you order. */
+  reason?: string;
   communityId: string;
   slug: string;
   viewerUserId: string | null;
@@ -118,6 +123,7 @@ function MemberCard({
           )
         )}
       </div>
+      {reason && <p className="mt-1 font-body-sm text-body-sm text-primary">{reason}</p>}
       {isSelf ? (
         <>
           {member.hidden && (
@@ -150,9 +156,17 @@ export default function MembersSection({
   slug,
   viewerUserId,
   editFocusOnLoad = false,
+  similar = null,
+  order = "role",
+  orderHrefs,
 }: {
   /** Open the viewer's own focus editor on load (?editFocus=1). */
   editFocusOnLoad?: boolean;
+  /** The viewer's similarity to each member (only for a member with a focus),
+   *  or null: then there is no "Closest to you" order. */
+  similar?: SimilarMember[] | null;
+  order?: "closest" | "role";
+  orderHrefs?: { closest: string; role: string };
   /** Whether the roster renders at all — true for an active member, and
    *  ALSO true for a non-member when this community's public_preview is
    *  'open'. See this file's own top comment on why this is a separate
@@ -178,9 +192,53 @@ export default function MembersSection({
     return <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>;
   }
 
+  const closest = !!similar && order === "closest";
+  const reasonOf = new Map((similar ?? []).map((s) => [s.id, s.reason]));
+
   return (
     <div className="flex flex-col gap-6">
-      {GROUP_ORDER.map((role) => {
+      {similar && orderHrefs && (
+        <div className="flex items-center gap-2 font-label-sm text-label-sm" role="group" aria-label="Order members">
+          <span className="text-secondary">Order:</span>
+          {(["closest", "role"] as const).map((o) => (
+            <Link
+              key={o}
+              href={orderHrefs[o]}
+              aria-current={order === o ? "true" : undefined}
+              className={
+                "px-3 py-1 rounded-full border " +
+                (order === o
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-outline-variant/40 text-secondary hover:text-primary")
+              }
+            >
+              {o === "closest" ? "Closest to you" : "By role"}
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {closest && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {closestFirst(
+            roster.map((m) => ({ id: m.member_id, m })),
+            similar ?? []
+          ).map(({ m }) => (
+            <MemberCard
+              key={m.member_id}
+              member={m}
+              communityId={communityId}
+              slug={slug}
+              viewerUserId={viewerUserId}
+              isMember={isMember}
+              editFocusOnLoad={editFocusOnLoad}
+              reason={reasonOf.get(m.member_id)}
+            />
+          ))}
+        </div>
+      )}
+
+      {!closest && GROUP_ORDER.map((role) => {
         const group = roster.filter((m) => m.role === role);
         if (group.length === 0) return null;
         return (
