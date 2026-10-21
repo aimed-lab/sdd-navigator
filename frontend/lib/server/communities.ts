@@ -2450,6 +2450,8 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
 // ── Living pages made by members ─────────────────────────────────────────
 
 export type MemberLivingPage = {
+  /** Server-side only (matching a page to its owner); never sent to the browser. */
+  owner_id: string;
   slug: string;
   title: string;
   seed_input: string;
@@ -2474,13 +2476,28 @@ export async function listMemberLivingPages(ownerIds: string[]): Promise<MemberL
 
   const { data, error } = await db
     .from("pages")
-    .select("slug, title, seed_input, visibility, updated_at, last_refreshed_at")
+    .select("owner_id, slug, title, seed_input, visibility, updated_at, last_refreshed_at")
     .in("owner_id", ids)
     .in("visibility", ["public", "team"])
     .order("updated_at", { ascending: false })
     .limit(60);
   if (error || !data) return [];
   return data as MemberLivingPage[];
+}
+
+/** Titles and seed topics of EVERY living page the signed-in viewer owns
+ *  (private ones too: they are theirs), used only to find members working on
+ *  similar things. Empty when signed out. */
+export async function listMyLivingPageTexts(): Promise<string[]> {
+  const session = await getSession();
+  if (!session) return [];
+  const { data, error } = await session.db
+    .from("pages")
+    .select("title, seed_input")
+    .eq("owner_id", session.user.id)
+    .limit(60);
+  if (error || !data) return [];
+  return (data as { title: string; seed_input: string }[]).flatMap((p) => [p.title, p.seed_input]);
 }
 
 export type CommunityProject = {

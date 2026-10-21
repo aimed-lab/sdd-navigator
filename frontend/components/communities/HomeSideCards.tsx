@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { initials } from "@/lib/server/communityHome/communityHome";
+import type { SimilarMember } from "@/lib/server/communityHome/similarMembers";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -25,13 +26,60 @@ export function UpcomingEventsCard() {
 export function MembersWorkingOnCard({
   rows,
   membersHref,
+  similar = null,
+  focusHref = null,
 }: {
   rows: { id: string; name: string; focus: string }[];
   /** Link to the Members tab; omitted when the viewer can't open it. */
   membersHref: string | null;
+  /** The viewer's closest members (they have a focus and are a member), or null
+   *  for today's card. */
+  similar?: SimilarMember[] | null;
+  /** For a member with no focus yet: where to add it. Shows the invitation line. */
+  focusHref?: string | null;
 }) {
+  if (similar) {
+    return (
+      <Card title="Members working on similar things">
+        {similar.length === 0 ? (
+          <p className="font-body-md text-body-md text-secondary">
+            Nobody has shared something close to your work yet.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {similar.map((m) => (
+              <li key={m.id} className="flex items-start gap-3 min-w-0">
+                <span
+                  aria-hidden
+                  className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-label-sm text-[11px] font-semibold shrink-0"
+                >
+                  {initials(m.name)}
+                </span>
+                <div className="min-w-0">
+                  <div className="font-label-md text-label-md text-on-background truncate">{m.name}</div>
+                  {m.focus && <div className="font-body-sm text-body-sm text-secondary line-clamp-2">{m.focus}</div>}
+                  {m.reason && <div className="font-body-sm text-body-sm text-primary">{m.reason}</div>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        {membersHref && (
+          <Link href={membersHref} className="font-label-sm text-label-sm text-primary hover:underline underline-offset-4">
+            See all members
+          </Link>
+        )}
+      </Card>
+    );
+  }
+
   return (
     <Card title="Members working on">
+      {focusHref && (
+        <Link href={focusHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
+          Add what you work on to see who&apos;s close to you
+        </Link>
+      )}
       {rows.length === 0 ? (
         <p className="font-body-md text-body-md text-secondary">
           Nobody has shared what they work on yet.
