@@ -400,3 +400,49 @@ def test_ten_approvals_for_egfr_lung_cancer_all_survive():
     approvals = [_item("approval", i, f"Drug{i} (generic{i})", "", brand=f"Drug{i}") for i in range(10)]
     by_kind = asst.relevant_by_kind({"sections": [{"kind": "approval", "items": approvals}]}, "EGFR lung cancer")
     assert len(by_kind["approval"]) == 10
+
+
+# ── a listed drug is never said to target the gene in the question ───────────
+
+KRAS_PANCREATIC = {
+    "sections": [
+        {"kind": "approval", "items": [
+            _item("approval", 0, "RASONQUE (daraxonrasib)", "Revolution Medicines \u00b7 FDA approved", brand="RASONQUE"),
+            _item(
+                "approval", 1, "BIZENGRI (zenocutuzumab)", "Merus \u00b7 FDA approved",
+                brand="BIZENGRI", indication="adults with NRG1 gene fusion-positive pancreatic adenocarcinoma",
+            ),
+        ]},
+    ]
+}
+
+
+def test_prompt_forbids_saying_what_a_drug_targets_without_evidence():
+    assert "Never state or imply what a drug, compound or trial targets" in asst._SYSTEM
+    assert 'may only be described as "approved for' in asst._SYSTEM
+    assert "NOT evidence that a listed drug targets it" in asst._SYSTEM
+
+
+def test_model_context_does_not_tie_bizengri_to_kras():
+    summary = asst.summarize_search(KRAS_PANCREATIC, "KRAS pancreatic cancer")
+    assert summary["fda_approved_drugs"] == ["RASONQUE", "BIZENGRI"]
+    # BIZENGRI's own label text is passed, and it says NRG1, not KRAS
+    assert summary["fda_indications_from_label"] == [
+        {"drug": "BIZENGRI", "indication": "adults with NRG1 gene fusion-positive pancreatic adenocarcinoma"}
+    ]
+    # RASONQUE has no indication text, so nothing is claimed about it
+    assert all(x["drug"] != "RASONQUE" for x in summary["fda_indications_from_label"])
+    assert "Do not say what they target" in summary["fda_note"]
+    # nothing in the context ties either drug to KRAS
+    assert "KRAS" not in json.dumps({k: v for k, v in summary.items() if k != "sources"})
+    assert "KRAS" not in json.dumps(summary["sources"])
+    # the indication text is for the model only, not shipped to the app
+    assert all("indication" not in s for s in asst.public_sources(summary))
+
+
+def test_openfda_indication_text_is_trimmed():
+    from sources import openfda
+
+    assert openfda._indication_text({"indications_and_usage": ["1 INDICATIONS AND USAGE  BIZENGRI is for NRG1+ cancers."]}) == "BIZENGRI is for NRG1+ cancers."
+    assert openfda._indication_text({}) is None
+    assert len(openfda._indication_text({"indications_and_usage": ["x " * 400]})) <= 301
