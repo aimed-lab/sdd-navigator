@@ -3,6 +3,7 @@ import { ServerConfigError } from "@/lib/server/supabaseServer";
 import { fetchPaperById } from "@/lib/server/promote/fetchPaper";
 import { generatePromoArticle } from "@/lib/server/promote/generateArticle";
 import { RateLimitedError } from "@/lib/server/promote/groqCall";
+import { suggestKeyFactsOrBlank } from "@/lib/server/promote/suggestKeyFacts";
 import {
   STALE_TTL_GENERATOR,
   TTL_GENERATOR,
@@ -49,6 +50,9 @@ async function generate(input: string): Promise<GeneratorResult | null> {
   if (!paper) return null;
 
   const article = await generatePromoArticle(paper);
+  // Key facts from the generated article's own text (blank where it does not
+  // support one); cached with the rest of the result.
+  const keyFacts = await suggestKeyFactsOrBlank("paper", article.headline, article.standfirst, article.articleBody);
 
   return {
     paper: {
@@ -64,6 +68,7 @@ async function generate(input: string): Promise<GeneratorResult | null> {
     standfirst: article.standfirst,
     articleBody: article.articleBody,
     linkedinPost: article.linkedinPost,
+    keyFacts,
   };
 }
 

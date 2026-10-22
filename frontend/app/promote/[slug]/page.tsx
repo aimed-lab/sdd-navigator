@@ -1,114 +1,42 @@
 // Public article page — /promote/[slug].
 //
 // PUBLIC, no account required: getPublishedArticleBySlug (lib/server/showcase.ts)
-// reads through the ANON Supabase client, never the session client, so this
-// page can never leak an unpublished draft through a signed-in owner's
-// cookies — the published/owner-draft split is enforced by RLS itself
-// (promote_showcase_select_published), and this query's own
-// .eq("published", true) is belt-and-suspenders on top of that.
+// reads through the ANON Supabase client, never the session client, so this page
+// can never leak an unpublished draft through a signed-in owner's cookies. An
+// unknown slug OR an unpublished one both 404.
 //
-// An unknown slug OR an unpublished one both 404 — from the outside there is
-// no way to distinguish "never existed" from "exists but private", which is
-// the correct behavior for a draft the owner hasn't shared yet.
+// LAYOUT (top to bottom):
+//   1. A green hero: the type label, headline, standfirst, authors / presenters,
+//      date and read time.
+//   2. The key-facts strip: three labelled facts, overlapping the bottom of the
+//      hero. Hidden when the item has none.
+//   3. The body: the article text in sections, the figures and attached files,
+//      and an author quote ONLY when the author entered one (the page never
+//      writes a quote, a personal statement or a name for one).
+//   4. A sidebar: the main button, "Download visual card", Share, "Want to work
+//      with this team?" (the Collaborate flow) and "Follow the topic" (the best
+//      matching living page and community; hidden when there is none).
 //
-// LAYOUT. Most arrivals here come from a shared link, not from browsing the
-// site, so the page has to answer "what is this and where am I" itself,
-// before the reader decodes anything else:
-//   1. Eyebrow — SPARC SHOWCASE + the category pill. Prior version opened
-//      straight into the hero image with no site identity at all.
-//   2. Headline, standfirst, byline (authors · date · read time) — in that
-//      order, ABOVE the image. A reader should know what the piece is
-//      before decoding a picture.
-//   3. Hero image — full width of the page's own 1040px column, wider than
-//      the prose, since a narrow-text/wide-image split is the standard
-//      editorial pattern and an image capped to the 680px prose column
-//      reads as small and incidental, not the visual anchor of the page.
-//      Natural aspect ratio, no crop, no letterbox: a conference poster is
-//      tall, a figure is wide, a screenshot is square, and forcing all of
-//      them into one fixed ratio (16:9 was tried) produces heavy empty
-//      bars. max-h-[70vh] is the only constraint, so a very tall poster
-//      can't dominate the whole screen — width is otherwise free to be
-//      anything up to the 1040px column.
-//
-// TWO WIDTHS, ONE PAGE. The outer column is 1040px; the eyebrow/headline/
-// standfirst/byline block and the prose (body, extra media) each sit in
-// their own nested max-w-[680px] wrapper. Only the hero itself uses the
-// full 1040px. 680px is the ORIGINAL prose width, restored — it was
-// briefly widened to 760px to fix "reads like a narrow strip on a wide
-// screen", but that fix was wrong: MEASURED in the browser
-// (Range.getClientRects() per character on real rendered body paragraphs),
-// 760px landed at 80-87 characters/line, averaging ~84 — inside the 80-90
-// range this file already knew was too wide (that's what the OLD 768px
-// max-w-3xl column measured), not the ~76 a generic "18px/760px" formula
-// assumed. Inter (this page's actual body font) is narrower than that
-// formula assumes. 680px measures 66-82 characters/line on real rendered
-// paragraphs (averaging ~75, back to where it was before the 760px
-// experiment) — comfortably narrower than 760px's 80-87, and back inside
-// the range this file's own reasoning always meant by "comfortable" —
-// confirmed the real complaint was never the character count, it was a
-// 680px column with nothing filling the space around it on a 1500px+
-// screen. See the SHARE RAIL note below for the actual fix.
-//
-// SHARE RAIL. The 680px prose column on a wide screen has real empty
-// margin on both sides — instead of widening the column into that space
-// (which just makes lines too long, per the note above), the RIGHT margin
-// now holds a sticky rail: the DOI link (when there is one) and the share
-// buttons, in ShareButtons' own `layout="column"` mode. This also fixes a
-// separate, real problem: sharing is the entire point of this page, and
-// the share row used to sit at the very bottom of a long article, below
-// the fold on any normal viewport.
-//   - POSITIONED RELATIVE TO THE ARTICLE ITSELF, not the viewport: `<article>`
-//     is `relative`, the rail is `absolute left-full ml-6` — `left-full` is
-//     100% of the article's OWN box, so the rail's left edge sits exactly at
-//     the article's right edge by construction, wherever that actually
-//     renders. No calc(), no independent guess at where the 1040px column's
-//     edge is — it literally cannot overlap the article, at any viewport
-//     width, because its position is defined FROM the article's own edge.
-//   - Shown only at 2xl (1536px) and up: below that, a 192px rail plus its
-//     24px gap wouldn't fit in the remaining margin next to the 1040px
-//     article (1536px viewport -> 248px of margin per side, comfortably more
-//     than the 216px the rail+gap needs; narrower viewports don't have that
-//     much room to spare).
-//   - NOT a duplicate control: the DOI card and the bottom ShareButtons row
-//     (both further down this file) are `2xl:hidden` — hidden at exactly the
-//     width the rail becomes visible, so the buttons render in exactly one
-//     place at any given viewport width, never both, never neither.
-//
-// PRESENCE WITHOUT DECORATION. A research showcase page with no visual
-// identity of its own — strip the nav bar and it's indistinguishable from
-// any other article template. Three deliberately restrained moves, no new
-// tokens:
-//   - The header (eyebrow through byline) sits on a full-page-width
-//     bg-primary/5 band — the ONE full-bleed element on the page, a
-//     sibling BEFORE the max-w-[1040px] <article>, not nested inside it,
-//     specifically so it can span edge to edge while the header text
-//     inside it still holds to 680px. The hero sits below the band, in
-//     the article, not inside it.
-//   - Section headings are text-primary instead of text-on-background —
-//     chosen over a green rule above each heading: a rule is an added
-//     decorative element (one more thing drawn on the page), while a
-//     colour change costs nothing extra and does the SAME job — giving
-//     scroll rhythm — using a value already applied everywhere else on
-//     this page (the eyebrow, the pills, the DOI link). Simpler wins here.
-//   - Share row: LinkedIn is the one platform this feature is actually
-//     built around, so it's the only filled (btn-primary) button;
-//     Facebook/X/Copy link stay btn-outline — see ShareButtons.tsx.
+// Link previews: the 1200x630 card (opengraph-image.tsx / twitter-image.tsx next
+// to this file) is the og:image and twitter:image; og:url and the canonical use
+// the site URL config (lib/articleFormat.ts), never a hardcoded host.
 
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublishedArticleBySlug, isOwnerOfShowcase } from "@/lib/server/showcase";
-import { articleUrl, estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
-import { LEGACY_SHOWCASE_TYPE_LABEL, SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
+import { findFollowTopic } from "@/lib/server/promote/followTopic";
+import { eventBadge, visibleFacts } from "@/lib/server/promote/showcaseKinds";
+import { SITE_URL, articleUrl, estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
+import { cardImageUrlFor } from "@/lib/server/promote/shareText";
+import { SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
 import ShareButtons from "@/components/promote/ShareButtons";
 
 export const dynamic = "force-dynamic";
 
-// Turn the "## Heading\n\nparagraph" body generateArticle.ts produces into
-// headings + paragraphs. Deliberately not a markdown library — the shape is
-// fixed (three known section headings, blank-line-separated paragraphs), so a
-// couple of string splits cover it without a new dependency, and an edited
-// draft that keeps roughly that shape still renders sensibly.
+// Turn the "## Heading\n\nparagraph" body into headings + paragraphs. Not a
+// markdown library: the shape is fixed (known section headings, blank-line
+// separated paragraphs), so a couple of string splits cover it.
 function renderBody(body: string) {
   const blocks = body
     .split(/\n\s*\n/)
@@ -117,13 +45,6 @@ function renderBody(body: string) {
 
   return blocks.map((block, i) => {
     if (block.startsWith("## ")) {
-      // 24px/40px-above/12px-below groups a heading with ITS OWN text
-      // rather than reading as floating space between two sections —
-      // font-headline-md/text-headline-md is already the 24px/32px/600
-      // token, and mt-10/mb-3 are Tailwind's own 40px/12px, so this needed
-      // no arbitrary values. text-primary (not text-on-background/a rule
-      // above) is what gives the page scroll rhythm — see the file header
-      // for why that reading won over a green rule.
       return (
         <h2 key={i} className="font-headline-md text-headline-md text-primary mt-10 mb-3 first:mt-0">
           {block.slice(3).trim()}
@@ -133,12 +54,6 @@ function renderBody(body: string) {
     return (
       <p
         key={i}
-        // 18px/1.7, explicit arbitrary values rather than the text-body-lg
-        // token (18px/28px, i.e. 1.56) — the token's bundled line-height
-        // isn't the 1.7 asked for here, and after this session's line-clamp
-        // cascade surprise, compositing a sized token with an overriding
-        // leading-[] utility isn't a risk worth taking versus just being
-        // explicit about both.
         className="font-body-lg text-[18px] leading-[1.7] text-on-background/90 mb-5 whitespace-pre-wrap"
       >
         {block}
@@ -149,41 +64,34 @@ function renderBody(body: string) {
 
 type PageProps = { params: Promise<{ slug: string }> };
 
-/** The image OG/Twitter/the article body lead with: the first attached
- *  `image`-kind file, falling back to the legacy single `image_url` column
- *  for a pre-media-table entry. Attached-media URLs are signed and
- *  short-lived (10 minutes — see signMediaPath), but this page is
- *  force-dynamic, so generateMetadata re-runs and re-signs on every crawl —
- *  a link-preview fetch always gets a fresh URL, never a stale/expired one. */
-function heroImage(article: NonNullable<Awaited<ReturnType<typeof getPublishedArticleBySlug>>>) {
-  return article.media.find((m) => m.kind === "image")?.url ?? article.image_url ?? null;
-}
-
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
   const { slug } = await params;
   const article = await getPublishedArticleBySlug(slug);
   if (!article) return {};
 
   const url = articleUrl(article.slug);
-  const hero = heroImage(article);
-  const images = hero ? [hero] : undefined;
-
+  // The card (route: ./opengraph-image/route.tsx) as an ABSOLUTE url built from
+  // the site URL config, so og:image and twitter:image never take the request
+  // host.
+  const image = cardImageUrlFor(SITE_URL, article.slug);
   return {
+    metadataBase: new URL(SITE_URL),
     title: article.headline,
     description: article.standfirst || undefined,
     alternates: { canonical: url },
     openGraph: {
       type: "article",
       url,
+      siteName: "SmartDrugDiscovery",
       title: article.headline,
       description: article.standfirst || undefined,
-      images,
+      images: [{ url: image, width: 1200, height: 630, alt: article.headline }],
     },
     twitter: {
-      card: images ? "summary_large_image" : "summary",
+      card: "summary_large_image",
       title: article.headline,
       description: article.standfirst || undefined,
-      images,
+      images: [image],
     },
   };
 }
@@ -193,31 +101,32 @@ export default async function ArticlePage({ params }: PageProps) {
   const article = await getPublishedArticleBySlug(slug);
   if (!article) notFound();
 
-  // Owner-only "Edit" link. A separate, session-scoped check — the article
-  // fetch above deliberately never touches owner_id or the session client
-  // (see the file header) — so this can never affect what the public read
-  // returns, only whether this ONE link renders.
-  const isOwner = await isOwnerOfShowcase(slug);
+  // Owner-only "Edit" link: a separate, session-scoped check, so it can never
+  // affect what the public read returns.
+  const [isOwner, found] = await Promise.all([
+    isOwnerOfShowcase(slug),
+    findFollowTopic(article.headline, article.tags, article.standfirst, slug),
+  ]);
+  // The community the author attached the item to is always shown; a matched
+  // one is the fallback.
+  const follow = {
+    page: found.page,
+    community: article.community
+      ? { slug: article.community.slug, name: article.community.name }
+      : found.community,
+  };
 
-  const typeLabel =
-    (SHOWCASE_TYPE_LABEL as Record<string, string>)[article.type] ??
-    LEGACY_SHOWCASE_TYPE_LABEL[article.type] ??
-    article.type;
-
-  const hero = heroImage(article);
-  // Every attached image beyond the hero, plus every slide deck — shown
-  // below the body as a simple gallery/download list rather than woven into
-  // the prose, since the article text doesn't reference them by position.
-  const images = article.media.filter((m) => m.kind === "image");
-  const extraImages = hero && images[0]?.url === hero ? images.slice(1) : images;
-  const decks = article.media.filter((m) => m.kind === "slides");
+  const typeLabel = SHOWCASE_TYPE_LABEL[article.type];
+  const facts = visibleFacts(article.keyFacts);
   const readMinutes = estimateReadMinutes(article.standfirst, article.articleBody);
+  const url = articleUrl(article.slug);
+  const badge = article.type === "event" ? eventBadge(article.eventStartsAt) : null;
 
-  // Authors, then date, then read time — the byline row, in that fixed
-  // order. Journal used to sit in a separate line here; it's dropped from
-  // the header now that the eyebrow's category pill carries that context,
-  // and it's still available via the DOI link below for anyone who wants
-  // the citation itself.
+  const images = article.media.filter((m) => m.kind === "image");
+  const decks = article.media.filter((m) => m.kind === "slides");
+  const hero = images[0]?.url ?? article.image_url ?? null;
+  const extraImages = hero && images[0]?.url === hero ? images.slice(1) : images;
+
   const byline = [
     article.authors || null,
     article.publishedAt ? formatPublishedDate(article.publishedAt) : null,
@@ -226,34 +135,104 @@ export default async function ArticlePage({ params }: PageProps) {
     .filter(Boolean)
     .join(" · ");
 
+  const workTitle = `Working with the team behind: ${article.headline}`.slice(0, 120);
+  const workDescription = `I read "${article.headline}" (${url}) and would like to talk about working together.`;
+  const collaborateHref = `/collaborate/new?title=${encodeURIComponent(workTitle)}&description=${encodeURIComponent(workDescription)}`;
+
+  const sidebar = (
+    <div className="space-y-6">
+      {/* The box always renders. With no link anywhere (the type's link, the
+          DOI, an attached deck or a link written in the text) only the main
+          button is left out. */}
+      <section className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-5 space-y-4">
+        {article.cta && (
+          <a
+            href={article.cta.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-primary w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-lg font-label-md text-label-md"
+          >
+            {article.cta.label}
+            <span className="material-symbols-outlined text-base">arrow_outward</span>
+          </a>
+        )}
+
+        <a
+          href={`/promote/${article.slug}/opengraph-image`}
+          download={`${article.slug}-card.png`}
+          className="btn-outline w-full inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-label-md text-label-md"
+        >
+          <span className="material-symbols-outlined text-base">download</span>
+          Download visual card
+        </a>
+
+        <ShareButtons url={url} title={article.headline} shareText={article.shareText} layout="column" />
+      </section>
+
+      <section className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-5">
+        <h2 className="font-title text-[18px] font-medium text-on-background">Want to work with this team?</h2>
+        <p className="mt-1.5 font-body-sm text-body-sm text-secondary">
+          Start a conversation through Collaborate and say what you have in mind.
+        </p>
+        <Link
+          href={collaborateHref}
+          className="mt-3 inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+        >
+          Get in touch
+          <span className="material-symbols-outlined text-base">arrow_forward</span>
+        </Link>
+      </section>
+
+      {(follow.page || follow.community) && (
+        <section className="rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-5">
+          <h2 className="font-title text-[18px] font-medium text-on-background">Follow the topic</h2>
+          <ul className="mt-3 space-y-2.5">
+            {follow.page && (
+              <li>
+                <Link
+                  href={`/pages/${follow.page.slug}`}
+                  className="flex items-start gap-2 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                >
+                  <span className="material-symbols-outlined text-base shrink-0">auto_stories</span>
+                  {follow.page.title}
+                </Link>
+              </li>
+            )}
+            {follow.community && (
+              <li>
+                <Link
+                  href={`/communities/${follow.community.slug}`}
+                  className="flex items-start gap-2 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                >
+                  <span className="material-symbols-outlined text-base shrink-0">groups</span>
+                  {follow.community.name}
+                </Link>
+              </li>
+            )}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+
   return (
-    <>
-      {/* The one full-bleed element on the page — a sibling before the
-          max-w-[1040px] <article>, not nested inside it, so the tint can
-          span edge to edge while the header text inside it still holds to
-          the 680px column. bg-primary/5: low enough opacity that body-text
-          contrast (rendered on white further down the page) is untouched —
-          this band never contains body copy, only the header. */}
-      <div className="bg-primary/5">
-        <div className="max-w-[680px] mx-auto px-margin-mobile md:px-margin-desktop py-12 md:py-16">
-          {/* 1. Eyebrow — site identity, since most arrivals are a shared link
-              landing straight on this page with no other context. */}
-          <div className="flex items-center gap-3">
-            <span className="font-label-sm text-label-sm uppercase tracking-widest text-primary">
-              SPARC Showcase
-            </span>
-            <span className="px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm">
+    <div className="bg-[var(--explore-bg)]">
+      {/* 1. Hero */}
+      <div className="bg-primary text-on-primary">
+        <div
+          className={
+            "max-w-[1100px] mx-auto px-margin-mobile md:px-margin-desktop pt-12 md:pt-16 " +
+            (facts.length > 0 ? "pb-24 md:pb-28" : "pb-12 md:pb-16")
+          }
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="px-3 py-1 rounded-full bg-white/15 font-label-sm text-label-sm uppercase tracking-wide">
               {typeLabel}
             </span>
-            {/* Next to the category pill, not replacing it — this article
-                still has its OWN type independent of whichever community it
-                may also belong to. Communities are publicly readable (RLS:
-                USING (true)), so this renders for every visitor, same as
-                the category pill next to it. */}
             {article.community && (
               <Link
                 href={`/communities/${article.community.slug}`}
-                className="px-3 py-1 rounded-full bg-secondary/10 text-secondary font-label-sm text-label-sm hover:bg-secondary/20 transition-colors"
+                className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors font-label-sm text-label-sm"
               >
                 {article.community.name}
               </Link>
@@ -261,7 +240,7 @@ export default async function ArticlePage({ params }: PageProps) {
             {isOwner && (
               <Link
                 href={`/promote/${article.slug}/edit`}
-                className="ml-auto shrink-0 inline-flex items-center gap-1 px-4 py-2 rounded-lg btn-outline font-label-md text-label-md"
+                className="ml-auto shrink-0 inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 transition-colors font-label-md text-label-md"
               >
                 <span className="material-symbols-outlined text-base">edit</span>
                 Edit
@@ -269,162 +248,109 @@ export default async function ArticlePage({ params }: PageProps) {
             )}
           </div>
 
-          {/* 2. Headline — 44px desktop, 1.15 line-height. */}
-          <h1 className="mt-4 font-headline-lg text-on-background text-[32px] leading-[1.15] md:text-[44px]">
+          <h1 className="mt-5 max-w-3xl font-headline-lg text-[32px] leading-[1.15] md:text-[44px]">
             {article.headline}
           </h1>
 
-          {/* 3. Standfirst — 21px regular, secondary colour, 1.5 line-height:
-              clearly larger than the 18px body, never the same weight/size. */}
           {article.standfirst && (
-            <p className="mt-4 font-body-lg text-[21px] font-normal leading-[1.5] text-secondary">
+            <p className="mt-4 max-w-3xl font-body-lg text-[20px] leading-[1.5] text-on-primary/90">
               {article.standfirst}
             </p>
           )}
 
-          {/* 4. Byline — 14px muted. text-body-sm IS 14px/20px/400 already, no
-              arbitrary value needed. */}
-          <p className="mt-4 font-body-sm text-body-sm text-secondary/80">{byline}</p>
+          {(badge || article.eventLocation) && (
+            <p className="mt-4 flex items-center gap-2 font-label-md text-label-md text-on-primary/90">
+              <span className="material-symbols-outlined text-base">event</span>
+              {[badge ? `${badge.month} ${badge.day}` : null, article.eventLocation].filter(Boolean).join(" · ")}
+            </p>
+          )}
+
+          <p className="mt-4 font-body-sm text-body-sm text-on-primary/80">{byline}</p>
         </div>
       </div>
 
-      <article className="relative max-w-[1040px] mx-auto px-margin-mobile md:px-margin-desktop pt-8 pb-12 md:pb-16">
-        {/* Hero — BELOW the header band, not above it, and WIDER than the
-            prose column (up to the full 1040px), the standard editorial
-            split of narrow text / wide image. Natural aspect ratio: no
-            fixed box, no object-fit, no background panel — just the image
-            at its own intrinsic ratio, shrunk to fit the column width and
-            capped at 70vh tall so a portrait poster can't take over the
-            screen. */}
-        {hero && (
-          <div className="flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={hero} alt="" className="max-w-full max-h-[70vh] w-auto h-auto rounded-2xl" />
-          </div>
+      <div className="max-w-[1100px] mx-auto px-margin-mobile md:px-margin-desktop pb-20">
+        {/* 2. Key facts, overlapping the hero */}
+        {facts.length > 0 && (
+          <dl className="relative -mt-14 md:-mt-16 grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+            {facts.map((f) => (
+              <div
+                key={f.label}
+                className="rounded-2xl bg-white border border-outline-variant/30 shadow-sm p-5 min-w-0"
+              >
+                <dt className="font-label-sm text-label-sm uppercase tracking-wide text-primary">{f.label}</dt>
+                <dd className="mt-1.5 font-body-md text-body-md text-on-background break-words">{f.value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
 
-        {/* Share rail — sticky, right margin, 2xl and up only. See the file
-            header's SHARE RAIL note for why this exists, how it's
-            positioned, and how it avoids duplicating the DOI card / bottom
-            ShareButtons row (both further down, both `2xl:hidden`). */}
-        <div className="hidden 2xl:block absolute top-0 left-full ml-6 w-48">
-          <div className="sticky top-24 flex flex-col gap-6">
-            {article.doi && (
-              <a
-                href={`https://doi.org/${article.doi}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-start gap-1.5 font-label-md text-label-md text-primary hover:underline underline-offset-4"
-              >
-                <span className="material-symbols-outlined text-base shrink-0">description</span>
-                Read the original paper
-              </a>
+        <div className="mt-10 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_280px] gap-10 lg:gap-14 items-start">
+          {/* 3. Body */}
+          <article className="min-w-0 max-w-[680px]">
+            {hero && (
+              <div className="mb-8">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={hero} alt="" className="max-w-full max-h-[70vh] w-auto h-auto rounded-2xl" />
+              </div>
             )}
-            <ShareButtons
-              url={articleUrl(article.slug)}
-              title={article.headline}
-              linkedinPost={article.linkedinPost}
-              layout="column"
-            />
-          </div>
-        </div>
 
-        <div className="max-w-[680px] mx-auto">
-          <div className={hero ? "mt-8" : ""}>{renderBody(article.articleBody)}</div>
+            <div>{renderBody(article.articleBody)}</div>
 
-          {/* Extra images get the SAME treatment as the hero — natural
-              aspect ratio, capped to the content width and 70vh tall, no
-              crop — just stacked with space between them instead of floating
-              as bare, unframed <img> tags at their raw natural size. */}
-          {extraImages.length > 0 && (
-            <div className="mt-8 space-y-6">
-              {extraImages.map((m) => (
-                <div key={m.id} className="flex justify-center">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={m.url}
-                    alt=""
-                    className="max-w-full max-h-[70vh] w-auto h-auto rounded-2xl"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
+            {/* Only a quote the author typed; nothing is written for them. */}
+            {article.quote && (
+              <figure className="my-10 border-l-4 border-primary pl-6">
+                <blockquote className="font-title text-[24px] leading-snug text-on-background">
+                  &ldquo;{article.quote}&rdquo;
+                </blockquote>
+                {article.quoteBy && (
+                  <figcaption className="mt-3 font-label-md text-label-md text-secondary">
+                    {article.quoteBy}
+                  </figcaption>
+                )}
+              </figure>
+            )}
 
-          {/* A PDF/PPTX has no business trying to render as an <img> — it
-              just breaks. Every "slides" media file is a labelled download
-              link instead, filename plus size so it reads as a real
-              attachment, not a mystery link. */}
-          {decks.length > 0 && (
-            <div className="mt-8">
-              <h2 className="font-label-md text-label-md text-secondary uppercase mb-3">
-                Slides &amp; documents
-              </h2>
-              <ul className="space-y-2">
-                {decks.map((m) => (
-                  <li key={m.id}>
-                    <a
-                      href={m.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 font-label-md text-label-md text-primary hover:underline underline-offset-4"
-                    >
-                      <span className="material-symbols-outlined text-base">slideshow</span>
-                      {m.filename}
-                      <span className="text-secondary font-body-sm text-body-sm">
-                        ({(m.sizeBytes / 1024 / 1024).toFixed(1)} MB)
-                      </span>
-                    </a>
-                  </li>
+            {extraImages.length > 0 && (
+              <div className="mt-8 space-y-6">
+                {extraImages.map((m) => (
+                  <div key={m.id}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={m.url} alt="" className="max-w-full max-h-[70vh] w-auto h-auto rounded-2xl" />
+                  </div>
                 ))}
-              </ul>
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* Footer card — the DOI link, above the share row. "Posted by
-              <name> · <affiliation>" used to render here too, but every
-              article today has exactly one owner, so it was the same name
-              on every card — identical attribution repeated, not
-              information, the same reasoning ResourcesSection.tsx's
-              "Added by" line was dropped for. The owner LOOKUP
-              (isOwnerOfShowcase above, article.owner from
-              getPublishedArticleBySlug) stays in place — it's not dead
-              code, just unrendered here — because attribution becomes the
-              point once an article can have more than one contributor,
-              and at that point it should show unconditionally, not behind
-              a distinct-contributor check. The card itself now depends
-              only on the DOI: nothing else lives in it once the byline is
-              gone, so with no DOI there's nothing left to show a card for.
-              `2xl:hidden` — below 2xl this is the ONLY DOI link on the
-              page; at 2xl and up, the rail's own copy takes over and this
-              one hides, so there is never more than one at any width. */}
-          {article.doi && (
-            <div className="mt-10 rounded-2xl border border-outline-variant/40 bg-surface-container-lowest p-6 2xl:hidden">
-              <a
-                href={`https://doi.org/${article.doi}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-label-md text-label-md text-primary hover:underline underline-offset-4"
-              >
-                Read the original paper
-                <span className="material-symbols-outlined text-base">open_in_new</span>
-              </a>
-            </div>
-          )}
+            {decks.length > 0 && (
+              <div className="mt-8">
+                <h2 className="font-label-md text-label-md text-secondary uppercase mb-3">Slides &amp; documents</h2>
+                <ul className="space-y-2">
+                  {decks.map((m) => (
+                    <li key={m.id}>
+                      <a
+                        href={m.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+                      >
+                        <span className="material-symbols-outlined text-base">slideshow</span>
+                        {m.filename}
+                        <span className="text-secondary font-body-sm text-body-sm">
+                          ({(m.sizeBytes / 1024 / 1024).toFixed(1)} MB)
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </article>
 
-          {/* `2xl:hidden` — same reasoning as the DOI card above: this is
-              the only share row below 2xl; the rail's own ShareButtons
-              takes over at 2xl and up, so exactly one instance is ever
-              visible, never both, never neither. */}
-          <div className="mt-10 border-t border-outline-variant/30 pt-8 2xl:hidden">
-            <ShareButtons
-              url={articleUrl(article.slug)}
-              title={article.headline}
-              linkedinPost={article.linkedinPost}
-            />
-          </div>
+          {/* 4. Sidebar */}
+          <aside className="lg:sticky lg:top-24">{sidebar}</aside>
         </div>
-      </article>
-    </>
+      </div>
+    </div>
   );
 }

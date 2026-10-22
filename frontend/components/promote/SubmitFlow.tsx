@@ -39,15 +39,20 @@ import ArticleEditor, {
 } from "@/components/promote/ArticleEditor";
 import MediaUploader from "@/components/promote/MediaUploader";
 import {
+  SHOWCASE_TYPES,
   SHOWCASE_TYPE_LABEL,
   STRUCTURED_QUESTIONS,
+  type KeyFact,
   type ShowcaseType,
 } from "@/lib/showcaseTypes";
 
 const EXAMPLES = ["10.1126/science.1225829", "22745249"];
 
-// Every choice except "paper" — the DOI box above already owns that one.
-const NON_PAPER_TYPES = (Object.keys(STRUCTURED_QUESTIONS) as (keyof typeof STRUCTURED_QUESTIONS)[]);
+// Every choice except Paper and Preprint — the DOI box above owns those (the
+// editor's Type field can switch a generated paper to a preprint).
+const NON_PAPER_TYPES = SHOWCASE_TYPES.filter(
+  (t): t is keyof typeof STRUCTURED_QUESTIONS => t in STRUCTURED_QUESTIONS
+);
 
 const fieldClass =
   "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -108,6 +113,8 @@ export default function SubmitFlow({
   const [articleBody, setArticleBody] = useState("");
   const [linkedinPost, setLinkedinPost] = useState("");
   const [authors, setAuthors] = useState("");
+  // The three key facts, taken from the author's own text (never composed).
+  const [keyFacts, setKeyFacts] = useState<KeyFact[] | undefined>(undefined);
 
   // Structured path — the five answers, plus the optional GitHub prefill
   // (tool type only).
@@ -206,6 +213,10 @@ export default function SubmitFlow({
       setLinkedinPost(json.linkedinPost);
       setAuthors(authorsStr);
       setType("paper");
+      // Filled by the generator from the article's own text; blank where the
+      // text does not support a fact.
+      const paperFacts: KeyFact[] | undefined = Array.isArray(json.keyFacts) ? json.keyFacts : undefined;
+      setKeyFacts(paperFacts);
 
       if (entry) {
         // A row already exists (from an earlier attached file) — update it
@@ -220,6 +231,7 @@ export default function SubmitFlow({
           doi: paperInfo.doi,
           link: paperInfo.sourceUrl,
           journal: paperInfo.journal,
+          keyFacts: paperFacts,
         });
         if (!updated.ok) setSaveError(updated.error);
       } else {
@@ -235,6 +247,7 @@ export default function SubmitFlow({
           link: paperInfo.sourceUrl,
           journal: paperInfo.journal,
           communityId: null,
+          keyFacts: paperFacts,
         });
         if (created.ok) setEntry({ id: created.id, slug: created.slug });
         else setSaveError(created.error);
@@ -287,6 +300,11 @@ export default function SubmitFlow({
       setLinkedinPost(json.linkedinPost);
       setStructGenerated(true);
 
+      // Filled by the generator from the article's own text; blank where the
+      // text does not support a fact.
+      const answerFacts: KeyFact[] | undefined = Array.isArray(json.keyFacts) ? json.keyFacts : undefined;
+      setKeyFacts(answerFacts);
+
       const id = await ensureDraft();
       const updated = await updateArticleDraftAction(id, {
         type,
@@ -295,6 +313,7 @@ export default function SubmitFlow({
         articleBody: json.articleBody,
         linkedinPost: json.linkedinPost,
         authors,
+        keyFacts: answerFacts,
       });
       if (!updated.ok) setSaveError(updated.error);
     } catch (e) {
@@ -373,6 +392,7 @@ export default function SubmitFlow({
           linkedinPost,
           authors,
           communityId: null,
+          keyFacts,
         }}
         media={[]}
         paper={paperInfo}
