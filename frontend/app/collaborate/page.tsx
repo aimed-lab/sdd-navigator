@@ -141,6 +141,26 @@ export default async function CollaboratePage({
       {/* Pinned open call: a static tile, not a post */}
       <OpenCallTile />
 
+      {/* Service providers directory */}
+      <Link
+        href="/collaborate/providers"
+        className="tile group mt-4 p-6 flex items-center justify-between gap-6"
+        style={{ background: "var(--type-other-bg)" }}
+      >
+        <span className="min-w-0">
+          <span className="block font-title text-[22px] font-medium text-on-background">
+            Find a service provider
+          </span>
+          <span className="block mt-1 font-body-md text-body-md text-secondary">
+            Chemistry, biology, AI and manufacturing companies we met at BioTechX Europe 2026.
+          </span>
+        </span>
+        <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
+          Browse
+          <span className="material-symbols-outlined">arrow_forward</span>
+        </span>
+      </Link>
+
       {/* Search (plain GET form — keeps every view linkable) */}
       <form action="/collaborate" method="get" className="mt-8 max-w-3xl">
         {filter !== "all" && <input type="hidden" name="filter" value={filter} />}

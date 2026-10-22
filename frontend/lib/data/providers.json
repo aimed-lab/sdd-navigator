@@ -1,0 +1,673 @@
+[
+  {
+    "slug": "kactus",
+    "name": "KACTUS",
+    "category": "Reagents/Consumables",
+    "services": [
+      "VLP displayed antigens",
+      "nanodisc displayed antigens",
+      "recombinant proteins",
+      "GMP enzymes",
+      "custom protein expression",
+      "SAMS protein expression platform"
+    ],
+    "description": "Designs and manufactures recombinant proteins and enzymes, including multi-pass transmembrane proteins displayed on virus-like particles and nanodiscs.",
+    "website": "https://kactusbio.com/",
+    "website_source": "brochure",
+    "email": "support@kactusbio.us",
+    "phone": "",
+    "location": "Waltham, United States",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/kactus/cover.webp",
+    "brochure_pages": [
+      "/providers/kactus/page-1.webp",
+      "/providers/kactus/page-2.webp",
+      "/providers/kactus/page-3.webp",
+      "/providers/kactus/page-4.webp"
+    ]
+  },
+  {
+    "slug": "aurigene-pharmaceutical-services",
+    "name": "Aurigene Pharmaceutical Services",
+    "category": "CRO - Chemistry",
+    "services": [
+      "AI-driven drug discovery",
+      "medicinal chemistry",
+      "hit identification",
+      "hit-to-lead",
+      "lead optimization",
+      "candidate nomination"
+    ],
+    "description": "Offers Aurigene.AI, a lab-in-the-loop platform combining computational design, medicinal chemistry and biological testing from target to candidate nomination.",
+    "website": "https://www.aurigeneservices.com/",
+    "website_source": "brochure",
+    "email": "contactapsl@aurigeneservices.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "~8 mo",
+        "label": "Concept to validated hit"
+      },
+      {
+        "value": "4.5x",
+        "label": "Faster delivery"
+      },
+      {
+        "value": "~70%",
+        "label": "Cost reduction"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/aurigene-pharmaceutical-services/cover.webp",
+    "brochure_pages": [
+      "/providers/aurigene-pharmaceutical-services/page-1.webp",
+      "/providers/aurigene-pharmaceutical-services/page-2.webp"
+    ]
+  },
+  {
+    "slug": "apeloa-pharmaceutical-co",
+    "name": "Apeloa Pharmaceutical Co.",
+    "category": "CDMO/Manufacturing",
+    "services": [
+      "flow chemistry",
+      "microreactor production",
+      "HPAPI manufacturing",
+      "high potency capability (OEB4/OEB5)",
+      "process analytical technology",
+      "commercial production"
+    ],
+    "description": "Provides integrated solutions from discovery to commercial production, including flow chemistry workshops and high-potency API facilities.",
+    "website": "https://apeloa.com/",
+    "website_source": "brochure",
+    "email": "info_cdmo@apeloa.com",
+    "phone": "",
+    "location": "Billerica, United States",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "75 m³",
+        "label": "Total HPAPI reactor volume"
+      },
+      {
+        "value": "35",
+        "label": "High potency reactors"
+      },
+      {
+        "value": "10+",
+        "label": "Years of flow chemistry project experience"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/apeloa-pharmaceutical-co/cover.webp",
+    "brochure_pages": [
+      "/providers/apeloa-pharmaceutical-co/page-1.webp",
+      "/providers/apeloa-pharmaceutical-co/page-2.webp"
+    ]
+  },
+  {
+    "slug": "paia",
+    "name": "PAIA",
+    "category": "Reagents/Consumables",
+    "services": [
+      "developability assays",
+      "hydrophobicity assays",
+      "polyreactivity assays",
+      "FcRn binding assays",
+      "titer assays",
+      "glycan and aggregation assays"
+    ],
+    "description": "Supplies ready-to-use, 384-well developability assays for high-throughput data generation to support candidate selection and protein engineering.",
+    "website": "https://www.paiabio.com/",
+    "website_source": "web lookup (not printed in brochure)",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/paia/cover.webp",
+    "brochure_pages": [
+      "/providers/paia/page-1.webp",
+      "/providers/paia/page-2.webp",
+      "/providers/paia/page-3.webp"
+    ]
+  },
+  {
+    "slug": "domainex",
+    "name": "Domainex",
+    "category": "CRO - Chemistry",
+    "services": [
+      "Direct-to-Biology (D2B)",
+      "medicinal chemistry",
+      "D2ADME early ADME profiling",
+      "biological screening",
+      "library design",
+      "data analysis"
+    ],
+    "description": "Integrated drug discovery services company in Cambridge, UK, offering Direct-to-Biology chemistry, biology and ADME profiling from target selection to candidate nomination.",
+    "website": "https://domainex.co.uk/",
+    "website_source": "brochure",
+    "email": "enquiries@domainex.co.uk",
+    "phone": "",
+    "location": "Cambridge, UK",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/domainex/cover.webp",
+    "brochure_pages": [
+      "/providers/domainex/page-1.webp",
+      "/providers/domainex/page-2.webp",
+      "/providers/domainex/page-3.webp"
+    ]
+  },
+  {
+    "slug": "pozescaf",
+    "name": "PozeSCAF",
+    "category": "AI/Software",
+    "services": [
+      "ADMET prediction",
+      "explainable AI models",
+      "absorption and distribution models",
+      "metabolism and excretion models",
+      "toxicity prediction"
+    ],
+    "description": "Offers multi-model explainable AI forecasts for ADMET properties, covering absorption, distribution, metabolism, excretion and toxicity endpoints.",
+    "website": "https://pozescaf.com/",
+    "website_source": "web lookup (not printed in brochure)",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "500+",
+        "label": "ADMET models built"
+      },
+      {
+        "value": ">75%",
+        "label": "Accuracy"
+      },
+      {
+        "value": "50+",
+        "label": "Projects validated in"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/pozescaf/cover.webp",
+    "brochure_pages": [
+      "/providers/pozescaf/page-1.webp"
+    ]
+  },
+  {
+    "slug": "wuxi-tides",
+    "name": "WuXi TIDES",
+    "category": "CDMO/Manufacturing",
+    "services": [
+      "oligonucleotide therapeutics",
+      "peptide therapeutics"
+    ],
+    "description": "WuXi AppTec unit whose brochure covers oligonucleotide and peptide therapeutics.",
+    "website": "https://tides.wuxiapptec.com/",
+    "website_source": "brochure",
+    "email": "WuXi_TIDES@wuxiapptec.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/wuxi-tides/cover.webp",
+    "brochure_pages": [
+      "/providers/wuxi-tides/page-1.webp",
+      "/providers/wuxi-tides/page-2.webp"
+    ]
+  },
+  {
+    "slug": "pharmablock",
+    "name": "PharmaBlock",
+    "category": "CRO - Chemistry",
+    "services": [
+      "chemistry technologies",
+      "engineering technologies",
+      "product search"
+    ],
+    "description": "Brochure for PharmaBlock chemistry and engineering technologies, listing entities and sites in Nanjing, Hatfield, Zhejiang and Shandong.",
+    "website": "https://www.pharmablock.com/",
+    "website_source": "brochure",
+    "email": "sales@pharmablock.com",
+    "phone": "+86-400 025 5188",
+    "location": "Nanjing, China",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/pharmablock/cover.webp",
+    "brochure_pages": [
+      "/providers/pharmablock/page-1.webp",
+      "/providers/pharmablock/page-2.webp"
+    ]
+  },
+  {
+    "slug": "openeye-cadence-molecular-sciences",
+    "name": "OpenEye | Cadence Molecular Sciences",
+    "category": "AI/Software",
+    "services": [
+      "Target X",
+      "enhanced sampling MD",
+      "cryptic pocket detection",
+      "ligandability ranking",
+      "cloud computing on Orion"
+    ],
+    "description": "Target X infosheet: cloud-based dynamic protein simulation that detects and scores cryptic, allosteric and hidden binding pockets.",
+    "website": "https://www.eyesopen.com/",
+    "website_source": "web lookup (not printed in brochure)",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": ">90%",
+        "label": "Accuracy detecting known binding sites"
+      },
+      {
+        "value": "~$100s",
+        "label": "Typical compute cost per protein target on Orion"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/openeye-cadence-molecular-sciences/cover.webp",
+    "brochure_pages": [
+      "/providers/openeye-cadence-molecular-sciences/page-1.webp"
+    ]
+  },
+  {
+    "slug": "promega-corporation",
+    "name": "Promega Corporation",
+    "category": "Reagents/Consumables",
+    "services": [
+      "energy metabolism assays",
+      "luminescent metabolite detection kits",
+      "cell viability assays",
+      "cytotoxicity assays",
+      "Glo assay kits",
+      "GloMax multimode readers"
+    ],
+    "description": "Sells luminescent assay kits to measure metabolites in glycolysis, gluconeogenesis, lipolysis and the TCA cycle, plus viability assays.",
+    "website": "https://www.promega.com/",
+    "website_source": "brochure",
+    "email": "",
+    "phone": "608-274-4330",
+    "location": "Madison, USA",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/promega-corporation/cover.webp",
+    "brochure_pages": [
+      "/providers/promega-corporation/page-1.webp",
+      "/providers/promega-corporation/page-2.webp"
+    ]
+  },
+  {
+    "slug": "hitchem",
+    "name": "HitChem",
+    "category": "Reagents/Consumables",
+    "services": [
+      "diversity library",
+      "compounds in stock",
+      "384-well plate solution",
+      "cherry pick powder"
+    ],
+    "description": "Supplies a diversity compound library with in-stock compounds offered in 384-well plates or as cherry-picked powder.",
+    "website": "https://hit-chem.com/",
+    "website_source": "brochure",
+    "email": "marketing@hit-chem.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/hitchem/cover.webp",
+    "brochure_pages": [
+      "/providers/hitchem/page-1.webp"
+    ]
+  },
+  {
+    "slug": "pharmaron",
+    "name": "Pharmaron",
+    "category": "CRO - Chemistry",
+    "services": [
+      "discovery chemistry",
+      "in vitro biology",
+      "in vivo pharmacology",
+      "DMPK",
+      "GLP safety assessment",
+      "GMP manufacturing"
+    ],
+    "description": "Offers an end-to-end platform for small molecules and biologics/CGT, from discovery and preclinical work through clinical development and commercial manufacturing.",
+    "website": "https://pharmaron.com/",
+    "website_source": "brochure",
+    "email": "bd@pharmaron.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/pharmaron/cover.webp",
+    "brochure_pages": [
+      "/providers/pharmaron/page-1.webp"
+    ]
+  },
+  {
+    "slug": "sygnature-discovery",
+    "name": "Sygnature Discovery",
+    "category": "CRO - Chemistry",
+    "services": [
+      "chemistry & CADD",
+      "biology",
+      "protein & structure",
+      "DMPK & formulation",
+      "in vivo pharmacology",
+      "integrated drug discovery"
+    ],
+    "description": "CRO offering integrated and standalone drug discovery services from target validation to candidate selection across immunology, oncology, neuroscience and other areas.",
+    "website": "https://sygnaturediscovery.com/",
+    "website_source": "brochure",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "61",
+        "label": "Programs: 23 preclinical, 36 clinical, 2 approved"
+      },
+      {
+        "value": "900+",
+        "label": "Team members, 700+ scientists"
+      },
+      {
+        "value": "90%",
+        "label": "Recurrent customers"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/sygnature-discovery/cover.webp",
+    "brochure_pages": [
+      "/providers/sygnature-discovery/page-1.webp",
+      "/providers/sygnature-discovery/page-2.webp"
+    ]
+  },
+  {
+    "slug": "toxindex",
+    "name": "ToxIndex",
+    "category": "AI/Software",
+    "services": [
+      "AI toxicology risk assessments",
+      "REACH dossiers",
+      "read-across",
+      "GHS classification",
+      "DNEL/DMEL derivation",
+      "impurity qualification"
+    ],
+    "description": "Full-service AI toxicology platform by Insilica producing safety risk assessments using a chemical safety knowledge graph, computational tox tools and expert toxicologists.",
+    "website": "https://toxindex.com/",
+    "website_source": "brochure",
+    "email": "agent@toxindex.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "3 hours",
+        "label": "Per safety assessment"
+      },
+      {
+        "value": "$10K",
+        "label": "Per assessment, vs CRO $50K-500K"
+      },
+      {
+        "value": "600+",
+        "label": "Computational tox tools"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/toxindex/cover.webp",
+    "brochure_pages": [
+      "/providers/toxindex/page-1.webp"
+    ]
+  },
+  {
+    "slug": "firstword-group",
+    "name": "FirstWord Group",
+    "category": "Other",
+    "services": [
+      "news and analysis service",
+      "MyFW+ customization",
+      "physician intelligence",
+      "KOL interviews",
+      "searchable content archive"
+    ],
+    "description": "FirstWord HealthTech+ is a news and analysis service for digital health professionals, with customizable alerts and physician intelligence.",
+    "website": "https://firstwordhealthtech.com/",
+    "website_source": "brochure",
+    "email": "info@firstwordgroup.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/firstword-group/cover.webp",
+    "brochure_pages": [
+      "/providers/firstword-group/page-1.webp"
+    ]
+  },
+  {
+    "slug": "bullfrog-ai",
+    "name": "BullFrog AI",
+    "category": "AI/Software",
+    "services": [
+      "bfLEAP platform",
+      "bfARENAS",
+      "target discovery and prioritization",
+      "LLM-based decision support",
+      "feature importance",
+      "similarity & clustering"
+    ],
+    "description": "Poster on AI tools using LLM-based pairwise comparisons in bfARENAS and the bfLEAP platform to rank and prioritize drug targets.",
+    "website": "https://bullfrogai.com/",
+    "website_source": "brochure QR code",
+    "email": "",
+    "phone": "",
+    "location": "Gaithersburg",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/bullfrog-ai/cover.webp",
+    "brochure_pages": [
+      "/providers/bullfrog-ai/page-1.webp"
+    ]
+  },
+  {
+    "slug": "fovus",
+    "name": "Fovus",
+    "category": "AI/Software",
+    "services": [
+      "benchmark-driven cloud HPC",
+      "workload benchmarking",
+      "intelligent orchestration",
+      "Spot and on-demand optimization",
+      "Nextflow/WDL pipelines",
+      "molecular simulation"
+    ],
+    "description": "Benchmark-driven cloud HPC service that profiles a customer workload and runs it on ranked cloud strategies, hosted or in the customer's AWS account.",
+    "website": "https://fovus.co/",
+    "website_source": "brochure",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": "Weeks to hours",
+        "label": "Public customer result (Chemspace, compound screening / GROMACS MD)"
+      },
+      {
+        "value": "85%",
+        "label": "Lower cloud HPC cost in that customer result"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/fovus/cover.webp",
+    "brochure_pages": [
+      "/providers/fovus/page-1.webp",
+      "/providers/fovus/page-2.webp"
+    ]
+  },
+  {
+    "slug": "chemspace",
+    "name": "Chemspace",
+    "category": "Reagents/Consumables",
+    "services": [
+      "make-on-demand small molecules",
+      "compound catalogs",
+      "virtual screening",
+      "medicinal chemistry",
+      "cheminformatics",
+      "AI/ML platform"
+    ],
+    "description": "Platform for discovering, designing and delivering small molecules, with searchable catalogs plus virtual screening, medicinal chemistry and cheminformatics services.",
+    "website": "https://chem-space.com/",
+    "website_source": "brochure",
+    "email": "sales@chem-space.com",
+    "phone": "",
+    "location": "Kyiv, Ukraine",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/chemspace/cover.webp",
+    "brochure_pages": [
+      "/providers/chemspace/page-1.webp",
+      "/providers/chemspace/page-2.webp",
+      "/providers/chemspace/page-3.webp"
+    ]
+  },
+  {
+    "slug": "cube-biotech",
+    "name": "Cube Biotech",
+    "category": "Reagents/Consumables",
+    "services": [
+      "protein expression",
+      "protein solubilization",
+      "protein stabilization",
+      "protein purification",
+      "protein characterization",
+      "NativeMP receptor targets"
+    ],
+    "description": "Offers protein services and active, native, full-length membrane protein targets (NativeMP receptors).",
+    "website": "https://cube-biotech.com/",
+    "website_source": "web lookup (not printed in brochure)",
+    "email": "servicesolution@cube-biotech.com",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/cube-biotech/cover.webp",
+    "brochure_pages": [
+      "/providers/cube-biotech/page-1.webp",
+      "/providers/cube-biotech/page-2.webp"
+    ]
+  },
+  {
+    "slug": "vazyme",
+    "name": "Vazyme",
+    "category": "Lab Instruments/Equipment",
+    "services": [
+      "automated liquid handling workstation (VNL-96P)",
+      "plate-based library prep kits",
+      "NGS library preparation",
+      "recombinant enzymes",
+      "reagents and consumables"
+    ],
+    "description": "Brochure for the VNL-96P automated liquid handling workstation and plate-based NGS library prep kits from a reagent, enzyme and instrument provider.",
+    "website": "https://www.vazyme.com/",
+    "website_source": "brochure",
+    "email": "support@vazyme.com",
+    "phone": "+86 400-168-5000",
+    "location": "Nanjing, China",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/vazyme/cover.webp",
+    "brochure_pages": [
+      "/providers/vazyme/page-1.webp",
+      "/providers/vazyme/page-2.webp"
+    ]
+  },
+  {
+    "slug": "truecourse-biosciences",
+    "name": "TrueCourse Biosciences",
+    "category": "CRO - Biology/Assays",
+    "services": [
+      "construct design",
+      "protein expression and purification",
+      "biophysical characterization",
+      "structural biology",
+      "cryo-EM",
+      "crystallography"
+    ],
+    "description": "US-based CRO taking protein projects from construct design through expression, purification, biophysical characterization and structural biology.",
+    "website": "https://truecoursebio.com/",
+    "website_source": "brochure",
+    "email": "",
+    "phone": "",
+    "location": "USA",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [],
+    "key_facts_source": "",
+    "cover": "/providers/truecourse-biosciences/cover.webp",
+    "brochure_pages": [
+      "/providers/truecourse-biosciences/page-1.webp"
+    ]
+  },
+  {
+    "slug": "certara",
+    "name": "Certara",
+    "category": "AI/Software",
+    "services": [
+      "drug discovery and development software",
+      "virtual patient populations",
+      "regulatory support"
+    ],
+    "description": "Certara offers software and solutions for drug discovery and development, from first-in-human trials to regulatory approvals and post-launch.",
+    "website": "https://www.certara.com/",
+    "website_source": "web lookup (not printed in brochure)",
+    "email": "",
+    "phone": "",
+    "location": "",
+    "event": "BioTechX Europe 2026",
+    "key_facts": [
+      {
+        "value": ">100",
+        "label": "Novel drugs and 325 label claims approved using Certara technology in lieu of clinical studies"
+      },
+      {
+        "value": "2,600+",
+        "label": "Customers in more than 70 countries"
+      },
+      {
+        "value": "23",
+        "label": "Global regulatory agencies adopted Certara software"
+      }
+    ],
+    "key_facts_source": "From the company's BioTechX Europe 2026 brochure; not verified by SmartDrugDiscovery",
+    "cover": "/providers/certara/cover.webp",
+    "brochure_pages": [
+      "/providers/certara/page-1.webp",
+      "/providers/certara/page-2.webp"
+    ]
+  }
+]
