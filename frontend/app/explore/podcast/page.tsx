@@ -17,11 +17,11 @@
 // design system, not that file's older palette: forest-green #006e2f primary,
 // glass cards, Nav/Footer from the root layout.
 //
-// Server Component for the data fetch (+ the static intro/category strip);
+// Server Component for the data fetch (+ the static intro and a back link to Explore);
 // PodcastGrid is the client half that owns the search box and filtering —
 // same split as TranscriptSection on the episode detail page.
 
-import CategoryStrip from "@/components/CategoryStrip";
+import Link from "next/link";
 import PodcastGrid from "@/components/podcast/PodcastGrid";
 import { listEpisodes } from "@/lib/server/wiki";
 
@@ -40,6 +40,14 @@ export default async function PodcastPage({
 
   return (
     <section className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20">
+      <Link
+        href="/explore"
+        className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1 mb-6"
+      >
+        <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+        Explore
+      </Link>
+
       {/* Intro */}
       <div className="max-w-3xl space-y-4">
         <span className="inline-block px-4 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm uppercase">
@@ -52,13 +60,6 @@ export default async function PodcastPage({
           Every episode, transcribed and turned into a searchable wiki page — the
           concepts, entities and tags pulled out of each conversation.
         </p>
-      </div>
-
-      {/* Category strip — same shared component as the feed. In navigate mode
-          every other chip links back into /explore scoped to that kind, so this
-          page isn't a dead end. Podcast stays active (it IS this page). */}
-      <div className="mt-8 -mb-6">
-        <CategoryStrip selected="episode" navigate />
       </div>
 
       <PodcastGrid

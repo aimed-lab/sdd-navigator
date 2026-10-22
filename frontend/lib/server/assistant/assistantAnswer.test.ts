@@ -8,6 +8,8 @@ import {
   countResults,
   isPagePick,
   mentionsTopic,
+  compoundName,
+  namedCompounds,
   quickFacts,
   resolveTopic,
   shouldShowPicker,
@@ -328,4 +330,38 @@ test("shouldShowPicker: never after an ordinary question, whatever the backend s
   assert.equal(shouldShowPicker("I work on KRAS in pancreatic cancer", false), true);
   assert.equal(shouldShowPicker("Create a living page on KRAS", false), true);
   assert.equal(shouldShowPicker("I work on KRAS in pancreatic cancer", true), false, "not while a page is being proposed");
+});
+
+// ── compounds in quick facts: named ones only ────────────────────────────────
+
+test("compoundName: keeps the name, drops the role suffix, refuses activity rows and bare ids", () => {
+  assert.equal(compoundName("Sotorasib"), "Sotorasib");
+  assert.equal(compoundName("Sotorasib — INHIBITOR"), "Sotorasib");
+  assert.equal(compoundName("Adagrasib - INHIBITOR"), "Adagrasib");
+  assert.equal(compoundName("CHEMBL159171 — bioactivity (EC50 = 30 nM)"), null);
+  assert.equal(compoundName("CHEMBL159171"), null);
+  assert.equal(compoundName("chembl42 — INHIBITOR"), null);
+  assert.equal(compoundName("bioactivity (IC50)"), null);
+  assert.equal(compoundName(""), null);
+  assert.equal(compoundName(null), null);
+});
+
+test("namedCompounds: distinct names in order", () => {
+  assert.deepEqual(
+    namedCompounds([{ title: "Sotorasib — INHIBITOR" }, { title: "CHEMBL1 — bioactivity (EC50)" }, { title: "sotorasib" }, { title: "Adagrasib — INHIBITOR" }]),
+    ["Sotorasib", "Adagrasib"]
+  );
+});
+
+test("quickFacts: Compounds lists only named compounds, counts them, and is omitted when there are none", () => {
+  const rows = (titles: string[]) =>
+    quickFacts([{ tool: "t", kind: "compound", items: titles.map((title, i) => ({ ...item("compound", i), title })) }] as never, "KRAS in pancreatic cancer");
+  const mixed = rows([
+    "CHEMBL159171 — bioactivity (EC50 = 30 nM)",
+    "Sotorasib — INHIBITOR",
+    "CHEMBL222 — bioactivity (IC50)",
+    "Adagrasib — INHIBITOR",
+  ]);
+  assert.deepEqual(mixed.map((r) => [r.label, r.count, r.text]), [["Compounds", 2, "Sotorasib, Adagrasib"]]);
+  assert.deepEqual(rows(["CHEMBL1 — bioactivity (EC50)", "CHEMBL2"]), [], "only activity rows: no Compounds row");
 });

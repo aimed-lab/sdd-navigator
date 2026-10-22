@@ -71,6 +71,7 @@ import {
 } from "@/lib/server/assistant/assistantAnswer";
 import type { ExploreResponse, ExploreSection } from "@/types/explore";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
+import { ASSISTANT_EVENT, parseAssistantRequest, type AssistantRequest } from "@/lib/server/assistant/assistantBridge";
 import {
   afterDuplicateChoice,
   needsEarlyDuplicateCheck,
@@ -116,7 +117,7 @@ async function fetchSections(topic: string): Promise<ExploreSection[] | null> {
   }
 }
 
-function Inlines({ items, maxCite }: { items: Inline[]; maxCite: number }) {
+export function Inlines({ items, maxCite }: { items: Inline[]; maxCite: number }) {
   return (
     <>
       {items.map((n, i) =>
@@ -152,7 +153,7 @@ function Inlines({ items, maxCite }: { items: Inline[]; maxCite: number }) {
   );
 }
 
-function Markdown({ text, maxCite }: { text: string; maxCite: number }) {
+export function Markdown({ text, maxCite }: { text: string; maxCite: number }) {
   return (
     <div className="flex flex-col gap-3">
       {parseMarkdown(text).map((b, i) =>
@@ -527,6 +528,30 @@ export default function AssistantChat() {
       setTyping(false);
     }
   };
+
+  // A button elsewhere on the page (Explore) hands the panel a message: open,
+  // then send it as the researcher's turn or fill the input.
+  const [external, setExternal] = useState<AssistantRequest | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const req = parseAssistantRequest((e as CustomEvent).detail);
+      if (req) setExternal(req);
+    };
+    window.addEventListener(ASSISTANT_EVENT, on);
+    return () => window.removeEventListener(ASSISTANT_EVENT, on);
+  }, []);
+  useEffect(() => {
+    if (!external || !restored || typing) return;
+    const req = external;
+    setExternal(null);
+    setOpen(true);
+    if (req.mode === "send") void send(req.text);
+    else {
+      setInput(req.text);
+      setFocusTick((t) => t + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [external, restored, typing]);
 
   // After the matches showed there were none, go straight to the draft.
   useEffect(() => {

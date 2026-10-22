@@ -144,5 +144,12 @@ export function matchAction(m: Pick<CommunityMatch, "isOpen" | "state">):
   return m.isOpen ? { kind: "join", label: "Join" } : { kind: "request", label: "Request to join" };
 }
 
+/** The community "People on this" shows: the best match the viewer is NOT a
+ *  member of; if every match is one they are already in, the best of those
+ *  (shown as "You're a member"). Matches arrive best first. Null when empty. */
+export function pickPeopleMatch<T extends Pick<CommunityMatch, "state">>(matches: T[]): T | null {
+  return matches.find((m) => m.state !== "active") ?? matches[0] ?? null;
+}
+
 export const MATCH_MIN_COVERAGE = 0.6;
 export const MATCH_LIMIT = 3;

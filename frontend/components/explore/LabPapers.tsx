@@ -14,29 +14,30 @@ import type { ExploreItem } from "@/types/explore";
 
 const SHOWN_COLLAPSED = 6;
 
+/** The lab's papers shaped as ExploreItems so PaperList renders them like every
+ *  other paper (summary "Published in <venue>." is the form PaperList reads the
+ *  venue from). Newest year first; the list's own order is kept within a year. */
+export function labPaperItems(): ExploreItem[] {
+  return labPapers
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => b.p.year - a.p.year || a.i - b.i)
+    .map(({ p }) => ({
+      id: `lab-paper-${p.doi}`,
+      kind: "paper",
+      title: p.title,
+      summary: `Published in ${p.venue}.`,
+      url: doiUrl(p.doi),
+      doi: p.doi,
+      source: "aimed-lab",
+      date_iso: `${p.year}-01-01T00:00:00.000Z`,
+      signal: null,
+    }));
+}
+
 export default function LabPapers() {
   const [expanded, setExpanded] = useState(false);
 
-  // Shaped as ExploreItems so PaperList renders them like every other paper.
-  // summary "Published in <venue>." is the form PaperList reads the venue from.
-  const items = useMemo<ExploreItem[]>(
-    () =>
-      labPapers
-        .map((p, i) => ({ p, i }))
-        .sort((a, b) => b.p.year - a.p.year || a.i - b.i)
-        .map(({ p }) => ({
-          id: `lab-paper-${p.doi}`,
-          kind: "paper",
-          title: p.title,
-          summary: `Published in ${p.venue}.`,
-          url: doiUrl(p.doi),
-          doi: p.doi,
-          source: "aimed-lab",
-          date_iso: `${p.year}-01-01T00:00:00.000Z`,
-          signal: null,
-        })),
-    []
-  );
+  const items = useMemo<ExploreItem[]>(() => labPaperItems(), []);
 
   if (items.length === 0) return null;
   const shown = expanded ? items : items.slice(0, SHOWN_COLLAPSED);

@@ -453,6 +453,34 @@ function namesWithMore(names: string[], shown: number): string {
 
 /** Up to three rows - Approved, Open trials, Compounds - only for kinds that
  *  have on-topic results. Recruiting trials come first. */
+/** A compound's display name, or null when the row is not a named compound.
+ *  ChEMBL rows come as "Sotorasib - INHIBITOR" (a mechanism record: keep the name,
+ *  drop the role) or "CHEMBL159171 - bioactivity (EC50 ...)" (an activity row:
+ *  no name, dropped). A bare ChEMBL id is not a name either. */
+export function compoundName(title: string | null | undefined): string | null {
+  const t = (title ?? "").trim();
+  if (!t) return null;
+  const name = t.split(/\s+[\u2014\u2013-]\s+/)[0].trim();
+  if (!name || /^CHEMBL\d+$/i.test(name) || /^\d+$/.test(name)) return null;
+  if (/\bbioactivity\b/i.test(t) && /^CHEMBL/i.test(name)) return null;
+  if (/^bioactivity\b/i.test(name)) return null;
+  return name;
+}
+
+/** The distinct named compounds in a list of compound items, in order. */
+export function namedCompounds(items: { title?: string | null }[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const i of items) {
+    const n = compoundName(i.title);
+    if (n && !seen.has(n.toLowerCase())) {
+      seen.add(n.toLowerCase());
+      out.push(n);
+    }
+  }
+  return out;
+}
+
 export function quickFacts(sections: ExploreSection[] | null | undefined, topic: string): FactRow[] {
   const terms = topicTerms(topic);
   const of = (kind: string): Item[] =>
@@ -480,10 +508,10 @@ export function quickFacts(sections: ExploreSection[] | null | undefined, topic:
     });
   }
 
-  const compounds = of("compound");
-  if (compounds.length > 0) {
-    const names = [...new Set(compounds.map((i) => clip(i.title, 32)))];
-    rows.push({ kind: "compound", label: "Compounds", count: compounds.length, text: namesWithMore(names, 3) });
+  // Only NAMED compounds: ChEMBL activity rows and bare ids are not listed or counted.
+  const names = namedCompounds(of("compound")).map((n) => clip(n, 32));
+  if (names.length > 0) {
+    rows.push({ kind: "compound", label: "Compounds", count: names.length, text: namesWithMore(names, 3) });
   }
   return rows.slice(0, 3);
 }

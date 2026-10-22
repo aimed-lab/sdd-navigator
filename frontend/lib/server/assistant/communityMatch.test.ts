@@ -2,7 +2,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { matchAction, queryTokens, rankCommunities, MATCH_MIN_COVERAGE } from "./communityMatch.ts";
+import { matchAction, pickPeopleMatch, queryTokens, rankCommunities, MATCH_MIN_COVERAGE } from "./communityMatch.ts";
 
 const c = (name: string, description: string | null, topics: string[] = []) => ({ name, description, explore_topics: topics });
 
@@ -81,4 +81,13 @@ test("matchAction: Join for open, Request to join for others, sign-in when signe
   assert.equal(matchAction({ isOpen: false, state: "signed_out" }).label, "Sign in to request");
   assert.deepEqual(matchAction({ isOpen: true, state: "active" }), { kind: "none", label: "Member" });
   assert.deepEqual(matchAction({ isOpen: false, state: "pending" }), { kind: "none", label: "Request pending" });
+});
+
+test("pickPeopleMatch: the best community the viewer is NOT in; one they are in only if nothing else matches", () => {
+  const m = (id: string, state: "none" | "active" | "pending" | "signed_out") => ({ id, state });
+  assert.equal(pickPeopleMatch([m("colabo", "active"), m("kras-lab", "none"), m("other", "none")])?.id, "kras-lab");
+  assert.equal(pickPeopleMatch([m("colabo", "active"), m("pend", "pending")])?.id, "pend", "a pending request is not membership");
+  assert.equal(pickPeopleMatch([m("a", "signed_out"), m("b", "signed_out")])?.id, "a");
+  assert.equal(pickPeopleMatch([m("colabo", "active"), m("also", "active")])?.id, "colabo", "all member: show the best, as 'You're a member'");
+  assert.equal(pickPeopleMatch([]), null, "nothing matches: the card stays hidden");
 });

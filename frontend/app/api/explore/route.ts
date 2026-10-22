@@ -50,6 +50,7 @@ export async function POST(req: Request) {
   let projectId: string | undefined;
   let sinceYear: number | undefined;
   let statusFilter: string[] | undefined;
+  let onlyKinds: string[] | undefined;
   try {
     const body = await req.json();
     if (body && typeof body.input === "string") input = body.input;
@@ -61,6 +62,12 @@ export async function POST(req: Request) {
     if (body && Array.isArray(body.status_filter)) {
       const cleaned = body.status_filter.filter((s: unknown): s is string => typeof s === "string" && s.trim() !== "");
       if (cleaned.length > 0) statusFilter = cleaned;
+    }
+    // A chosen scope ("Grants"): the backend queries just these sources with the
+    // typed text instead of letting its router decide.
+    if (body && Array.isArray(body.only_kinds)) {
+      const kinds = body.only_kinds.filter((k: unknown): k is string => typeof k === "string" && k.trim() !== "");
+      if (kinds.length > 0) onlyKinds = kinds;
     }
   } catch {
     // malformed body -> treat as empty input (backend serves the default feed)
@@ -92,6 +99,7 @@ export async function POST(req: Request) {
     const payload: Record<string, unknown> = scope.length > 0 ? { input, scope } : { input };
     if (sinceYear !== undefined) payload.since_year = sinceYear;
     if (statusFilter !== undefined) payload.status_filter = statusFilter;
+    if (onlyKinds !== undefined && input.trim()) payload.only_kinds = onlyKinds;
     const res = await fetch(`${EXPLORE_API_URL}/api/explore`, {
       method: "POST",
       headers: exploreBackendHeaders({ "Content-Type": "application/json" }),

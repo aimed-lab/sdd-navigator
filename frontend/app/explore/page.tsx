@@ -1,38 +1,48 @@
 "use client";
 
-// Explore feed: the default landing feed from the real explore backend, laid
-// out like an editorial front page. Each content type has its own shape: news
-// is a lead story plus headlines (NewsFront), papers are citation rows
-// (PaperList), tools and datasets are pastel tiles (ResourceBento), the latest
-// episode is one wide card (PodcastFeature). Tokens: lib/typeStyles.ts.
-// Nav/Footer come from the shared shell (in the root layout).
+// Explore landing: one question, then four short blocks. In order: the big
+// question box with example topics; "Your living pages" (signed in only);
+// "Today in drug discovery" (four cards from the feed); "Browse" (one tab row
+// showing one short list at a time, each with See all); "Communities near your
+// work". Everything else the old landing stacked lives behind those tabs and
+// links.
 //
-// The feed is PERSONALIZED for a signed-in user with saved interests: the same
-// blank-input request, which /api/explore scopes to those interests server-side
-// (the browser is never told whose feed this is, and never asks for a scope).
-// The response says which it got via scope.is_personalized, and the chips below
-// the search bar show the terms it used. Signed out, or with no interests, this
-// is exactly the generic field-wide feed it always was.
+// ?category=<kind> still works: it opens that kind's full list (the "See all"
+// links use it), with a way back to the landing.
 //
-// The hand-picked bento (lib/curated.ts) never waits on the backend, so it still
-// shows when the live feed is loading or has failed.
+// The feed is PERSONALIZED for a signed-in user with saved interests (the same
+// blank-input request, which /api/explore scopes server-side). The chips that
+// used to show those terms are gone from the landing; ?scope=off still turns
+// personalization off.
 
 import { Suspense, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
-import CommunitiesResultsSection from "@/components/explore/CommunitiesResultsSection";
-import CommunityTiles from "@/components/explore/CommunityTiles";
-import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
+import CommunitiesNear from "@/components/explore/CommunitiesNear";
+import ExploreShell from "@/components/explore/ExploreShell";
 import HandPickedRow from "@/components/explore/HandPickedRow";
-import LabPapers from "@/components/explore/LabPapers";
+import JumpTo from "@/components/explore/JumpTo";
+import { labPaperItems } from "@/components/explore/LabPapers";
 import NewsFront from "@/components/explore/NewsFront";
 import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
-import PodcastFeature from "@/components/explore/PodcastFeature";
+import QuestionBox from "@/components/explore/QuestionBox";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
-import ScopeChips from "@/components/ScopeChips";
+import TodayCards from "@/components/explore/TodayCards";
+import YourLivingPages from "@/components/explore/YourLivingPages";
+import PageHeader from "@/components/PageHeader";
+import {
+  EXAMPLE_TOPICS,
+  pickToday,
+  scopeFromParam,
+  scopeHref,
+  sortGrantsByDeadline,
+  sortTrialsRecruitingFirst,
+  type ScopeKey,
+} from "@/lib/server/explore/exploreLayout";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
 
@@ -41,15 +51,6 @@ import type { CommunitySummaryItem } from "@/lib/server/communities";
 const HIDDEN_SECTION_KINDS = new Set<string>();
 const visibleSections = (data: ExploreResponse | null): ExploreSection[] =>
   (data?.sections ?? []).filter((s) => !HIDDEN_SECTION_KINDS.has(s.kind));
-
-// Kinds the editorial components above render themselves. Everything else keeps
-// the detailed ItemCard grid (trial status, compound facts, ... live there).
-const EDITORIAL_KINDS = new Set(["news", "paper", "tool", "dataset", "episode"]);
-
-const PAPERS_IN_ALL_VIEW = 6;
-// Same honesty rule as the homepage: a count is only shown when it is real and
-// at least this big.
-const MIN_EPISODES_TO_SHOW = 10;
 
 // "Trial status" — three mutually exclusive states, so a segmented control
 // (one bordered track) rather than a pill row — matching
@@ -132,20 +133,25 @@ function ExploreFeed() {
     trialStatusParam === "stopped" ? ["TERMINATED", "WITHDRAWN"]
     : trialStatusParam === "recruiting" ? ["RECRUITING"]
     : undefined;
-  const [query, setQuery] = useState("");
+  const labItems = useMemo(() => labPaperItems(), []);
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [selected, setSelected] = useState<string | null>(
-    categoryParam && CATEGORIES.some((c) => c.kind === categoryParam) ? categoryParam : null
-  );
+  // ?category=<kind> opens that kind's full list.
+  const categoryScope = scopeFromParam(categoryParam);
+  const selected: string | null =
+    categoryScope !== "all"
+      ? categoryScope
+      : categoryParam && CATEGORIES.some((c) => c.kind === categoryParam)
+        ? categoryParam
+        : null;
 
   // Communities — fetched separately from the explore backend response
   // above: communities live in Supabase, not the Python search backend, so
   // they're not one of `data.sections`. Blank query on this page (the
   // landing feed has no search text of its own) means "every community",
   // same as the old block above the search used to show unconditionally.
-  // Podcast episode count for the stats line; null (hidden) until/unless it loads.
+  // Podcast episode count for the Jump-to tile; null (no number shown) until/unless it loads.
   const [episodeCount, setEpisodeCount] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -155,7 +161,7 @@ function ExploreFeed() {
         const json = (await res.json()) as { episodes?: number | null };
         if (!cancelled && typeof json.episodes === "number") setEpisodeCount(json.episodes);
       } catch {
-        /* leave it hidden */
+        /* the tile just shows no number */
       }
     })();
     return () => {
@@ -211,24 +217,6 @@ function ExploreFeed() {
     };
   }, [personalize, trialStatusParam]);
 
-  // The interests the feed was actually built from, straight from the response —
-  // present only when the backend personalized it.
-  const scopeTerms = useMemo(() => {
-    if (data?.scope?.is_personalized !== true) return [];
-    const topics = data.scope.topics;
-    return Array.isArray(topics) ? topics.filter((t): t is string => typeof t === "string") : [];
-  }, [data]);
-
-  // Editing a chip leaves the personalized feed: what's left becomes an ordinary
-  // search, and clearing the last one asks for the generic feed instead.
-  const editScope = (remaining: string[]) => {
-    router.push(
-      remaining.length > 0
-        ? `/explore/${encodeURIComponent(remaining.join(" "))}`
-        : "/explore?scope=off"
-    );
-  };
-
   const sections = useMemo(() => visibleSections(data), [data]);
   const sectionOf = (kind: string) => sections.find((s) => s.kind === kind);
   const itemsOf = (kind: string): ExploreItem[] => sectionOf(kind)?.items ?? [];
@@ -241,15 +229,11 @@ function ExploreFeed() {
   const showError =
     failed || data?.error === true || (!loading && totalItems === 0 && communities.length === 0);
 
-  const qsParams = new URLSearchParams();
-  if (trialStatusParam) qsParams.set("trial_status", trialStatusParam);
-  const qs = qsParams.toString() ? `?${qsParams.toString()}` : "";
+  useEffect(() => {
+    if (categoryScope === "episode") router.replace("/explore/podcast");
+  }, [categoryScope, router]);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = query.trim();
-    if (q) router.push(`/explore/${encodeURIComponent(q)}${qs}`);
-  };
+  const goToTopic = (topic: string, scope: ScopeKey = "all") => router.push(scopeHref(scope, topic));
 
   const onTrialStatusChange = (value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -257,11 +241,6 @@ function ExploreFeed() {
     else params.delete("trial_status");
     const qs = params.toString();
     router.push(qs ? `/explore?${qs}` : "/explore");
-  };
-
-  const select = (kind: string | null) => {
-    setSelected(kind);
-    if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   };
 
   // ---- Per-view content ---------------------------------------------------
@@ -292,72 +271,6 @@ function ExploreFeed() {
             </p>
           )}
         </section>
-      </div>
-    );
-  };
-
-  const allView = () => {
-    const news = itemsOf("news");
-    const papers = itemsOf("paper");
-    const episodes = itemsOf("episode");
-    const remaining = sections.filter((s) => !EDITORIAL_KINDS.has(s.kind) && s.items.length > 0);
-    return (
-      <div className="space-y-16">
-        {/* 1. News front */}
-        {loading ? (
-          <BlockSkeleton />
-        ) : showError ? (
-          <FeedError />
-        ) : (
-          news.length > 0 && (
-            <section>
-              <SectionHeading title="In the news" subtitle="Headlines from across the industry." />
-              <NewsFront items={news} onAllNews={() => select("news")} />
-            </section>
-          )
-        )}
-
-        {/* 2. Hand-picked bento: always shown, independent of the live feed */}
-        <section>
-          <SectionHeading
-            title="Hand-picked tools and datasets"
-            subtitle="Open-source and public resources we recommend."
-          />
-          <HandPickedRow mode="mix" onBrowseAll={() => select("tool")} />
-        </section>
-
-        {/* 2b. The AI.MED Lab's recent publications (static list, lib/labPapers.ts) */}
-        <LabPapers />
-
-        {!loading && !showError && (
-          <>
-            {/* 3. Papers */}
-            {papers.length > 0 && (
-              <section>
-                <SectionHeading title="New research" subtitle="The latest papers in the field." />
-                <PaperList
-                  items={papers}
-                  limit={PAPERS_IN_ALL_VIEW}
-                  onMore={() => select("paper")}
-                />
-              </section>
-            )}
-
-            {/* 4. Latest podcast episode (renders nothing without one) */}
-            {episodes.length > 0 && (
-              <section>
-                <SectionHeading title="From the podcast" />
-                <PodcastFeature items={episodes} />
-              </section>
-            )}
-
-            {/* Communities: a place to join, not a document to read. */}
-            <CommunityTiles items={communities} />
-
-            {/* 5. Anything else the backend returned */}
-            <OtherSections sections={remaining} />
-          </>
-        )}
       </div>
     );
   };
@@ -405,7 +318,14 @@ function ExploreFeed() {
     }
 
     // Any other kind (deep links such as ?category=trial): the detailed card grid.
-    const section = sectionOf(kind);
+    // Open grants show the soonest deadline first, trials the recruiting ones first.
+    const base = sectionOf(kind);
+    const section =
+      base && kind === "grant"
+        ? { ...base, items: sortGrantsByDeadline(base.items) }
+        : base && kind === "trial"
+          ? { ...base, items: sortTrialsRecruitingFirst(base.items) }
+          : base;
     if (!section || section.items.length === 0) {
       return (
         <p className="py-16 text-center text-secondary font-body-md">
@@ -418,56 +338,82 @@ function ExploreFeed() {
       </div>;
   };
 
-  const statsLine = [
-    "Live across 7+ sources",
-    episodeCount !== null && episodeCount >= MIN_EPISODES_TO_SHOW
-      ? `${episodeCount} podcast episodes`
-      : null,
-    "updated daily",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const hero = (
+    <>
+      <PageHeader
+        title="Explore"
+        subtitle="Explore biomedical research: ask a question or jump straight to what you need."
+        className="mb-6"
+      />
+      <QuestionBox
+        placeholder="Ask a question, e.g. dementia care in rural communities, KRAS in pancreatic cancer"
+        examples={EXAMPLE_TOPICS}
+        onSubmit={goToTopic}
+      />
+      <JumpTo episodeCount={episodeCount} />
+    </>
+  );
+
+  // A full list (?category=<kind>, the "See all" links): the old per-kind view,
+  // with a way back to the landing.
+  if (selected !== null) {
+    return (
+      <ExploreShell>
+        <Link
+          href="/explore"
+          className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1 mb-4"
+        >
+          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          Explore
+        </Link>
+        <PageHeader title={labelForKind(selected) || "Explore"} className="mb-6" />
+        <div className="mb-10">
+          <QuestionBox placeholder="Ask a question" initialScope={categoryScope} onSubmit={goToTopic} />
+        </div>
+        {selected === "trial" && (
+          <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
+            <div>
+              <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
+              <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
+            </div>
+          </div>
+        )}
+        {selected === "communities" ? (
+          communities.length === 0 ? (
+            <div className="text-center py-20 text-secondary font-body-md">No communities found.</div>
+          ) : (
+            <CommunitiesNear items={communities} />
+          )
+        ) : selected === "tool" ? (
+          <div className="space-y-14">
+            {resourceView("tool")}
+            {resourceView("dataset")}
+          </div>
+        ) : (
+          selectedView(selected)
+        )}
+      </ExploreShell>
+    );
+  }
+
+  const today = pickToday({
+    approvals: itemsOf("approval"),
+    news: itemsOf("news"),
+    labPapers: labItems,
+    trials: itemsOf("trial"),
+    episodes: itemsOf("episode"),
+    papers: itemsOf("paper"),
+  });
 
   return (
-    <ExplorePageFrame
-      title="What's happening in drug discovery"
-      subtitle="Curated tools, live news and new research, updated daily."
-      statsLine={statsLine}
-      search={{
-        value: query,
-        onChange: setQuery,
-        onSubmit: submit,
-        placeholder:
-          "What are you working on? e.g. PHGDH in Alzheimer's, pancreatic cancer, CRISPR screening",
-      }}
-      scopeChips={<ScopeChips terms={scopeTerms} onEdit={editScope} />}
-      chips={{ selected, onSelect: select, query }}
-    >
-      {/* Trial status filter, only on the Trials view (the URL/state is kept when
-          switching away, only visibility changes). */}
-      {selected === "trial" && (
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
-          <div>
-            <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
-            <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
-          </div>
-        </div>
-      )}
-
-      {/* Communities chip: its own view, independent of the explore-backend
-          state (communities never came from that backend). */}
-      {selected === "communities" ? (
-        communities.length === 0 ? (
-          <div className="text-center py-20 text-secondary font-body-md">No communities found.</div>
-        ) : (
-          <CommunityTiles items={communities} />
-        )
-      ) : selected === null ? (
-        allView()
-      ) : (
-        selectedView(selected)
-      )}
-    </ExplorePageFrame>
+    <ExploreShell>
+      {hero}
+      <div className="mt-12 flex flex-col gap-14">
+        <YourLivingPages />
+        {loading ? <BlockSkeleton className="h-40" /> : showError ? <FeedError /> : <TodayCards cards={today} />}
+        <CommunitiesNear items={communities} />
+      </div>
+    </ExploreShell>
   );
 }
 
