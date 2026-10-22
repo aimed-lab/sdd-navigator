@@ -24,11 +24,17 @@ const MEDIA_ACCEPT =
 
 const MEDIA_HINT: Record<ShowcaseType, string> = {
   paper: "A figure, chart, or a copy of the poster or slides, if you have one.",
+  preprint: "A figure or chart from the preprint, if you have one.",
   talk: "Upload your slides or a photo from the session.",
   poster: "Upload the poster as an image or PDF.",
-  award: "A photo of the award, plaque, or moment.",
-  tool: "Screenshots or a demo.",
   event: "Upload the flyer or a photo, if you have one.",
+  achievement: "A photo of the award, plaque, or moment.",
+  breakthrough: "A figure or image that shows the result.",
+  partnership: "A photo or logo of the partners, if you have one.",
+  funding: "A photo of the team, or the funder's logo.",
+  tool: "Screenshots or a demo.",
+  service: "A photo of the facility or a sample report.",
+  dataset: "A figure or screenshot that shows what is in it.",
   other: "Anything that helps show what this is.",
 };
 

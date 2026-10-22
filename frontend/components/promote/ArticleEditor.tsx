@@ -21,7 +21,25 @@ import { usePathname, useRouter } from "next/navigation";
 import { setArticlePublishedAction, updateArticleDraftAction } from "@/app/promote/actions";
 import MediaUploader from "@/components/promote/MediaUploader";
 import ShareButtons from "@/components/promote/ShareButtons";
-import { articleUrl, withArticleLink } from "@/lib/articleFormat";
+import { articleUrl } from "@/lib/articleFormat";
+import {
+  CTA_DEFAULT_LABEL,
+  CTA_LABEL_CHOICES,
+  KEY_FACT_LABELS,
+  MAX_FACT_CHARS,
+  defaultKeyFacts,
+  visibleFacts,
+  type KeyFact,
+} from "@/lib/server/promote/showcaseKinds";
+import {
+  PLATFORM_LIMIT,
+  draftShareTexts,
+  fillLink,
+  shareLength,
+  shareTextsEmpty,
+  type Platform,
+  type ShareTexts,
+} from "@/lib/server/promote/shareText";
 import {
   SHOWCASE_TYPES,
   SHOWCASE_TYPE_LABEL,
@@ -45,6 +63,22 @@ export type ArticleEditorEntry = {
   /** Null = attached to no community (the default). See
    *  database/migrations/2026-09-13_promote_showcase_community.sql. */
   communityId: string | null;
+  /** Three facts for the strip under the hero; the author's own, else taken
+   *  from their text (never blank-by-surprise on an older item). */
+  keyFacts?: KeyFact[];
+  /** The main button. Blank = the type's default label / the best link. */
+  ctaLabel?: string;
+  ctaUrl?: string;
+  /** Only what the author types. The app never writes a quote. */
+  quote?: string;
+  quoteBy?: string;
+  /** Ready-to-post drafts per platform. */
+  shareText?: ShareTexts;
+  eventStartsAt?: string | null;
+  eventLocation?: string;
+  featured?: boolean;
+  /** True for a site admin: shows the featured switch. */
+  isAdmin?: boolean;
 };
 
 /** Only relevant right after generation (SubmitFlow) — the "Paper found" /
@@ -63,6 +97,15 @@ export type ArticleEditorPaperInfo = {
   journal: string | null;
   publishedDate: string | null;
 } | null;
+
+/** ISO instant -> the "YYYY-MM-DDTHH:mm" value a datetime-local input takes. */
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function ArticleEditor({
   entry: initialEntry,
@@ -94,13 +137,46 @@ export default function ArticleEditor({
   const [standfirst, setStandfirst] = useState(initialEntry.standfirst);
   const [articleBody, setArticleBody] = useState(initialEntry.articleBody);
   const [communityId, setCommunityId] = useState<string | null>(initialEntry.communityId);
-  // Resolved up front — the placeholder never reaches the screen, even for
-  // a row saved before this resolution existed (see withArticleLink's own
-  // comment). The slug (and so the URL) exists from the moment the row
-  // does, published or not, so there's never a "no link yet" case here.
-  const [linkedinPost, setLinkedinPost] = useState(() =>
-    withArticleLink(initialEntry.linkedinPost, articleUrl(initialEntry.slug))
+  // The link is filled in up front, so the placeholder never reaches the
+  // screen. The slug (and so the URL) exists from the moment the row does.
+  // An item with no drafts yet shows ones made from its own headline, summary
+  // and facts, ready to edit.
+  const [keyFacts, setKeyFacts] = useState<KeyFact[]>(
+    () => initialEntry.keyFacts ?? defaultKeyFacts(initialEntry.type)
   );
+  const [ctaLabel, setCtaLabel] = useState(initialEntry.ctaLabel ?? "");
+  const [ctaUrl, setCtaUrl] = useState(initialEntry.ctaUrl ?? "");
+  const [quote, setQuote] = useState(initialEntry.quote ?? "");
+  const [quoteBy, setQuoteBy] = useState(initialEntry.quoteBy ?? "");
+  const [eventStartsAt, setEventStartsAt] = useState(toLocalInput(initialEntry.eventStartsAt));
+  const [eventLocation, setEventLocation] = useState(initialEntry.eventLocation ?? "");
+  const [featured, setFeatured] = useState(Boolean(initialEntry.featured));
+  const [shareText, setShareText] = useState<ShareTexts>(() => {
+    const url = articleUrl(initialEntry.slug);
+    const stored = initialEntry.shareText ?? {
+      linkedin: initialEntry.linkedinPost,
+      x: "",
+      bluesky: "",
+    };
+    const filled: ShareTexts = {
+      linkedin: fillLink(stored.linkedin, url),
+      x: fillLink(stored.x, url),
+      bluesky: fillLink(stored.bluesky, url),
+    };
+    if (!shareTextsEmpty(filled) && filled.x.trim() && filled.bluesky.trim()) return filled;
+    const draft = draftShareTexts({
+      type: initialEntry.type,
+      headline: initialEntry.headline,
+      standfirst: initialEntry.standfirst,
+      facts: visibleFacts(initialEntry.keyFacts ?? []),
+      url,
+    });
+    return {
+      linkedin: filled.linkedin.trim() || fillLink(draft.linkedin, url),
+      x: filled.x.trim() || fillLink(draft.x, url),
+      bluesky: filled.bluesky.trim() || fillLink(draft.bluesky, url),
+    };
+  });
   const [authors, setAuthors] = useState(initialEntry.authors);
 
   // Auto-grows the post textarea to its content instead of letting the
@@ -112,7 +188,7 @@ export default function ArticleEditor({
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
-  }, [linkedinPost]);
+  }, [shareText.linkedin]);
 
   // The LinkedIn post panel sticks down the left column ON A WIDE SCREEN
   // ONLY WHILE IT FITS the viewport (see the panel's className below) — a
@@ -143,6 +219,41 @@ export default function ArticleEditor({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestNote, setSuggestNote] = useState<string | null>(null);
+
+  // Asks the helper for the type's three facts, from this item's own headline,
+  // standfirst and body only. It fills the boxes below; nothing is saved until
+  // the author reviews them and presses Save changes.
+  const suggestFacts = async () => {
+    if (keyFacts.some((f) => f.value.trim()) && !window.confirm("Replace the key facts you have with suggestions?")) return;
+    setSuggesting(true);
+    setSuggestNote(null);
+    try {
+      const res = await fetch("/api/promote/suggest-facts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, headline, standfirst, body: articleBody }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setSuggestNote(json?.error ?? "Couldn't suggest facts right now.");
+        return;
+      }
+      const got = (json.facts as KeyFact[]).slice(0, 3);
+      setKeyFacts(KEY_FACT_LABELS[type].map((label, i) => ({ label, value: got[i]?.value ?? "" })));
+      setDirty(true);
+      setSuggestNote(
+        got.some((f) => f.value)
+          ? "Suggestions added. Check each one, edit anything, then save."
+          : "The text doesn't say enough to suggest facts. Write them yourself, or add detail to the article first."
+      );
+    } catch {
+      setSuggestNote("Couldn't reach the helper. Try again.");
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const saveEdits = async () => {
     setSaving(true);
@@ -152,9 +263,17 @@ export default function ArticleEditor({
       headline,
       standfirst,
       articleBody,
-      linkedinPost,
       communityId,
       authors,
+      keyFacts,
+      ctaLabel,
+      ctaUrl,
+      quote,
+      quoteBy,
+      shareText,
+      eventStartsAt: eventStartsAt ? new Date(eventStartsAt).toISOString() : null,
+      eventLocation,
+      ...(initialEntry.isAdmin ? { featured } : {}),
     });
     setSaving(false);
     if (res.ok) setDirty(false);
@@ -262,38 +381,72 @@ export default function ArticleEditor({
 
         <section className="glass-panel rounded-2xl p-6 space-y-4">
           <div>
-            <h2 className="font-headline-md text-lg text-on-background">LinkedIn post</h2>
+            <h2 className="font-headline-md text-lg text-on-background">Share texts</h2>
             <p className="mt-1 font-body-sm text-body-sm text-secondary">
-              This is what you actually share — the article below is the page it
-              links to, not the other way around.
+              Ready-to-post text for each platform, written from your own words. Edit
+              anything before you share. X and Bluesky open with their text filled in;
+              LinkedIn can&apos;t be prefilled, so its button copies the text for you to paste.
             </p>
           </div>
 
-          {/* Sans-serif, normal reading size, and styled like the post it
-              will actually render as — LinkedIn renders in its own
-              proportional font, so previewing this in a form field's
-              monospace misrepresents the line breaks and rhythm the post
-              actually depends on. No fixed rows/height: it grows with its
-              content (see the postRef effect above) rather than scrolling a
-              box that hides the ask, the link and the hashtags below the
-              fold. */}
-          <textarea
-            ref={postRef}
-            rows={1}
-            value={linkedinPost}
-            onChange={(e) => {
-              setLinkedinPost(e.target.value);
-              setDirty(true);
-            }}
-            placeholder="Hook, contrast, a few concrete specifics, an ask…"
-            className="w-full resize-none overflow-hidden bg-surface-container-lowest border border-outline-variant/40 rounded-xl px-5 py-4 font-body-md text-body-md leading-relaxed text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 whitespace-pre-wrap"
-          />
+          {(["linkedin", "x", "bluesky"] as Platform[]).map((platform) => {
+            const url = articleUrl(entry.slug);
+            const len = shareLength(shareText[platform], url);
+            const limit = PLATFORM_LIMIT[platform];
+            const over = len > limit;
+            return (
+              <div key={platform}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-label-sm text-label-sm text-secondary">
+                    {platform === "linkedin" ? "LinkedIn" : platform === "x" ? "X" : "Bluesky"}
+                  </label>
+                  <span className={"font-label-sm text-label-sm " + (over ? "text-error" : "text-secondary")}>
+                    {len} / {limit}
+                  </span>
+                </div>
+                <textarea
+                  ref={platform === "linkedin" ? postRef : undefined}
+                  rows={platform === "linkedin" ? 1 : 4}
+                  value={shareText[platform]}
+                  onChange={(e) => {
+                    setShareText((t) => ({ ...t, [platform]: e.target.value }));
+                    setDirty(true);
+                  }}
+                  className={
+                    "w-full bg-surface-container-lowest border rounded-xl px-5 py-4 font-body-md text-body-md leading-relaxed text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 whitespace-pre-wrap " +
+                    (platform === "linkedin" ? "resize-none overflow-hidden " : "") +
+                    (over ? "border-error" : "border-outline-variant/40")
+                  }
+                />
+                {over && (
+                  <p className="mt-1 font-label-sm text-label-sm text-error" role="alert">
+                    {platform === "linkedin" ? "Over LinkedIn's limit." : "Too long for this platform."}
+                  </p>
+                )}
+              </div>
+            );
+          })}
 
-          <ShareButtons
-            url={articleUrl(entry.slug)}
-            title={headline}
-            linkedinPost={linkedinPost}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const url = articleUrl(entry.slug);
+                const draft = draftShareTexts({ type, headline, standfirst, facts: visibleFacts(keyFacts), url });
+                setShareText({
+                  linkedin: fillLink(draft.linkedin, url),
+                  x: fillLink(draft.x, url),
+                  bluesky: fillLink(draft.bluesky, url),
+                });
+                setDirty(true);
+              }}
+              className="btn-outline px-4 py-2 rounded-lg font-label-md text-label-md"
+            >
+              Redraft from my text
+            </button>
+          </div>
+
+          <ShareButtons url={articleUrl(entry.slug)} title={headline} shareText={shareText} />
         </section>
       </div>
 
@@ -318,7 +471,10 @@ export default function ArticleEditor({
             <select
               value={type}
               onChange={(e) => {
-                setType(e.target.value as ShowcaseType);
+                const next = e.target.value as ShowcaseType;
+                setType(next);
+                // Same values, the new type's labels.
+                setKeyFacts((f) => KEY_FACT_LABELS[next].map((label, i) => ({ label, value: f[i]?.value ?? "" })));
                 setDirty(true);
               }}
               className={fieldClass}
@@ -425,6 +581,169 @@ export default function ArticleEditor({
               published page.
             </p>
           </div>
+
+          <fieldset className="space-y-3 border-t border-outline-variant/30 pt-4">
+            <legend className="font-label-md text-label-md text-on-background">Key facts</legend>
+            <p className="font-label-sm text-label-sm text-secondary">
+              Three short facts shown in a strip under the headline, up to {MAX_FACT_CHARS} characters
+              each. Leave them all blank and no strip is shown.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={suggestFacts}
+                disabled={suggesting}
+                className="btn-outline px-4 py-2 rounded-lg font-label-md text-label-md disabled:opacity-50"
+              >
+                {suggesting ? "Suggesting…" : "Suggest key facts"}
+              </button>
+              {suggestNote && (
+                <p role="status" className="font-label-sm text-label-sm text-secondary">
+                  {suggestNote}
+                </p>
+              )}
+            </div>
+            {keyFacts.map((f, i) => (
+              <div key={i}>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-label-sm text-label-sm text-secondary">{f.label}</label>
+                  <span
+                    className={
+                      "font-label-sm text-label-sm " +
+                      (f.value.length > MAX_FACT_CHARS ? "text-error" : "text-secondary")
+                    }
+                  >
+                    {f.value.length} / {MAX_FACT_CHARS}
+                  </span>
+                </div>
+                <textarea
+                  rows={2}
+                  maxLength={MAX_FACT_CHARS}
+                  value={f.value}
+                  onChange={(e) => {
+                    setKeyFacts((all) => all.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)));
+                    setDirty(true);
+                  }}
+                  className={fieldClass}
+                />
+              </div>
+            ))}
+          </fieldset>
+
+          <fieldset className="space-y-3 border-t border-outline-variant/30 pt-4">
+            <legend className="font-label-md text-label-md text-on-background">Main button</legend>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block font-label-sm text-label-sm text-secondary mb-1">Label</label>
+                <input
+                  list="promote-cta-labels"
+                  value={ctaLabel}
+                  maxLength={40}
+                  placeholder={CTA_DEFAULT_LABEL[type]}
+                  onChange={(e) => {
+                    setCtaLabel(e.target.value);
+                    setDirty(true);
+                  }}
+                  className={fieldClass}
+                />
+                <datalist id="promote-cta-labels">
+                  {CTA_LABEL_CHOICES.map((l) => (
+                    <option key={l} value={l} />
+                  ))}
+                </datalist>
+              </div>
+              <div>
+                <label className="block font-label-sm text-label-sm text-secondary mb-1">Link</label>
+                <input
+                  type="url"
+                  value={ctaUrl}
+                  placeholder="https://"
+                  onChange={(e) => {
+                    setCtaUrl(e.target.value);
+                    setDirty(true);
+                  }}
+                  className={fieldClass}
+                />
+              </div>
+            </div>
+            <p className="font-label-sm text-label-sm text-secondary">
+              Blank uses the paper&apos;s DOI or your link, with the label above.
+            </p>
+          </fieldset>
+
+          {type === "event" && (
+            <fieldset className="space-y-3 border-t border-outline-variant/30 pt-4">
+              <legend className="font-label-md text-label-md text-on-background">Event details</legend>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-label-sm text-label-sm text-secondary mb-1">Starts</label>
+                  <input
+                    type="datetime-local"
+                    value={eventStartsAt}
+                    onChange={(e) => {
+                      setEventStartsAt(e.target.value);
+                      setDirty(true);
+                    }}
+                    className={fieldClass}
+                  />
+                </div>
+                <div>
+                  <label className="block font-label-sm text-label-sm text-secondary mb-1">Location</label>
+                  <input
+                    value={eventLocation}
+                    maxLength={200}
+                    onChange={(e) => {
+                      setEventLocation(e.target.value);
+                      setDirty(true);
+                    }}
+                    className={fieldClass}
+                  />
+                </div>
+              </div>
+            </fieldset>
+          )}
+
+          <fieldset className="space-y-3 border-t border-outline-variant/30 pt-4">
+            <legend className="font-label-md text-label-md text-on-background">Quote (optional)</legend>
+            <p className="font-label-sm text-label-sm text-secondary">
+              Shown on the page only if you write one, in your own words.
+            </p>
+            <textarea
+              rows={3}
+              maxLength={600}
+              value={quote}
+              onChange={(e) => {
+                setQuote(e.target.value);
+                setDirty(true);
+              }}
+              className={fieldClass}
+            />
+            <input
+              value={quoteBy}
+              maxLength={120}
+              placeholder="Who said it, for example Dr Jane Okafor, Principal Investigator"
+              onChange={(e) => {
+                setQuoteBy(e.target.value);
+                setDirty(true);
+              }}
+              className={fieldClass}
+            />
+          </fieldset>
+
+          {initialEntry.isAdmin && (
+            <label className="flex items-center gap-3 border-t border-outline-variant/30 pt-4 font-label-md text-label-md text-on-background">
+              <input
+                type="checkbox"
+                checked={featured}
+                onChange={(e) => {
+                  setFeatured(e.target.checked);
+                  setDirty(true);
+                }}
+                className="h-4 w-4 accent-primary"
+              />
+              Feature this at the top of Promote (admins only)
+            </label>
+          )}
 
           {saveError && (
             <p className="font-body-sm text-body-sm text-error" role="alert">

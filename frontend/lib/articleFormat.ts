@@ -5,6 +5,8 @@
 // publish-date formatting can't drift between the two — before this they
 // were duplicated (the card didn't have them at all yet).
 
+import { articleUrlFor, siteUrl } from "./server/promote/shareText.ts";
+
 /** ~200 wpm, rounded, floored at 1 minute — standard estimated-read-time
  *  math, same rough rate every "N min read" badge on a news site uses.
  *  Counts the standfirst too since it's read before the body is. */
@@ -21,15 +23,13 @@ export function formatPublishedDate(iso: string): string {
   });
 }
 
-// smartdrugdiscovery.org is the Wix marketing site (a 404 for anything under
-// /promote) — the app itself is served from v2.smartdrugdiscovery.org. This
-// is the only absolute-URL construction in the app; NEXT_PUBLIC_SITE_URL
-// isn't set anywhere yet (not in .env.example/.env.local), so it always
-// falls through to this default today. Reads NEXT_PUBLIC_ (not a plain env
-// var) specifically so this also works from ArticleEditor.tsx, a client
-// component — Next.js inlines NEXT_PUBLIC_ vars into the client bundle at
-// build time.
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://v2.smartdrugdiscovery.org";
+// The public site URL comes from NEXT_PUBLIC_SITE_URL when it is set to a valid
+// origin, otherwise the production address (connect.smartdrugdiscovery.org):
+// see siteUrl() in lib/server/promote/shareText.ts, which is the one place that
+// decides it and is covered by tests. Reads NEXT_PUBLIC_ (not a plain env var)
+// so this also works from client components: Next.js inlines NEXT_PUBLIC_ vars
+// into the client bundle at build time.
+export const SITE_URL = siteUrl(process.env.NEXT_PUBLIC_SITE_URL);
 
 /** The public URL for a published (or draft — the slug exists from the
  *  moment the row does) article. Shared by the article page itself and by
@@ -37,7 +37,7 @@ const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://v2.smartdrugdiscov
  *  ArticleEditor.tsx) so there is exactly one place that knows the shape of
  *  a /promote/[slug] URL. */
 export function articleUrl(slug: string): string {
-  return `${SITE_URL}/promote/${slug}`;
+  return articleUrlFor(SITE_URL, slug);
 }
 
 /** Replace the LinkedIn post's "{{ARTICLE_LINK}}" placeholder (see

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ServerConfigError } from "@/lib/server/supabaseServer";
 import { generateStructuredArticle } from "@/lib/server/promote/generateStructuredArticle";
+import { suggestKeyFactsOrBlank } from "@/lib/server/promote/suggestKeyFacts";
 import { RateLimitedError } from "@/lib/server/promote/groqCall";
 import { STALE_TTL_GENERATOR, TTL_GENERATOR, normalizeKey, serverCache } from "@/lib/serverCache";
 import { SHOWCASE_TYPES, type ShowcaseType, type StructuredGeneratorResult } from "@/lib/showcaseTypes";
@@ -32,8 +33,8 @@ type Body = {
   audience?: string;
 };
 
-function isNonPaperType(t: string): t is Exclude<ShowcaseType, "paper"> {
-  return t !== "paper" && (SHOWCASE_TYPES as readonly string[]).includes(t);
+function isNonPaperType(t: string): t is Exclude<ShowcaseType, "paper" | "preprint"> {
+  return t !== "paper" && t !== "preprint" && (SHOWCASE_TYPES as readonly string[]).includes(t);
 }
 
 /** The cache key — the whole answer set, normalized. Two different people
@@ -80,7 +81,11 @@ export async function POST(req: Request) {
   try {
     const result = await serverCache.getOrCompute<StructuredGeneratorResult>(
       key,
-      () => generateStructuredArticle(type, { oneLiner, contrast, specifics, context, audience }),
+      async () => {
+        const article = await generateStructuredArticle(type, { oneLiner, contrast, specifics, context, audience });
+        const keyFacts = await suggestKeyFactsOrBlank(type, article.headline, article.standfirst, article.articleBody);
+        return { ...article, keyFacts };
+      },
       TTL_GENERATOR,
       STALE_TTL_GENERATOR
     );

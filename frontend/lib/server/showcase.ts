@@ -24,6 +24,23 @@ import {
 } from "@/lib/auth";
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
 import type { ArticleEditorEntry } from "@/components/promote/ArticleEditor";
+import { articleUrl } from "@/lib/articleFormat";
+import {
+  canonicalType,
+  factsForRow,
+  firstLinkIn,
+  matchesType,
+  normalizeKeyFacts,
+  resolveCta,
+  safeHttpUrl,
+  type KeyFact,
+} from "@/lib/server/promote/showcaseKinds";
+import {
+  draftShareTexts,
+  normalizeShareTexts,
+  shareTextsEmpty,
+  type ShareTexts,
+} from "@/lib/server/promote/shareText";
 import {
   SHOWCASE_TYPE_LABEL,
   SHOWCASE_TYPES,
@@ -54,7 +71,7 @@ export {
 // couldn't already look up directly. NULL community_id -> NULL here, same
 // as any other to-one embed with no matching row.
 const ENTRY_SELECT =
-  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, tags, created_at, published_at, owner_id, community_id, community:communities(id, slug, name)";
+  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, doi, tags, created_at, published_at, owner_id, community_id, key_facts, cta_label, cta_url, event_starts_at, event_location, featured, community:communities(id, slug, name)";
 
 /** Pull the embedded `community:communities(...)` object (see ENTRY_SELECT's
  *  own comment) into a ShowcaseCommunity, or null. Supabase can return this
@@ -75,9 +92,10 @@ function toEntry(
   viewerId: string | null,
   heroImages: Map<string, string>
 ): ShowcaseEntry {
+  const type = canonicalType(row.type as string | null);
   return {
     id: row.id as string,
-    type: (row.type as ShowcaseType) ?? "paper",
+    type,
     title: (row.title as string) ?? "",
     description: (row.description as string) ?? "",
     authors: (row.authors as string) ?? "",
@@ -99,6 +117,16 @@ function toEntry(
     // Attached media wins over the legacy column — see the field's own
     // comment in showcaseTypes.ts for why this can't be re-derived client-side.
     heroImageUrl: heroImages.get(row.id as string) ?? (row.image_url as string | null) ?? null,
+    keyFacts: factsForRow(type, row.key_facts), // stored facts only; none = no strip
+    cta: resolveCta(type, {
+      ctaLabel: row.cta_label as string | null,
+      ctaUrl: row.cta_url as string | null,
+      link: row.link as string | null,
+      doi: row.doi as string | null,
+    }, firstLinkIn(row.article_body as string)),
+    eventStartsAt: (row.event_starts_at as string | null) ?? null,
+    eventLocation: (row.event_location as string | null) ?? null,
+    featured: Boolean(row.featured),
   };
 }
 
@@ -174,18 +202,18 @@ export async function listShowcase(
   const db = await getDb();
   if (!db) throw new ServerConfigError();
 
-  let query = db
+  // The type filter is applied here, on the mapped type, so an older row (an
+  // "award") still shows under its current chip ("Achievement").
+  const { data, error } = await db
     .from("promote_showcase")
     .select(ENTRY_SELECT)
     .eq("published", true)
     .order("created_at", { ascending: false });
-
-  if (opts.type && opts.type !== "all") query = query.eq("type", opts.type);
-
-  const { data, error } = await query;
   if (error || !data) return [];
 
-  const rows = data as Record<string, unknown>[];
+  const rows = (data as Record<string, unknown>[]).filter((r) =>
+    matchesType(r.type as string | null, opts.type ?? "all")
+  );
   const viewer = await getCurrentUser();
   const [owners, heroImages] = await Promise.all([
     ownerMap(db),
@@ -315,6 +343,8 @@ export async function createArticleEntry(
         // CHECK (can_post_to_community) rejects a forged id outright, same
         // as owner_id is already enforced by RLS rather than trusted here.
         community_id: input.communityId ?? null,
+        key_facts: sanitizeFacts(input.keyFacts),
+        share_text: input.shareText ?? {},
         slug,
         // published intentionally omitted -> column default (false): a
         // freshly created draft is private until publishArticle().
@@ -322,7 +352,12 @@ export async function createArticleEntry(
       .select("id, slug")
       .single();
 
-    if (!error && data) return { id: data.id as string, slug: data.slug as string };
+    if (!error && data) {
+      // A draft that already has a headline (the DOI path) gets its share
+      // drafts straight away.
+      if (input.headline.trim()) await ensureShareText(data.id as string);
+      return { id: data.id as string, slug: data.slug as string };
+    }
     // 23505 = unique_violation. Only the slug index can collide here (id is a
     // fresh gen_random_uuid()) — retry with a new suffix rather than failing
     // the whole submission over a title someone already used.
@@ -348,6 +383,22 @@ export async function updateArticleEntry(id: string, patch: ArticleDraftPatch): 
   if (patch.doi !== undefined) update.doi = patch.doi;
   if (patch.link !== undefined) update.link = patch.link;
   if (patch.journal !== undefined) update.journal = patch.journal;
+  if (patch.keyFacts !== undefined) update.key_facts = sanitizeFacts(patch.keyFacts);
+  if (patch.ctaLabel !== undefined) update.cta_label = (patch.ctaLabel ?? "").trim().slice(0, 40) || null;
+  if (patch.ctaUrl !== undefined) update.cta_url = safeHttpUrl(patch.ctaUrl);
+  if (patch.quote !== undefined) update.quote = (patch.quote ?? "").trim().slice(0, 600) || null;
+  if (patch.quoteBy !== undefined) update.quote_by = (patch.quoteBy ?? "").trim().slice(0, 120) || null;
+  if (patch.eventStartsAt !== undefined) update.event_starts_at = validIso(patch.eventStartsAt);
+  if (patch.eventLocation !== undefined) update.event_location = (patch.eventLocation ?? "").trim().slice(0, 200) || null;
+  if (patch.shareText !== undefined) {
+    const t = normalizeShareTexts(patch.shareText);
+    update.share_text = t;
+    // The LinkedIn column stays in step: older readers use it.
+    update.linkedin_post = t.linkedin;
+  }
+  // Only a site admin's value sticks: the database trigger resets anyone
+  // else's, this just avoids sending it.
+  if (patch.featured !== undefined && (await isSiteAdmin())) update.featured = patch.featured;
   if (Object.keys(update).length === 0) return;
 
   const { error } = await db
@@ -356,6 +407,81 @@ export async function updateArticleEntry(id: string, patch: ArticleDraftPatch): 
     .eq("id", id)
     .eq("owner_id", user.id);
   if (error) throw error;
+
+  // Share drafts are written once the item has a headline, unless the author
+  // already has some (never overwritten).
+  if (patch.headline !== undefined || patch.standfirst !== undefined || patch.articleBody !== undefined) {
+    await ensureShareText(id);
+  }
+}
+
+/** Three facts at most, each a trimmed label and value. */
+function sanitizeFacts(facts: KeyFact[] | undefined): KeyFact[] {
+  if (!Array.isArray(facts)) return [];
+  const cleaned = facts.slice(0, 3).map((f) => ({
+    label: String(f?.label ?? "").trim().slice(0, 60),
+    value: String(f?.value ?? "").trim().slice(0, 200),
+  }));
+  // All blank = nothing stored, so the item shows no fact strip.
+  return cleaned.some((f) => f.value) ? cleaned : [];
+}
+
+function validIso(v: string | null | undefined): string | null {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Is the signed-in user a site admin? (public.site_admins, read through RLS
+ *  as their own row.) Signed out or any failure: false. */
+export async function isSiteAdmin(): Promise<boolean> {
+  const user = await getCurrentUser();
+  if (!user) return false;
+  const db = await getDb();
+  if (!db) return false;
+  const { data, error } = await db.rpc("is_site_admin");
+  return !error && data === true;
+}
+
+/** Fill in the three share drafts for an item when it has none yet. The
+ *  author's existing LinkedIn post (the older column) is kept as the LinkedIn
+ *  text when there is one. Best-effort: a failure leaves the drafts empty and
+ *  the editor offers to generate them. */
+async function ensureShareText(id: string): Promise<void> {
+  try {
+    const { user, db } = await requireCurrentUser();
+    const { data } = await db
+      .from("promote_showcase")
+      .select("type, headline, standfirst, article_body, tags, key_facts, linkedin_post, share_text, slug")
+      .eq("id", id)
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!data || !(data.headline as string)?.trim()) return;
+    const current = normalizeShareTexts(data.share_text);
+    if (current.linkedin.trim() && current.x.trim() && current.bluesky.trim()) return;
+    const type = canonicalType(data.type as string);
+    const draft = draftShareTexts({
+      type,
+      headline: data.headline as string,
+      standfirst: (data.standfirst as string) ?? "",
+      facts: factsForRow(type, data.key_facts),
+      tags: (data.tags as string[]) ?? [],
+      url: articleUrl(data.slug as string),
+    });
+    const next: ShareTexts = {
+      linkedin: current.linkedin.trim() || ((data.linkedin_post as string) ?? "").trim() || draft.linkedin,
+      x: current.x.trim() || draft.x,
+      bluesky: current.bluesky.trim() || draft.bluesky,
+    };
+    if (shareTextsEmpty(next)) return;
+    await db
+      .from("promote_showcase")
+      .update({ share_text: next, linkedin_post: next.linkedin })
+      .eq("id", id)
+      .eq("owner_id", user.id);
+  } catch (e) {
+    console.error("ensureShareText failed", e);
+  }
 }
 
 /** True when `title` is exactly the placeholder ensureDraft() (SubmitFlow.tsx)
@@ -472,6 +598,8 @@ export async function setArticlePublished(id: string, published: boolean): Promi
     .eq("id", id)
     .eq("owner_id", user.id);
   if (error) throw error;
+
+  if (published) await ensureShareText(id);
 
   return { slug };
 }
@@ -679,7 +807,7 @@ export async function removeShowcaseMedia(showcaseId: string, mediaId: string): 
 // ── public article page ──────────────────────────────────────────────────────
 
 const PUBLIC_ARTICLE_SELECT =
-  "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, created_at, published_at, owner_id, community:communities(id, slug, name)";
+  "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, tags, created_at, published_at, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, community:communities(id, slug, name)";
 
 /** Look up a PUBLISHED article by slug, for the public /promote/[slug] page.
  *
@@ -719,12 +847,39 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     ownerMap(anon),
   ]);
 
+  const type = canonicalType(data.type as string);
+  const standfirst = (data.standfirst as string) ?? "";
+  const articleBody = (data.article_body as string) ?? "";
+  const shareText = normalizeShareTexts(data.share_text);
+  if (!shareText.linkedin.trim()) shareText.linkedin = (data.linkedin_post as string) ?? "";
+  // A talk with no link of its own offers its first attached deck instead.
+  const deck = media.find((m) => m.kind === "slides")?.url ?? null;
+  const cta = resolveCta(
+    type,
+    {
+      ctaLabel: data.cta_label as string | null,
+      ctaUrl: data.cta_url as string | null,
+      link: data.link as string | null,
+      doi: data.doi as string | null,
+    },
+    deck ?? firstLinkIn(articleBody)
+  );
+
   return {
+    id: data.id as string,
+    tags: (data.tags as string[]) ?? [],
+    keyFacts: factsForRow(type, data.key_facts),
+    cta,
+    quote: ((data.quote as string | null) ?? "").trim() || null,
+    quoteBy: ((data.quote_by as string | null) ?? "").trim() || null,
+    shareText,
+    eventStartsAt: (data.event_starts_at as string | null) ?? null,
+    eventLocation: (data.event_location as string | null) ?? null,
     slug: data.slug as string,
-    type: (data.type as string) ?? "other",
+    type,
     headline: (data.headline as string) || (data.title as string),
-    standfirst: (data.standfirst as string) ?? "",
-    articleBody: (data.article_body as string) ?? "",
+    standfirst,
+    articleBody,
     linkedinPost: (data.linkedin_post as string) ?? "",
     title: data.title as string,
     authors: (data.authors as string) ?? "",
@@ -796,7 +951,7 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
   const { data, error } = await db
     .from("promote_showcase")
     .select(
-      "id, slug, type, headline, standfirst, article_body, linkedin_post, community_id, authors, published, owner_id"
+      "id, slug, type, headline, standfirst, article_body, linkedin_post, community_id, authors, published, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, featured, link, doi"
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -804,19 +959,36 @@ export async function getOwnedArticleForEdit(slug: string): Promise<OwnedArticle
   if (error || !data || data.owner_id !== user.id) return null;
 
   const media = await listShowcaseMedia(db, data.id as string);
+  const type = canonicalType(data.type as string);
+  const standfirst = (data.standfirst as string) ?? "";
+  const articleBody = (data.article_body as string) ?? "";
+  const shareText = normalizeShareTexts(data.share_text);
+  if (!shareText.linkedin.trim()) shareText.linkedin = (data.linkedin_post as string) ?? "";
 
   return {
     entry: {
       id: data.id as string,
       slug: data.slug as string,
       published: Boolean(data.published),
-      type: data.type as ShowcaseType,
+      type,
       headline: (data.headline as string) ?? "",
-      standfirst: (data.standfirst as string) ?? "",
-      articleBody: (data.article_body as string) ?? "",
+      standfirst,
+      articleBody,
       linkedinPost: (data.linkedin_post as string) ?? "",
       communityId: (data.community_id as string | null) ?? null,
       authors: (data.authors as string) ?? "",
+      // The three slots as stored (blank where nothing is stored). The editor
+      // fills them by hand or with "Suggest key facts"; nothing is derived.
+      keyFacts: normalizeKeyFacts(type, data.key_facts),
+      ctaLabel: (data.cta_label as string | null) ?? "",
+      ctaUrl: (data.cta_url as string | null) ?? "",
+      quote: (data.quote as string | null) ?? "",
+      quoteBy: (data.quote_by as string | null) ?? "",
+      shareText,
+      eventStartsAt: (data.event_starts_at as string | null) ?? null,
+      eventLocation: (data.event_location as string | null) ?? "",
+      featured: Boolean(data.featured),
+      isAdmin: await isSiteAdmin(),
     },
     media,
   };

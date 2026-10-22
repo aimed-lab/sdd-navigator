@@ -60,11 +60,16 @@ export type ArticleDraft = {
 // (generateArticle.ts) unchanged.
 const SECTION_HEADINGS = ["What it is", "Why it matters", "What's next"] as const;
 
-const TYPE_REGISTER: Record<Exclude<ShowcaseType, "paper">, string> = {
+const TYPE_REGISTER: Record<Exclude<ShowcaseType, "paper" | "preprint">, string> = {
   tool: "a tool or piece of software the person built",
   talk: "a talk or conference presentation the person gave",
   poster: "a poster the person presented",
-  award: "an award or milestone the person is sharing",
+  achievement: "an achievement, award or milestone the person is sharing",
+  breakthrough: "a breakthrough or key result the person is sharing",
+  partnership: "a partnership or collaboration the person is announcing",
+  funding: "a funding award the person or their group won",
+  service: "a service or core facility the person's group offers to other researchers",
+  dataset: "a dataset the person assembled and is sharing",
   event: "an event the person is announcing or ran",
   other: "something the person built or did that doesn't fit a more specific category",
 };
@@ -226,7 +231,7 @@ Return only the JSON object described in the system prompt.`;
 // so the route maps it via errorResponse, same contract as
 // generatePromoArticle.
 export async function generateStructuredArticle(
-  type: Exclude<ShowcaseType, "paper">,
+  type: Exclude<ShowcaseType, "paper" | "preprint">,
   answers: StructuredAnswers
 ): Promise<ArticleDraft> {
   const specifics = answers.specifics.map((s) => s.trim()).filter(Boolean);

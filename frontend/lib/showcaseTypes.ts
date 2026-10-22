@@ -9,83 +9,75 @@
 //
 // Rule: anything a "use client" component imports as a VALUE belongs here.
 
-// These are the seven choices the /promote/submit flow opens with (see
-// components/promote/SubmitFlow.tsx) — "what are you showcasing?" — and
-// double as the Type field in the editor and the gallery's filter chips.
-// "paper" is the one choice that goes through DOI/PubMed generation; every
+// The thirteen item types the /promote/submit flow opens with, the editor's
+// Type field and the front page's filter chips (the list, labels and the
+// mapping of older values live in lib/server/promote/showcaseKinds.ts, which
+// `npm test` covers). "paper" and "preprint" go through DOI generation; every
 // other choice goes through the structured five-question form
-// (STRUCTURED_QUESTIONS below) instead of being written by hand. Replaced
-// the old case_study/paper/white_paper/achievement set (kept below,
-// read-only, for rows created before this picker existed).
-//
-// "event" added alongside the original five: a talk and an event share a
-// where/when context question, but need genuinely different second
-// questions ("what did people think before/now" vs "why does this matter
-// now" — see STRUCTURED_QUESTIONS), which only makes sense as two types,
-// not one relabeled.
-export const SHOWCASE_TYPES = ["paper", "talk", "poster", "award", "tool", "event", "other"] as const;
-export type ShowcaseType = (typeof SHOWCASE_TYPES)[number];
+// (STRUCTURED_QUESTIONS below).
+import {
+  CTA_DEFAULT_LABEL,
+  KEY_FACT_LABELS,
+  SHOWCASE_TYPES,
+  SHOWCASE_TYPE_LABEL,
+  canonicalType,
+  type KeyFact,
+  type ShowcaseType,
+} from "./server/promote/showcaseKinds.ts";
+import type { ShareTexts } from "./server/promote/shareText.ts";
 
-/** Human labels for the type chips / select. */
-export const SHOWCASE_TYPE_LABEL: Record<ShowcaseType, string> = {
-  paper: "Paper",
-  talk: "Conference or talk",
-  poster: "Poster",
-  award: "Award or milestone",
-  tool: "Tool or software",
-  event: "Event",
-  other: "Something else",
-};
+export { CTA_DEFAULT_LABEL, KEY_FACT_LABELS, SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, canonicalType };
+export type { KeyFact, ShowcaseType, ShareTexts };
 
-/** Labels for `type` values a row may still carry from before this picker
- *  replaced the old four-category set — never offered as a choice anymore,
- *  only read so an old gallery card still shows a real label instead of the
- *  raw column value. See ShowcaseCard.tsx. */
+/** Labels for `type` values a row may still carry from before the current
+ *  list. Rows are read through canonicalType() now, so these only matter to a
+ *  caller that has the raw value. */
 export const LEGACY_SHOWCASE_TYPE_LABEL: Record<string, string> = {
   case_study: "Case study",
   white_paper: "White paper",
-  achievement: "Achievement",
+  award: "Achievement",
 };
 
-/** Material Symbols icon name per type — used ONLY for the gallery card's
- *  no-image placeholder (ShowcaseCard.tsx). Not a decision the picker made
- *  before (there was one, in the now-removed category cards); kept here as
- *  the single source since the card is the only place it matters now. */
+/** Material Symbols icon name per type, for the no-image placeholders. */
 export const SHOWCASE_TYPE_ICON: Record<ShowcaseType, string> = {
   paper: "science",
+  preprint: "draft",
   talk: "podium",
   poster: "image",
-  award: "emoji_events",
-  tool: "build",
   event: "event",
+  achievement: "emoji_events",
+  breakthrough: "bolt",
+  partnership: "handshake",
+  funding: "payments",
+  tool: "build",
+  service: "support_agent",
+  dataset: "database",
   other: "auto_awesome",
 };
 
 /** Fallback icon for a legacy `type` value with no entry above. */
 export const DEFAULT_SHOWCASE_TYPE_ICON = "auto_awesome";
 
-/** Background/text pairing per type for the gallery card's GENERATED COVER
- *  (ShowcaseCard.tsx) — the solid tinted panel an entry gets when it has no
- *  image of its own. Built entirely from tokens already in
- *  tailwind.config.ts (no new colours): the three hue families the palette
- *  actually has (primary/green, secondary/blue-grey, tertiary/blue), kept
- *  muted via low opacity rather than the saturated base colour, since
- *  several of these sit side by side in one grid. Six categories only
- *  really give three distinguishable hues here — the background icon
- *  (SHOWCASE_TYPE_ICON) carries the rest of the distinction, same as a real
- *  photo would. Every category uses the EXACT SAME cover structure — only
- *  bg/text change — so the six don't read as six different components. */
+/** Background/text pairing per type for a generated cover: tokens already in
+ *  tailwind.config.ts, kept muted. The icon carries the rest of the
+ *  distinction between types that share a hue. */
 export const SHOWCASE_TYPE_COVER: Record<ShowcaseType, { bg: string; text: string }> = {
   paper: { bg: "bg-primary/10", text: "text-primary" },
+  preprint: { bg: "bg-primary/10", text: "text-primary" },
   talk: { bg: "bg-secondary/10", text: "text-secondary" },
   poster: { bg: "bg-tertiary/10", text: "text-tertiary" },
-  award: { bg: "bg-primary/20", text: "text-primary" },
-  tool: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
   event: { bg: "bg-tertiary/20", text: "text-tertiary" },
+  achievement: { bg: "bg-primary/20", text: "text-primary" },
+  breakthrough: { bg: "bg-primary/20", text: "text-primary" },
+  partnership: { bg: "bg-secondary/10", text: "text-secondary" },
+  funding: { bg: "bg-primary/10", text: "text-primary" },
+  tool: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
+  service: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
+  dataset: { bg: "bg-tertiary/10", text: "text-tertiary" },
   other: { bg: "bg-surface-container-high", text: "text-on-surface-variant" },
 };
 
-/** Cover tint for a legacy `type` value with no entry above — neutral, same
+/** Cover tint for a legacy `type` value with no entry above: neutral, same
  *  as `other`. */
 export const DEFAULT_SHOWCASE_TYPE_COVER = {
   bg: "bg-surface-container-high",
@@ -154,6 +146,15 @@ export type ShowcaseEntry = {
    *  entirely and silently show nothing for every post-media-table entry
    *  that has a hero image. */
   heroImageUrl: string | null;
+  /** Three labelled facts: the author's own, else taken from their text. */
+  keyFacts: KeyFact[];
+  /** The main button (label + link), null when there is nowhere to send a reader. */
+  cta: { label: string; url: string } | null;
+  /** Event start (ISO) and place, for type "event". */
+  eventStartsAt: string | null;
+  eventLocation: string | null;
+  /** Set by a site admin: shown large at the top of /promote. */
+  featured: boolean;
 };
 
 // ── generator (public, no auth) ───────────────────────────────────────────────
@@ -185,6 +186,9 @@ export type GeneratorResult = {
    *  thing the flow is actually for; the article is the page the post links
    *  to. See lib/server/promote/generateArticle.ts for the shape rules. */
   linkedinPost: string;
+  /** Key facts filled from the generated article's own text; blank values
+   *  where the text does not support one. */
+  keyFacts?: KeyFact[];
 };
 
 // ── structured (non-paper) generator, public, no auth ───────────────────────
@@ -242,6 +246,7 @@ export type StructuredGeneratorResult = {
   standfirst: string;
   articleBody: string;
   linkedinPost: string;
+  keyFacts?: KeyFact[];
 };
 
 /** One question's label + a real example answer, shown directly under the
@@ -263,7 +268,7 @@ export type StructuredQuestionSet = {
  *  real numbers, a real venue) rather than generic placeholders, matching
  *  the same "a specific travels, a summary doesn't" standard the generated
  *  posts themselves are held to. */
-export const STRUCTURED_QUESTIONS: Record<Exclude<ShowcaseType, "paper">, StructuredQuestionSet> = {
+export const STRUCTURED_QUESTIONS: Record<Exclude<ShowcaseType, "paper" | "preprint">, StructuredQuestionSet> = {
   tool: {
     oneLiner: {
       label: "What is it, in one line",
@@ -333,29 +338,6 @@ export const STRUCTURED_QUESTIONS: Record<Exclude<ShowcaseType, "paper">, Struct
       example: "Structural biologists or medicinal chemists who've worked on this target family before.",
     },
   },
-  award: {
-    oneLiner: {
-      label: "What is it, in one line",
-      example: "Our lab's early-career investigator award for work on antibody developability prediction.",
-    },
-    contrast: {
-      label: "What did people have to do before, and what can they do now",
-      example:
-        "Before: developability was assessed late, after a candidate was already selected. Now: the model flags likely aggregation risk before synthesis.",
-    },
-    specifics: {
-      label: "Three to five specific things about the work being recognized",
-      example: "Screened 40,000 candidate sequences, flagged aggregation risk with 85% precision on held-out data.",
-    },
-    context: {
-      label: "What it's for and when",
-      example: "American Association of Immunologists early-career award, announced March 2026.",
-    },
-    audience: {
-      label: "Who you want to hear from",
-      example: "Other groups working on antibody developability or biologics manufacturability.",
-    },
-  },
   event: {
     oneLiner: {
       label: "What is it, in one line",
@@ -379,27 +361,165 @@ export const STRUCTURED_QUESTIONS: Record<Exclude<ShowcaseType, "paper">, Struct
       example: "Anyone who's maintained a computational pipeline other people depend on.",
     },
   },
-  other: {
+  achievement: {
     oneLiner: {
       label: "What is it, in one line",
-      example: "A public dataset of 500 curated drug-target interaction pairs with confidence scores.",
+      example: "Our lab's early-career investigator award for work on antibody developability prediction.",
     },
     contrast: {
       label: "What did people have to do before, and what can they do now",
       example:
-        "Before: cobble together interaction data from five inconsistent sources by hand. Now: one file, one schema, confidence-scored.",
+        "Before: developability was assessed late, after a candidate was already selected. Now: the model flags likely aggregation risk before synthesis.",
     },
     specifics: {
-      label: "Three to five specific things about it",
-      example: "500 pairs, each scored 0-1 for confidence, sourced from six curated databases with citations.",
+      label: "Three to five specific things about the work being recognized",
+      example: "Screened 40,000 candidate sequences, flagged aggregation risk with 85% precision on held-out data.",
     },
     context: {
-      label: "The relevant context",
-      example: "First release — built over the past three months, not yet used outside my own project.",
+      label: "What it's for and when",
+      example: "American Association of Immunologists early-career award, announced March 2026.",
     },
     audience: {
       label: "Who you want to hear from",
-      example: "Anyone building a model that needs labeled drug-target interaction data.",
+      example: "Other groups working on antibody developability or biologics manufacturability.",
+    },
+  },
+  breakthrough: {
+    oneLiner: {
+      label: 'What is the breakthrough, in one line',
+      example: 'A method that reads single-cell data from a frozen biopsy without losing rare cell types.',
+    },
+    contrast: {
+      label: 'The problem before, and what changed',
+      example:
+        'Before: frozen samples lost rare cells and were considered unusable. Now: we recover them with a gentler prep step.',
+    },
+    specifics: {
+      label: 'Three to five specific results, in your own words',
+      example: 'Recovered 92% of rare cell types, compared with 40% before.',
+    },
+    context: {
+      label: 'Where and when it was shown or published',
+      example: 'Preprint posted in September 2026.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Groups with archived frozen tissue they could not use.',
+    },
+  },
+  partnership: {
+    oneLiner: {
+      label: 'What is the partnership, in one line',
+      example: 'A joint programme between our lab and a regional hospital network on rural dementia care.',
+    },
+    contrast: {
+      label: 'What each side brings, and the goal',
+      example:
+        'The hospitals bring patients and clinical expertise; we bring data analysis. The goal is earlier detection in rural clinics.',
+    },
+    specifics: {
+      label: 'Three to five specific things it will do',
+      example: 'Share de-identified data, run a pilot in four clinics, publish results openly.',
+    },
+    context: {
+      label: 'Who is involved and since when',
+      example: 'Our lab and three hospitals, signed in October 2026.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Researchers working on rural health or early diagnosis.',
+    },
+  },
+  funding: {
+    oneLiner: {
+      label: 'What did you win, in one line',
+      example: 'An NIH R01 for computational models of drug resistance in pancreatic cancer.',
+    },
+    contrast: {
+      label: 'What the money makes possible',
+      example:
+        'Before: we could only test two drug combinations a year. Now: we can test hundreds.',
+    },
+    specifics: {
+      label: 'Three to five specific things it will fund',
+      example: 'Two postdocs, a cluster upgrade, and a patient-derived organoid core.',
+    },
+    context: {
+      label: 'Funder, amount and length',
+      example: 'NIH, 1.9 million dollars over four years, starting July 2026.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Anyone who wants to collaborate on resistance models.',
+    },
+  },
+  service: {
+    oneLiner: {
+      label: 'What do you offer, in one line',
+      example: 'A core facility that runs CRISPR screens end to end for other labs.',
+    },
+    contrast: {
+      label: 'What people had to do before, and what they can do now',
+      example:
+        'Before: each lab built its own screening pipeline. Now: send us the library and get results in three weeks.',
+    },
+    specifics: {
+      label: 'Three to five specific things included',
+      example: 'Library design, screening, sequencing and a results report.',
+    },
+    context: {
+      label: 'Who it is for and how to request it',
+      example: 'Any academic lab. Email the core with a short description of your screen.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Labs planning a pooled CRISPR screen.',
+    },
+  },
+  dataset: {
+    oneLiner: {
+      label: 'What is it, in one line',
+      example: 'A public dataset of 500 curated drug-target interaction pairs with confidence scores.',
+    },
+    contrast: {
+      label: 'What people had to do before, and what they can do now',
+      example:
+        'Before: cobble together interaction data from five inconsistent sources by hand. Now: one file, one schema, confidence-scored.',
+    },
+    specifics: {
+      label: 'Three to five specific things about it',
+      example: '500 pairs, each scored 0-1 for confidence, sourced from six curated databases with citations.',
+    },
+    context: {
+      label: 'Size, format and how to get it',
+      example: 'A 2 MB CSV, first release, built over the past three months.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Anyone building a model that needs labeled drug-target interaction data.',
+    },
+  },
+  other: {
+    oneLiner: {
+      label: 'What is it, in one line',
+      example: 'Something we did that does not fit the other categories, such as a community workshop series.',
+    },
+    contrast: {
+      label: 'What changed because of it',
+      example:
+        'Before: people worked alone on this. Now: a shared space and a regular meeting.',
+    },
+    specifics: {
+      label: 'Three to five specific things about it',
+      example: 'Twelve sessions so far, with an average of 30 people each.',
+    },
+    context: {
+      label: 'The relevant context',
+      example: 'Running since January 2026, open to anyone.',
+    },
+    audience: {
+      label: 'Who you want to hear from',
+      example: 'Anyone who wants to start something similar.',
     },
   },
 };
@@ -430,6 +550,9 @@ export type CreateArticleInput = {
    *  promote_showcase_insert_own/update_own's WITH CHECK
    *  (can_post_to_community) in the database. */
   communityId: string | null;
+  /** Optional: three key facts, and the share drafts (see shareText.ts). */
+  keyFacts?: KeyFact[];
+  shareText?: ShareTexts;
 };
 
 export type ArticleDraftPatch = {
@@ -448,6 +571,17 @@ export type ArticleDraftPatch = {
   doi?: string | null;
   link?: string | null;
   journal?: string | null;
+  keyFacts?: KeyFact[];
+  ctaLabel?: string | null;
+  ctaUrl?: string | null;
+  /** The author's own words only: the app never writes a quote. */
+  quote?: string | null;
+  quoteBy?: string | null;
+  shareText?: ShareTexts;
+  eventStartsAt?: string | null;
+  eventLocation?: string | null;
+  /** Honoured only for a site admin (the database trigger enforces it). */
+  featured?: boolean;
 };
 
 // ── media attachments ────────────────────────────────────────────────────
@@ -469,10 +603,9 @@ export type ShowcaseMedia = {
  *  render, nothing more (no owner_id, no draft-only fields). */
 export type PublicArticle = {
   slug: string;
-  /** Drives the category pill in the page's eyebrow row. Typed loosely
-   *  (not ShowcaseType) because a pre-picker legacy row can carry a value
-   *  SHOWCASE_TYPE_LABEL has no key for — see LEGACY_SHOWCASE_TYPE_LABEL. */
-  type: string;
+  /** Already mapped to one of the current types (an old "award" row reads
+   *  as "achievement"). */
+  type: ShowcaseType;
   headline: string;
   standfirst: string;
   articleBody: string;
@@ -503,4 +636,15 @@ export type PublicArticle = {
    *  the gallery card; the page skips the attribution line rather than
    *  showing a blank one. */
   owner: ShowcaseOwner | null;
+  id: string;
+  tags: string[];
+  keyFacts: KeyFact[];
+  /** The main button; a talk with no link falls back to its attached deck. */
+  cta: { label: string; url: string } | null;
+  /** Entered by the author, or null. Never generated. */
+  quote: string | null;
+  quoteBy: string | null;
+  shareText: ShareTexts;
+  eventStartsAt: string | null;
+  eventLocation: string | null;
 };
