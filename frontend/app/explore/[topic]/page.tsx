@@ -1,9 +1,12 @@
 "use client";
 
-// Search results page — /explore/<topic>. Same shell, grid, and category strip
-// as the Explore feed, but scoped to a query: it POSTs { input: topic } to the
-// explore backend and renders the routed sections. Selecting a category filters
-// to that section; an empty selected category shows the A+D invitation card.
+// Search results page — /explore/<topic>. The question box (prefilled), the
+// assistant's short cited Answer with the quick facts under it, one tab row with
+// counts (All, Papers, Trials, FDA, Compounds, Datasets, Grants, plus any other
+// kind that has results), and a right sidebar of next steps. It POSTs
+// { input: topic } to the explore backend and renders the routed sections.
+// ?category=<kind> opens that kind's tab. An empty selected tab shows the A+D
+// invitation card.
 //
 // PROJECT CONTEXT: arriving with ?project_id=&project_name= (from a
 // project's "Explore for this project" button — see
@@ -20,21 +23,34 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { CATEGORIES, labelForKind } from "@/components/CategoryStrip";
+import { labelForKind } from "@/components/CategoryStrip";
+import AnswerCard from "@/components/explore/AnswerCard";
 import CategoryEmptyCard from "@/components/CategoryEmptyCard";
-import CommunityTiles from "@/components/explore/CommunityTiles";
-import ExplorePageFrame from "@/components/explore/ExplorePageFrame";
+import ExploreShell from "@/components/explore/ExploreShell";
 import NewsFront from "@/components/explore/NewsFront";
 import OtherSections from "@/components/explore/OtherSections";
 import PaperList from "@/components/explore/PaperList";
+import QuestionBox from "@/components/explore/QuestionBox";
 import ResourceBento, { liveTile } from "@/components/explore/ResourceBento";
+import ResultsSidebar from "@/components/explore/ResultsSidebar";
 import { ApprovalTile, TILE_GRID, TrialTile } from "@/components/explore/ResultTiles";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { BlockSkeleton, PageSkeleton } from "@/components/explore/Skeletons";
+import {
+  categoryToTab,
+  mixedAll,
+  resultTabs,
+  scopeFromParam,
+  scopeHref,
+  scopeKinds,
+  sortGrantsByDeadline,
+  sortTrialsRecruitingFirst,
+  type MixedGroup,
+  type ScopeKey,
+} from "@/lib/server/explore/exploreLayout";
 import InlineFeedback from "@/components/feedback/InlineFeedback";
 import { submitFeedbackAction } from "@/app/feedback/actions";
 import type { ExploreItem, ExploreResponse, ExploreSection } from "@/types/explore";
-import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 // Section kinds hidden from the feed for now (portal quick fixes). Hidden,
 // not removed: drop a kind from this set to bring its section back.
@@ -81,6 +97,18 @@ function TrialStatusControl({
   );
 }
 
+const SCOPE_LABEL: Record<ScopeKey, string> = {
+  all: "everything",
+  paper: "papers",
+  preprint: "preprints",
+  trial: "clinical trials",
+  approval: "FDA approvals",
+  grant: "grants",
+  tool: "tools and datasets",
+  episode: "podcast episodes",
+  news: "news",
+};
+
 function SearchResults() {
   const router = useRouter();
   const params = useParams<{ topic: string }>();
@@ -108,17 +136,18 @@ function SearchResults() {
   if (trialStatusParam) extraQs.trial_status = trialStatusParam;
   const projectQs = Object.keys(extraQs).length > 0 ? `?${new URLSearchParams(extraQs).toString()}` : "";
 
-  const [query, setQuery] = useState(topic); // search bar value (pre-filled)
   const [data, setData] = useState<ExploreResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  // ?category=<kind> opens that section (the assistant's quick facts link here).
+  // ?category=<kind> opens that kind's tab once the results are in (the
+  // assistant's quick facts link here).
   const categoryParam = searchParams.get("category");
-  const validCategory = categoryParam && CATEGORIES.some((c) => c.kind === categoryParam) ? categoryParam : null;
-  const [selected, setSelected] = useState<string | null>(validCategory);
-  useEffect(() => {
-    if (validCategory) setSelected(validCategory);
-  }, [validCategory]);
+  // A specific scope (?category=grant, grants, trial, ...): the page opens on that
+  // type only. "Everything" (no category, or a kind that is just a tab) keeps the
+  // full results page.
+  const scope = scopeFromParam(categoryParam);
+  const scoped = scope !== "all";
+  const [selected, setSelected] = useState<string | null>(null);
 
   // FIRST LOAD ONLY: when arriving with a projectId (from "Explore for this
   // project" — see lib/projectTypes.ts:buildProjectExploreHref), `topic` is
@@ -132,46 +161,25 @@ function SearchResults() {
   // the original project context while ignoring their edit.
   const isFirstLoadRef = useRef(true);
 
-  // Communities matching this search — fetched separately from the explore
-  // backend response below, since communities live in Supabase, not the
-  // Python search backend (see /api/communities-summary's own comment).
-  // Keyed on `topic` so re-searching re-scopes the match, same as the main
-  // fetch below.
-  const [communities, setCommunities] = useState<CommunitySummaryItem[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/communities-summary?q=${encodeURIComponent(topic)}`, {
-          cache: "no-store",
-        });
-        const json = (await res.json()) as { communities?: CommunitySummaryItem[] };
-        if (!cancelled) setCommunities(json.communities ?? []);
-      } catch {
-        if (!cancelled) setCommunities([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [topic]);
-
   // (Re)fetch whenever the routed topic changes.
   useEffect(() => {
     let cancelled = false;
     const useProjectContext = isFirstLoadRef.current && !!projectId;
     isFirstLoadRef.current = false;
-    setQuery(topic);
     setSelected(null);
     (async () => {
       setLoading(true);
       setFailed(false);
       try {
+        // A chosen scope queries just that source (backend `only_kinds`) instead
+        // of relying on the router to pick it.
+        const kinds = scopeKinds(scope);
         const body = useProjectContext
           ? { project_id: projectId }
           : {
               input: topic,
               ...(statusFilter !== undefined ? { status_filter: statusFilter } : {}),
+              ...(kinds ? { only_kinds: kinds } : {}),
             };
         const res = await fetch("/api/explore", {
           method: "POST",
@@ -191,7 +199,7 @@ function SearchResults() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- projectId is
     // read once via isFirstLoadRef, not meant to re-trigger this effect
-  }, [topic, trialStatusParam]);
+  }, [topic, trialStatusParam, scope]);
 
   const sections = useMemo(() => visibleSections(data), [data]);
   const sectionOf = (kind: string) => sections.find((s) => s.kind === kind);
@@ -208,11 +216,7 @@ function SearchResults() {
   //                  sources, which backendError is not.
   // Both are "settled" (not loading) and mutually exclusive.
   const backendError = !loading && (failed || data?.error === true);
-  // Zero backend items is only a genuinely empty result when communities
-  // ALSO matched nothing — a search that turned up a matching community but
-  // no papers/trials/etc. still found something and must not read as "no
-  // results for X" (see the pinned Communities row below).
-  const emptyResult = !loading && !backendError && totalItems === 0 && communities.length === 0;
+  const emptyResult = !loading && !backendError && totalItems === 0;
   const showError = backendError || emptyResult;
 
   // Auto-capture: page_path + the query, tagged with which of the two
@@ -236,10 +240,25 @@ function SearchResults() {
     });
   }, [showError, backendError, topic]);
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = query.trim();
-    if (q && q !== topic) router.push(`/explore/${encodeURIComponent(q)}${projectQs}`);
+  useEffect(() => {
+    if (scope === "episode") router.replace(`/explore/podcast?q=${encodeURIComponent(topic)}`);
+  }, [scope, topic, router]);
+
+  const tabs = useMemo(() => resultTabs(sections), [sections]);
+  useEffect(() => {
+    if (loading || !categoryParam || scoped) return;
+    const t = categoryToTab(categoryParam, tabs);
+    setSelected(t === "all" ? null : t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tabs follows data
+  }, [loading, categoryParam, topic]);
+
+  const submit = (q: string, nextScope: ScopeKey = "all") => {
+    if (!q) return;
+    if (q === topic && nextScope === scope) return;
+    const href = scopeHref(nextScope, q);
+    router.push(
+      projectQs ? href + (href.includes("?") ? "&" + projectQs.slice(1) : projectQs) : href
+    );
   };
 
   const onTrialStatusChange = (value: string) => {
@@ -279,7 +298,7 @@ function SearchResults() {
   };
 
   const trialSection = () => {
-    const items = itemsOf("trial");
+    const items = sortTrialsRecruitingFirst(itemsOf("trial"));
     if (items.length === 0) return null;
     return (
       <section key="trial">
@@ -293,8 +312,6 @@ function SearchResults() {
     );
   };
 
-  // No free patent API to search, so this links out to the two public patent
-  // search sites with the query pre-filled rather than showing results.
   const approvalSection = () => {
     const items = itemsOf("approval");
     if (items.length === 0) return null;
@@ -313,95 +330,75 @@ function SearchResults() {
     );
   };
 
-  const patentsSection = () => {
-    if (!topic.trim()) return null;
-    const q = encodeURIComponent(topic);
-    const links = [
-      { label: "Google Patents", href: `https://patents.google.com/?q=${q}` },
-      { label: "Lens", href: `https://www.lens.org/lens/search/patent/list?q=${q}` },
-    ];
-    return (
-      <section key="patents">
-        <SectionHeading title="Patents" />
-        <p className="text-secondary font-body-md">
-          Search patents for &ldquo;{topic}&rdquo;
-        </p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          {links.map((l) => (
-            <a
-              key={l.label}
-              href={l.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-outline px-5 py-2 rounded-lg font-label-md text-label-md"
-            >
-              {l.label} ↗
-            </a>
+  // One group of the mixed All list, in the component its own tab uses.
+  const groupBody = (g: MixedGroup) => {
+    const shownItems = g.items;
+    if (g.kind === "paper") return <PaperList items={shownItems} projectId={projectId} />;
+    if (g.kind === "preprint") return <PaperList items={shownItems} projectId={projectId} preprint />;
+    if (g.kind === "approval") {
+      return (
+        <div className={TILE_GRID}>
+          {shownItems.map((item) => (
+            <ApprovalTile key={item.id} item={item} projectId={projectId} />
           ))}
         </div>
-      </section>
-    );
+      );
+    }
+    if (g.kind === "trial") {
+      return (
+        <div className={TILE_GRID}>
+          {shownItems.map((item) => (
+            <TrialTile key={item.id} item={item} projectId={projectId} />
+          ))}
+        </div>
+      );
+    }
+    if (g.kind === "news") return <NewsFront items={shownItems} projectId={projectId} />;
+    if (g.kind === "dataset" || g.kind === "tool") return <ResourceBento tiles={shownItems.map(liveTile)} projectId={projectId} />;
+    const base = sectionOf(g.kind);
+    return base ? <OtherSections sections={[{ ...base, items: shownItems }]} projectId={projectId} expandGenesets={g.kind === "geneset"} /> : null;
   };
 
+  // "All": about ten items, FDA first, then papers, trials and the rest, each
+  // group with a "See all <kind>" link into its tab. Patents are a link at the
+  // bottom (there is no free patent API to search).
   const allView = () => {
-    const papers = itemsOf("paper");
-    const preprints = itemsOf("preprint");
-    const news = itemsOf("news");
-    const handled = new Set(["paper", "preprint", "dataset", "tool", "trial", "approval", "news"]);
-    const rest = sections.filter((s) => !handled.has(s.kind) && s.items.length > 0);
+    const groups = mixedAll(sections, 10);
+    const q = encodeURIComponent(topic);
     return (
-      <div className="space-y-16">
-        {papers.length > 0 && (
-          <section>
-            <SectionHeading title="Papers" />
-            <PaperList
-              items={papers}
-              limit={6}
-              onMore={() => select("paper")}
-              projectId={projectId}
-            />
+      <div className="space-y-10">
+        {groups.map((g) => (
+          <section key={g.kind}>
+            <h2 className="mb-3 font-title text-[22px] leading-tight font-medium text-on-background">{g.label}</h2>
+            {groupBody(g)}
+            {g.total > g.items.length && (
+              <button
+                type="button"
+                onClick={() => select(g.kind)}
+                className="mt-4 font-label-md text-label-md text-primary hover:underline underline-offset-4"
+              >
+                See all {g.label} ({g.total}) →
+              </button>
+            )}
           </section>
+        ))}
+        {topic.trim() && (
+          <p className="font-body-sm text-body-sm text-secondary">
+            Patents:{" "}
+            <a href={`https://patents.google.com/?q=${q}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-4">
+              Google Patents ↗
+            </a>
+            {" · "}
+            <a href={`https://www.lens.org/lens/search/patent/list?q=${q}`} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline underline-offset-4">
+              Lens ↗
+            </a>
+          </p>
         )}
-        {preprints.length > 0 && (
-          <section>
-            <SectionHeading title="Preprints" subtitle="Not yet peer reviewed." />
-            <PaperList
-              items={preprints}
-              limit={4}
-              onMore={() => select("preprint")}
-              projectId={projectId}
-              preprint
-            />
-          </section>
-        )}
-        {resourceSection("dataset", "Datasets")}
-        {resourceSection("tool", "Tools")}
-        {trialSection()}
-        {approvalSection()}
-        {patentsSection()}
-        {news.length > 0 && (
-          <section>
-            <SectionHeading title="News" />
-            <NewsFront items={news} onAllNews={() => select("news")} projectId={projectId} />
-          </section>
-        )}
-        <CommunityTiles items={communities} />
-        <OtherSections sections={rest} projectId={projectId} />
       </div>
     );
   };
 
   const selectedView = (kind: string) => {
-    if (kind === "communities") {
-      return communities.length === 0 ? (
-        <div className="text-center py-20 text-secondary font-body-md">
-          No communities found for &ldquo;{topic}&rdquo;.
-        </div>
-      ) : (
-        <CommunityTiles items={communities} />
-      );
-    }
-
     const section = sectionOf(kind);
     if (!section || section.items.length === 0) return emptyCategory(kind);
 
@@ -438,12 +435,25 @@ function SearchResults() {
     }
     if (kind === "trial") return <div>{trialSection()}</div>;
     if (kind === "approval") return <div>{approvalSection()}</div>;
+    const ordered = kind === "grant" ? { ...section, items: sortGrantsByDeadline(section.items) } : section;
     return (
       <div className="space-y-14">
-        <OtherSections sections={[section]} projectId={projectId} expandGenesets={kind === "geneset"} />
+        <OtherSections sections={[ordered]} projectId={projectId} expandGenesets={kind === "geneset"} />
       </div>
     );
   };
+
+  // A scoped page shows that type only ("Tools & datasets" is both kinds).
+  const scopedView = () =>
+    scope === "tool" ? (
+      <div className="space-y-14">
+        {resourceSection("tool", "Tools")}
+        {resourceSection("dataset", "Datasets")}
+        {itemsOf("tool").length === 0 && itemsOf("dataset").length === 0 && emptyCategory("tool")}
+      </div>
+    ) : (
+      selectedView(scope)
+    );
 
   const banner =
     projectId && projectName ? (
@@ -468,94 +478,125 @@ function SearchResults() {
     ) : undefined;
 
   return (
-    <ExplorePageFrame
-      banner={banner}
-      title={<>Results for &ldquo;{topic}&rdquo;</>}
-      subtitle="Papers, datasets, tools, trials and news matching your search."
-      search={{
-        value: query,
-        onChange: setQuery,
-        onSubmit: submit,
-        placeholder: "Search papers, tools, trials, podcast, people…",
-      }}
-      chips={{ selected, onSelect: select, query: topic }}
-    >
-      {/* Trial status filter, only on the Trials view. */}
-      {selected === "trial" && (
-        <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-10">
-          <div>
-            <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
-            <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
+    <ExploreShell banner={banner}>
+      <h1 className="sr-only">Results for {topic}</h1>
+      <QuestionBox
+        key={`${topic}|${scope}`}
+        initial={topic}
+        initialScope={scope}
+        placeholder="Ask a question"
+        onSubmit={submit}
+      />
+      {scoped && (
+        <p className="mt-3 font-body-sm text-body-sm text-secondary">
+          Showing {SCOPE_LABEL[scope]} only.{" "}
+          <Link href={scopeHref("all", topic)} className="text-primary hover:underline underline-offset-4">
+            Search everything instead
+          </Link>
+        </p>
+      )}
+
+      <div className="mt-8 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_20rem] gap-8 items-start">
+        <div className="min-w-0 flex flex-col gap-6">
+          {!loading && !showError && !scoped && (
+            <AnswerCard topic={topic} sections={sections} onOpenTab={(kind) => select(tabs.some((t) => t.key === kind) ? kind : null)} />
+          )}
+
+          {/* One tab row with counts, replacing the category chips. */}
+          {!loading && !showError && !scoped && (
+            <div role="tablist" aria-label="Result types" className="flex gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-outline-variant/30">
+              {tabs.map((t) => {
+                const on = (selected ?? "all") === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => select(t.key === "all" ? null : t.key)}
+                    className={
+                      "px-4 py-2.5 font-label-md text-label-md whitespace-nowrap border-b-2 -mb-px transition-colors " +
+                      (on
+                        ? "border-primary text-primary"
+                        : t.count === 0
+                          ? "border-transparent text-secondary/50"
+                          : "border-transparent text-secondary hover:text-on-background")
+                    }
+                  >
+                    {t.label}
+                    <span className={"ml-1.5 " + (on ? "text-primary" : "text-secondary/70")}>{t.count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div id="explore-results" className="scroll-mt-24">
+            {/* Trial status filter, only on the Trials tab. */}
+            {(scoped ? scope : selected) === "trial" && (
+              <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mb-8">
+                <div>
+                  <p className="mb-2 text-secondary font-label-md text-label-md">Trial status</p>
+                  <TrialStatusControl value={trialStatusParam ?? ""} onChange={onTrialStatusChange} />
+                </div>
+              </div>
+            )}
+
+            {loading && (
+              <div className="space-y-10">
+                <BlockSkeleton className="h-40" />
+                <BlockSkeleton className="h-64" />
+              </div>
+            )}
+
+            {/* Error / no results at all. Copy differs by which settled outcome this
+                was: a backend failure must never read like an empty search. */}
+            {!loading && showError && (
+              <div className="max-w-md mx-auto text-center py-16">
+                {backendError ? (
+                  <>
+                    <span className="material-symbols-outlined text-5xl text-secondary/50">cloud_off</span>
+                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">Couldn&apos;t search right now</h2>
+                    <p className="mt-2 text-secondary font-body-md">
+                      The discovery backend didn&apos;t respond. This isn&apos;t about your search, please try again in a moment.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-5xl text-secondary/50">search_off</span>
+                    <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
+                      No results for &ldquo;{topic}&rdquo;
+                    </h2>
+                    <p className="mt-2 text-secondary font-body-md">Try a broader term, or browse the full feed.</p>
+                  </>
+                )}
+
+                <button
+                  onClick={() => router.push("/explore")}
+                  className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
+                >
+                  Browse the full feed
+                </button>
+
+                {emptyResult && (
+                  <div className="mt-8 text-left">
+                    <InlineFeedback
+                      prompt="What were you hoping to find?"
+                      pagePath={`/explore/${encodeURIComponent(topic)}`}
+                      context={{ query: topic }}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!loading && !showError && (scoped ? scopedView() : selected === null ? allView() : selectedView(selected))}
           </div>
         </div>
-      )}
 
-      {/* Communities chip: independent of the explore-backend state. */}
-      {selected === "communities" ? (
-        selectedView("communities")
-      ) : (
-        <>
-          {loading && (
-            <div className="space-y-10">
-              <BlockSkeleton className="h-40" />
-              <BlockSkeleton className="h-64" />
-            </div>
-          )}
-
-          {/* Error / no results at all. Copy differs by which settled outcome this
-              was: a backend failure must never read like an empty search. */}
-          {!loading && showError && (
-            <div className="max-w-md mx-auto text-center py-16">
-              {backendError ? (
-                <>
-                  <span className="material-symbols-outlined text-5xl text-secondary/50">
-                    cloud_off
-                  </span>
-                  <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
-                    Couldn&apos;t search right now
-                  </h2>
-                  <p className="mt-2 text-secondary font-body-md">
-                    The discovery backend didn&apos;t respond. This isn&apos;t about your search,
-                    please try again in a moment.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-5xl text-secondary/50">
-                    search_off
-                  </span>
-                  <h2 className="mt-4 font-title text-[24px] font-medium text-on-background">
-                    No results for &ldquo;{topic}&rdquo;
-                  </h2>
-                  <p className="mt-2 text-secondary font-body-md">
-                    Try a broader term, or browse the full feed.
-                  </p>
-                </>
-              )}
-
-              <button
-                onClick={() => router.push("/explore")}
-                className="mt-6 btn-primary px-6 py-2 rounded-lg font-label-md text-label-md"
-              >
-                Browse the full feed
-              </button>
-
-              {emptyResult && (
-                <div className="mt-8 text-left">
-                  <InlineFeedback
-                    prompt="What were you hoping to find?"
-                    pagePath={`/explore/${encodeURIComponent(topic)}`}
-                    context={{ query: topic }}
-                  />
-                </div>
-              )}
-            </div>
-          )}
-
-          {!loading && !showError && (selected === null ? allView() : selectedView(selected))}
-        </>
-      )}
-    </ExplorePageFrame>
+        {!loading && !showError && !scoped && <ResultsSidebar topic={topic} sections={sections} />}
+      </div>
+    </ExploreShell>
   );
 }
 

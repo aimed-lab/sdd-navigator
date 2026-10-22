@@ -18,10 +18,11 @@
 // matches "available" (no token in that episode STARTS WITH "ai"). Multi-term
 // AND: every query term must prefix-match at least one token.
 
-import { useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { EpisodeCard as EpisodeCardData } from "@/lib/server/wiki";
+import { highlightParts, queryTerms, type PodcastHit } from "@/lib/server/explore/podcastSearch";
 
 const GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6";
 
@@ -48,6 +49,23 @@ function tokenize(text: string): string[] {
 function matches(tokens: string[], terms: string[]): boolean {
   if (terms.length === 0) return true;
   return terms.every((term) => tokens.some((tok) => tok.startsWith(term)));
+}
+
+/** Text with the search words highlighted. */
+function Marked({ text, terms }: { text: string; terms: string[] }) {
+  return (
+    <>
+      {highlightParts(text, terms).map((p, i) =>
+        p.hit ? (
+          <mark key={i} className="bg-primary/15 text-on-background rounded-sm px-0.5">
+            {p.text}
+          </mark>
+        ) : (
+          <Fragment key={i}>{p.text}</Fragment>
+        )
+      )}
+    </>
+  );
 }
 
 function EpisodeCard({ episode }: { episode: EpisodeCardData }) {
@@ -153,7 +171,40 @@ export default function PodcastGrid({
     [episodes, tokensByEpisode, terms, failed]
   );
 
-  const showEmpty = !failed && filtered.length === 0;
+  // Once something is typed, the server searches titles, descriptions, topics AND
+  // transcripts and sends back the matches with a snippet. While that loads (or
+  // if it fails) the instant title / topic filter above is what shows.
+  const [hits, setHits] = useState<PodcastHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const typed = query.trim();
+  useEffect(() => {
+    if (!typed) {
+      setHits(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const ctl = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/podcast-search?q=${encodeURIComponent(typed)}`, { signal: ctl.signal });
+        const json = (await res.json()) as { hits?: PodcastHit[]; failed?: boolean };
+        if (!ctl.signal.aborted) setHits(json.failed || !Array.isArray(json.hits) ? null : json.hits);
+      } catch {
+        if (!ctl.signal.aborted) setHits(null);
+      } finally {
+        if (!ctl.signal.aborted) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      ctl.abort();
+      window.clearTimeout(timer);
+    };
+  }, [typed]);
+
+  const searchTerms = useMemo(() => queryTerms(typed), [typed]);
+  const showHits = !failed && typed !== "" && hits !== null;
+  const showEmpty = !failed && (showHits ? hits.length === 0 : filtered.length === 0);
 
   return (
     <>
@@ -167,15 +218,15 @@ export default function PodcastGrid({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search episodes by title, concept or tag…"
+            placeholder="Search titles, guests, topics and transcripts…"
             aria-label="Search episodes"
             className="w-full glass-panel rounded-full pl-12 pr-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
           />
         </div>
         {!failed && (
           <span className="font-label-md text-label-md text-secondary">
-            {filtered.length} {filtered.length === 1 ? "episode" : "episodes"}
-            {query.trim() && " matching"}
+            {(showHits ? hits.length : filtered.length)} {(showHits ? hits.length : filtered.length) === 1 ? "episode" : "episodes"}
+            {typed && (searching ? " · searching transcripts…" : " matching")}
           </span>
         )}
       </div>
@@ -212,7 +263,41 @@ export default function PodcastGrid({
           </div>
         )}
 
-        {!failed && filtered.length > 0 && (
+        {showHits && hits.length > 0 && (
+          <ul className="flex flex-col gap-4">
+            {hits.map((h) => (
+              <li key={h.id || h.slug}>
+                <Link
+                  href={`/explore/podcast/${h.slug}`}
+                  className="glass-card group flex flex-col gap-2 rounded-xl p-5 hover:border-primary/40 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    {episodeLabel(h.episode_number) && (
+                      <span className="inline-block px-3 py-0.5 rounded-full bg-primary text-on-primary font-label-sm text-label-sm">
+                        {episodeLabel(h.episode_number)}
+                      </span>
+                    )}
+                    {h.snippet?.field === "transcript" && (
+                      <span className="font-label-sm text-label-sm text-secondary">Found in the transcript</span>
+                    )}
+                  </span>
+                  <h3 className="font-headline-md text-lg leading-tight text-on-background group-hover:text-primary transition-colors">
+                    <Marked text={h.title} terms={searchTerms} />
+                  </h3>
+                  {h.snippet ? (
+                    <p className="font-body-sm text-body-sm text-secondary">
+                      <Marked text={h.snippet.text} terms={searchTerms} />
+                    </p>
+                  ) : (
+                    h.description && <p className="font-body-sm text-body-sm text-secondary line-clamp-2">{h.description}</p>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {!showHits && !failed && filtered.length > 0 && (
           <div className={GRID}>
             {filtered.map((episode) => (
               <EpisodeCard key={episode.id || episode.slug} episode={episode} />

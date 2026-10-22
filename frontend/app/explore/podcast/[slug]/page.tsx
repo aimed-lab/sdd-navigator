@@ -160,6 +160,28 @@ export default async function EpisodeDetailPage({
               </div>
             )}
 
+            {/* Where the transcript and the linked articles are: both sit further
+                down (the articles in the side column, below everything on a phone),
+                so the top of the page points straight at them. */}
+            <nav aria-label="On this episode" className="flex flex-wrap items-center gap-2">
+              {episode.transcript && (
+                <a
+                  href="#transcript"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/40 bg-white font-label-md text-label-md text-on-background hover:border-primary hover:text-primary transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[18px]">subtitles</span>
+                  Transcript
+                </a>
+              )}
+              <a
+                href="#articles"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-outline-variant/40 bg-white font-label-md text-label-md text-on-background hover:border-primary hover:text-primary transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">article</span>
+                Related articles
+              </a>
+            </nav>
+
             {episode.episode_url && (
               <div>
                 <a
@@ -237,7 +259,7 @@ export default async function EpisodeDetailPage({
         </main>
 
         {/* ── RIGHT RAIL ──────────────────────────────────────────────── */}
-        <aside className="min-w-0 space-y-8 lg:sticky lg:top-24">
+        <aside id="articles" className="min-w-0 space-y-8 lg:sticky lg:top-24 scroll-mt-24">
           <LiveLiteratureRail query={query} />
           <RelatedEpisodesRail
             slug={episode.slug}

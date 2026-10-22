@@ -4,6 +4,7 @@
 // podcast pages directly against Supabase (no Python backend in the loop).
 
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
+import type { SearchableEpisode } from "@/lib/server/explore/podcastSearch";
 
 // One concept block within a wiki page.
 export type Concept = { title: string; bullets: string[] };
@@ -223,5 +224,41 @@ export async function listEpisodes(): Promise<EpisodesResult> {
     concepts: normalizeConcepts(row.concepts),
   })) as EpisodeCard[];
 
+  return { status: "ok", episodes };
+}
+
+// ── search over titles, descriptions, topics AND transcripts ─────────────────
+
+// The transcripts are large (tens of thousands of characters each), so they are
+// read on the server only and kept for a few minutes; the browser only ever
+// receives the matching episodes and a short snippet (see
+// lib/server/explore/podcastSearch.ts, which does the matching).
+const SEARCH_TTL_MS = 10 * 60 * 1000;
+let searchCache: { at: number; episodes: SearchableEpisode[] } | null = null;
+
+export async function getEpisodeSearchIndex(): Promise<{ status: "ok"; episodes: SearchableEpisode[] } | { status: "error" }> {
+  if (searchCache && Date.now() - searchCache.at < SEARCH_TTL_MS) return { status: "ok", episodes: searchCache.episodes };
+
+  const supabase = getAnonServerClient();
+  if (!supabase) return { status: "error" };
+
+  const { data, error } = await supabase
+    .from("wiki_pages")
+    .select("id, slug, title, episode_number, description, tags, image_url, concepts, transcript")
+    .order("episode_number", { ascending: false });
+  if (error) return { status: "error" };
+
+  const episodes = (data ?? []).map((row) => ({
+    id: String(row.id),
+    slug: String(row.slug),
+    title: String(row.title ?? ""),
+    episode_number: typeof row.episode_number === "number" ? row.episode_number : null,
+    description: String(row.description ?? ""),
+    tags: Array.isArray(row.tags) ? (row.tags as unknown[]).filter((t): t is string => typeof t === "string") : [],
+    image_url: typeof row.image_url === "string" ? row.image_url : null,
+    concepts: normalizeConcepts(row.concepts).map((c) => ({ title: c.title })),
+    transcript: String(row.transcript ?? ""),
+  }));
+  searchCache = { at: Date.now(), episodes };
   return { status: "ok", episodes };
 }

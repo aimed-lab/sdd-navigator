@@ -5,13 +5,23 @@
 // state). Everything else on the page is now server-rendered directly from
 // Supabase (see app/explore/podcast/[slug]/page.tsx).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function TranscriptSection({ transcript }: { transcript: string }) {
   const [showTranscript, setShowTranscript] = useState(false);
 
+  // The "Transcript" link at the top of the episode (#transcript) opens it.
+  useEffect(() => {
+    const open = () => {
+      if (window.location.hash === "#transcript") setShowTranscript(true);
+    };
+    open();
+    window.addEventListener("hashchange", open);
+    return () => window.removeEventListener("hashchange", open);
+  }, []);
+
   return (
-    <section>
+    <section id="transcript" className="scroll-mt-24">
       <h2 className="font-headline-lg text-headline-lg text-on-background mb-6">
         Full Transcript
       </h2>

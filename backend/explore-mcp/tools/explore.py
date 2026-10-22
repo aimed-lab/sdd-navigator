@@ -1040,6 +1040,90 @@ async def _execute(
     return sections
 
 
+_TOOL_FOR_KIND: dict[str, str] = {kind: tool for tool, kind in _KINDS.items()}
+
+
+def normalize_only_kinds(raw) -> list[str]:
+    """Caller-supplied `only_kinds` -> a sorted, de-duplicated list of KNOWN kinds
+    (paper, preprint, trial, ...). Anything unknown is dropped; [] means "no
+    restriction", so a bad value can never turn into an empty search."""
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return sorted({str(k).strip() for k in raw if str(k).strip() in _TOOL_FOR_KIND})
+
+
+async def _execute_only(
+    kinds: list[str], text: str, since_year: int | None = None,
+    status_filter: list[str] | None = None,
+) -> list[dict]:
+    """Run ONLY the sources for `kinds`, each with the typed text as its query.
+
+    No scope extraction and no routing: a user who picked "Grants" asked for
+    grants, so the LLM router never gets to leave that source out. Sections have
+    the same shape _execute builds."""
+    tools = [_TOOL_FOR_KIND[k] for k in kinds]
+    awaitables = []
+    for name in tools:
+        if name == "search_papers":
+            awaitables.append(
+                search_papers_multi_dual_async(
+                    [text], limit_per_query=_NET_LIMIT, final_limit=_NET_LIMIT,
+                    since_year=since_year,
+                )
+            )
+        elif name == "search_news":
+            awaitables.append(search_news_async(text, _NET_LIMIT, match=True))
+        elif name == "search_trials":
+            awaitables.append(
+                search_trials_async(
+                    text, _NET_LIMIT, status_filter=status_filter or None, condition_only=False,
+                )
+            )
+        else:
+            awaitables.append(_dispatch(name, text))
+
+    results = await asyncio.gather(
+        *(_capped(name, text, a) for name, a in zip(tools, awaitables)),
+        return_exceptions=True,
+    )
+    sections: list[dict] = []
+    for name, result in zip(tools, results):
+        section: dict = {"tool": name, "kind": _KINDS[name], "query": text}
+        if isinstance(result, Exception):
+            section["items"] = []
+            if name == "search_papers":
+                section["items_key"] = []
+            section["error"] = f"{type(result).__name__}: {result}"
+            logger.exception("explore(only): tool %s failed for query=%r", name, text, exc_info=result)
+        elif result is _TIMED_OUT:
+            section["items"] = []
+            if name == "search_papers":
+                section["items_key"] = []
+            section["timed_out"] = True
+        elif name == "search_papers":
+            latest, key = result
+            section["items"] = [item.model_dump() for item in latest]
+            section["items_key"] = [item.model_dump() for item in key]
+        else:
+            section["items"] = [item.model_dump() for item in result]
+        sections.append(section)
+    return sections
+
+
+async def _explore_only_uncached(
+    input_text: str, kinds: list[str], since_year: int | None, status_filter: list[str] | None,
+) -> dict:
+    text = input_text.strip()
+    sections = await _execute_only(kinds, text, since_year, status_filter)
+    return {
+        "input": input_text,
+        "scope": {**_EMPTY_SCOPE, "topics": [text], "is_default": False, "is_personalized": False},
+        "tools_called": [_TOOL_FOR_KIND[k] for k in kinds],
+        "reasoning": f"restricted to {', '.join(kinds)} by the caller; no routing",
+        "sections": sections,
+    }
+
+
 async def _explore_uncached(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
     status_filter: list[str] | None = None,
@@ -1117,9 +1201,15 @@ async def _explore_uncached(
 
 async def explore_async(
     input_text: str, scope_terms: list[str] | None = None, since_year: int | None = None,
-    status_filter: list[str] | None = None,
+    status_filter: list[str] | None = None, only_kinds: list[str] | None = None,
 ) -> dict:
     """Async orchestration core (used by the MCP server), cached end-to-end.
+
+    `only_kinds` (e.g. ["grant"]) runs JUST those sources with the typed text as
+    the query, skipping scope extraction and the router (see _execute_only). It
+    applies to typed searches only (blank input still serves the landing feed),
+    unknown kinds are dropped, and omitting it leaves everything below unchanged.
+    Cached under its own key per kind set.
 
     `since_year`, when given, restricts search_papers (PubMed/OpenAlex/Crossref
     only — no other tool's date logic changes) to results published on/after
@@ -1170,6 +1260,22 @@ async def explore_async(
     """
     blank = not (input_text or "").strip()
     terms = _clean_terms(scope_terms) if blank else []
+
+    kinds = [] if blank else normalize_only_kinds(only_kinds)
+    if kinds:
+        only_key = f"explore:only:{','.join(kinds)}"
+        if since_year is not None:
+            only_key += f":since{since_year}"
+        if status_filter:
+            only_key += f":status{','.join(status_filter)}"
+        only_result = await cache.get_or_compute(
+            normalize_key(only_key, input_text),
+            lambda: _explore_only_uncached(input_text, kinds, since_year, status_filter),
+            TTL_TOPIC, STALE_TOPIC,
+        )
+        if any(s.get("timed_out") for s in only_result.get("sections", [])):
+            await cache.expire_soon(normalize_key(only_key, input_text))
+        return only_result
 
     base_key = "explore:interests" if terms else "explore"
     key_terms = terms if terms else input_text
