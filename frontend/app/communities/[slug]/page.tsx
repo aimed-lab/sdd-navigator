@@ -1,5 +1,5 @@
 // Community detail — /communities/[slug]. A banner header (name, purpose, Join,
-// Share, QR code) over a tab bar: Home, Resources, Living pages, Events,
+// Share, QR code) over a tab bar: Home, Resources, Wiki pages, Events,
 // Members, Showcase. Tabs follow the community's configured sections
 // (lib/server/communityHome: visibleTabs); the tab is `?tab=`.
 //
@@ -139,7 +139,7 @@ export default async function CommunityDetailPage({
     memberRoster.filter((m) => m.user_id).map((m) => [m.user_id as string, m.display_name])
   );
 
-  // Living pages made by members (public ones, plus team pages this viewer can
+  // Wiki pages made by members (public ones, plus team pages this viewer can
   // read — the pages table's own RLS decides). Only where the roster is visible.
   const livingPages = access.seesMembers
     ? await listMemberLivingPages(memberRoster.flatMap((m) => (m.user_id ? [m.user_id] : [])))
@@ -249,6 +249,12 @@ export default async function CommunityDetailPage({
         )}
 
         <CommunityTabs slug={slug} tabs={tabs} active={tab} />
+
+        {tab === "home" && (
+          <h2 className="font-headline-sm text-headline-sm text-on-background">
+            What&apos;s happening in {community.name}
+          </h2>
+        )}
 
         {/* ── Home ───────────────────────────────────────────────────── */}
         {tab === "home" && (
@@ -364,7 +370,7 @@ export default async function CommunityDetailPage({
           </div>
         )}
 
-        {/* ── Living pages made by members ───────────────────────────── */}
+        {/* ── Wiki pages made by members ───────────────────────────── */}
         {tab === "pages" && <LivingPagesList pages={livingPages} />}
 
         {/* ── Events (empty for now) ─────────────────────────────────── */}

@@ -33,7 +33,7 @@ const STAGE_LABEL: Record<Stage, string> = {
   early_data: "Early data",
   validation: "In-progress validation",
   preclinical: "Pre-clinical",
-  seeking_team: "Seeking a team",
+  seeking_team: "Looking for people",
 };
 
 // The DOM <select> only ever holds strings, so "unspecified" needs its own

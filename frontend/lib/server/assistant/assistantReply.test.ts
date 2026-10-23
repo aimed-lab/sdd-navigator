@@ -114,7 +114,7 @@ test("starters: the four chips, in order, all live (Communities is a real option
     STARTERS.map((s) => s.label),
     [
       "Find resources on a topic",
-      "Create a living page for my research",
+      "Create a wiki page for my research",
       "Show my pages",
       "Find or create a community",
     ]
@@ -127,7 +127,7 @@ test("starters: each live chip starts a flow or fills the input", () => {
   assert.equal(byId.find.kind, "fill");
   assert.match((byId.find as { text: string }).text, /^Find resources on /);
   assert.equal(byId.create.kind, "send");
-  assert.match((byId.create as { text: string }).text, /living page/);
+  assert.match((byId.create as { text: string }).text, /wiki page/);
   assert.deepEqual({ kind: byId.mine.kind, href: (byId.mine as { href: string }).href }, { kind: "go", href: "/pages" });
   assert.equal(byId.communities.kind, "send");
   assert.match((byId.communities as { text: string }).text, /community/);

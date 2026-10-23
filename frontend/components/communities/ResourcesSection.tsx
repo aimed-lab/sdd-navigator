@@ -934,7 +934,7 @@ export default function ResourcesSection({
         )}
 
         {resources.length === 0 ? (
-          <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
+          <p className="font-body-md text-body-md text-secondary">No resources yet. Use the button above to add a link or file.</p>
         ) : (
           <div className="flex flex-col gap-6">
             {TYPE_ORDER.map((type) => {

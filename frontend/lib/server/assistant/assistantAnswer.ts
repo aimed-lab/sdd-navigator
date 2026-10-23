@@ -13,15 +13,15 @@ import type { ExploreSection } from "@/types/explore";
 
 const PICK = /^(?:private|team|public)\b[\s.!]*$/i;
 const CHITCHAT = /^(?:hi|hello|hey|thanks|thank you|thx|ok|okay|yes|no|yep|nope|sure|great|cool|good|bye)\b[\s!.?,]*$/i;
-// "create a living page for my research": a page request with no topic yet.
+// "create a wiki page for my research": a page request with no topic yet.
 const PAGE_REQUEST_NO_TOPIC =
-  /^(?:(?:i(?:'d| would)? (?:like|want|need) to|i want to|can you|could you|please)\s+)?(?:create|make|build|start|set up)\s+(?:me\s+)?(?:a\s+|an\s+|my\s+)?(?:(?:new|living)\s+)*page(?:\s+for\s+(?:my|our)\s+research|\s+for\s+me)?[\s.!?]*$/i;
+  /^(?:(?:i(?:'d| would)? (?:like|want|need) to|i want to|can you|could you|please)\s+)?(?:create|make|build|start|set up)\s+(?:me\s+)?(?:a\s+|an\s+|my\s+)?(?:(?:new|living|wiki)\s+)*page(?:\s+for\s+(?:my|our)\s+research|\s+for\s+me)?[\s.!?]*$/i;
 
 const LEAD = new RegExp(
   "^(?:(?:please|can you|could you|i'd like you to)\\s+)?" +
     "(?:(?:" +
     [
-      "(?:create|make|build|start)\\s+(?:me\\s+)?(?:a\\s+|an\\s+)?(?:(?:new|living)\\s+)*page\\s+(?:on|about|for)",
+      "(?:create|make|build|start)\\s+(?:me\\s+)?(?:a\\s+|an\\s+)?(?:(?:new|living|wiki)\\s+)*page\\s+(?:on|about|for)",
       "what (?:is|are|has been) known about",
       "what do (?:we|you|i) know about",
       "can you (?:explain|tell me about)",
@@ -68,7 +68,7 @@ export function topicFromMessage(text: string): string | null {
 }
 
 const SAYS_WORK = /\b(?:i work on|i study|i research|i'm (?:working on|researching)|i am (?:working on|researching)|my research (?:is|focuses))\b/i;
-const ASKS_PAGE = /\b(?:(?:create|make|build|start|set up|want|need|like)\b[^.?!]{0,40}\bpage|(?:living|new) page)\b/i;
+const ASKS_PAGE = /\b(?:(?:create|make|build|start|set up|want|need|like)\b[^.?!]{0,40}\bpage|(?:living|wiki|new) page)\b/i;
 
 /** Show the Private / Team / Public picker right away? Only when the researcher
  *  says what they work on, or asks for a page, AND there is a topic to build it

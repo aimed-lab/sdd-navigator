@@ -1,5 +1,5 @@
 """
-test_page_agent — the living-page agent against today's explore_async output
+test_page_agent — the wiki-page agent against today's explore_async output
 (preprint and approval sections, per-tool timed_out sections).
 """
 

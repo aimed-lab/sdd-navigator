@@ -31,7 +31,7 @@ test("matching ignores case and punctuation", () => {
   assert.equal(out.length, 1);
 });
 
-test("living page titles and seed topics count, for the viewer and for the other member", () => {
+test("wiki page titles and seed topics count, for the viewer and for the other member", () => {
   const mine = { focus: "Drug resistance", pageTexts: ["EGFR inhibitor resistance in lung cancer"] };
   const out = similarMembers(mine, [
     person("a", "Ann", "Imaging", ["Osimertinib and EGFR in lung cancer"]),

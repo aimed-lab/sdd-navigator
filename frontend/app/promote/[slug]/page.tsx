@@ -15,7 +15,7 @@
 //      writes a quote, a personal statement or a name for one).
 //   4. A sidebar: the main button, "Download visual card", Share, "Want to work
 //      with this team?" (the Collaborate flow) and "Follow the topic" (the best
-//      matching living page and community; hidden when there is none).
+//      matching wiki page and community; hidden when there is none).
 //
 // Link previews: the 1200x630 card (opengraph-image.tsx / twitter-image.tsx next
 // to this file) is the og:image and twitter:image; og:url and the canonical use
@@ -29,6 +29,7 @@ import { findFollowTopic } from "@/lib/server/promote/followTopic";
 import { eventBadge, visibleFacts } from "@/lib/server/promote/showcaseKinds";
 import { SITE_URL, articleUrl, estimateReadMinutes, formatPublishedDate } from "@/lib/articleFormat";
 import { cardImageUrlFor } from "@/lib/server/promote/shareText";
+import OwnerMenu from "@/components/promote/OwnerMenu";
 import { SHOWCASE_TYPE_LABEL } from "@/lib/showcaseTypes";
 import ShareButtons from "@/components/promote/ShareButtons";
 
@@ -237,15 +238,7 @@ export default async function ArticlePage({ params }: PageProps) {
                 {article.community.name}
               </Link>
             )}
-            {isOwner && (
-              <Link
-                href={`/promote/${article.slug}/edit`}
-                className="ml-auto shrink-0 inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-white/15 hover:bg-white/25 transition-colors font-label-md text-label-md"
-              >
-                <span className="material-symbols-outlined text-base">edit</span>
-                Edit
-              </Link>
-            )}
+            {isOwner && <OwnerMenu id={article.id} slug={article.slug} title={article.headline} />}
           </div>
 
           <h1 className="mt-5 max-w-3xl font-headline-lg text-[32px] leading-[1.15] md:text-[44px]">

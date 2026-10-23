@@ -48,7 +48,7 @@ export function ResultTile({
 }: {
   item: ExploreItem;
   projectId?: string;
-  /** Leave out the bookmark (living pages have nothing to save into). */
+  /** Leave out the bookmark (wiki pages have nothing to save into). */
   hideSave?: boolean;
 }) {
   const t = TYPE_STYLES[typeKeyForKind(item.kind)];
@@ -97,7 +97,7 @@ export function GrantTile({
 }: {
   item: ExploreItem;
   projectId?: string;
-  /** Leave out the bookmark (living pages have nothing to save into). */
+  /** Leave out the bookmark (wiki pages have nothing to save into). */
   hideSave?: boolean;
 }) {
   const t = TYPE_STYLES[typeKeyForKind("grant")];
@@ -160,7 +160,7 @@ export function ApprovalTile({
 }: {
   item: ExploreItem;
   projectId?: string;
-  /** Leave out the bookmark (living pages have nothing to save into). */
+  /** Leave out the bookmark (wiki pages have nothing to save into). */
   hideSave?: boolean;
 }) {
   const t = TYPE_STYLES[typeKeyForKind("approval")];
@@ -215,7 +215,7 @@ export function TrialTile({
 }: {
   item: ExploreItem;
   projectId?: string;
-  /** Leave out the bookmark (living pages have nothing to save into). */
+  /** Leave out the bookmark (wiki pages have nothing to save into). */
   hideSave?: boolean;
 }) {
   const t = TYPE_STYLES[typeKeyForKind("trial")];

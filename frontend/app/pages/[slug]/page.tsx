@@ -1,4 +1,4 @@
-// /pages/[slug] — a living page: notes with numbered citations, What's new,
+// /pages/[slug] — a wiki page: notes with numbered citations, What's new,
 // and every source collected. Server-rendered through the visitor's OWN
 // Supabase session (lib/server/pages/pageView.ts), so RLS decides who can see
 // it: signed-out visitors get public pages, owners and team members get theirs.
@@ -8,6 +8,7 @@
 // page's existence is never revealed. Owner controls and the team panel are a
 // convenience for the owner; the server actions and RLS are the real gate.
 
+import { AskAssistantButton } from "@/components/pages/NewWikiPageButton";
 import { notFound } from "next/navigation";
 import PageControls from "@/components/pages/PageControls";
 import PageNotes from "@/components/pages/PageNotes";
@@ -53,7 +54,13 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
           )}
         </div>
         <h1 className="mt-3 font-display-lg text-[40px] leading-tight text-on-background">{page.title}</h1>
-        <p className="mt-2 font-body-md text-body-md text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
+        <p className="mt-3 font-body-lg text-body-lg text-on-background/80">
+          This page updates itself with new research. Edit it, share it, or ask the assistant to add to it.
+        </p>
+        <p className="mt-2 font-body-sm text-body-sm text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
+        <div className="mt-5">
+          <AskAssistantButton title={page.title} />
+        </div>
       </header>
 
       {(viewer.isOwner || showTeam) && (
@@ -82,7 +89,8 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
       {empty ? (
         <div className="glass-panel rounded-2xl p-8 text-center max-w-3xl">
           <p className="font-body-md text-body-md text-secondary">
-            Nothing has been collected for this page yet. It fills in after its first update.
+            Nothing has been collected for this wiki page yet. It fills in after its first update, usually within a day.
+            In the meantime, ask the assistant a question about this topic.
           </p>
         </div>
       ) : (

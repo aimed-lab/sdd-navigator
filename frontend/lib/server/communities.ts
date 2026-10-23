@@ -2447,7 +2447,7 @@ export async function refreshCommunityFeed(communityId: string): Promise<Refresh
   return { status: "ok", count: rows.length, emptySources };
 }
 
-// ── Living pages made by members ─────────────────────────────────────────
+// ── Wiki pages made by members ─────────────────────────────────────────
 
 export type MemberLivingPage = {
   /** Server-side only (matching a page to its owner); never sent to the browser. */
@@ -2460,7 +2460,7 @@ export type MemberLivingPage = {
   last_refreshed_at: string | null;
 };
 
-/** Living pages created by the given members that this viewer may read:
+/** Wiki pages created by the given members that this viewer may read:
  *  public pages, plus team pages they can read (the `pages` table's own RLS,
  *  "Pages: read", is the real gate — a private page never comes back, and a
  *  team page only to its team). `ownerIds` are the members' user ids; the
@@ -2485,7 +2485,7 @@ export async function listMemberLivingPages(ownerIds: string[]): Promise<MemberL
   return data as MemberLivingPage[];
 }
 
-/** Titles and seed topics of EVERY living page the signed-in viewer owns
+/** Titles and seed topics of EVERY wiki page the signed-in viewer owns
  *  (private ones too: they are theirs), used only to find members working on
  *  similar things. Empty when signed out. */
 export async function listMyLivingPageTexts(): Promise<string[]> {

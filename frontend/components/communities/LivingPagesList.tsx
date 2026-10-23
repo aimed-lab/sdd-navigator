@@ -1,8 +1,9 @@
-// The "Living pages" tab: living pages created by this community's members
+// The "Wiki pages" tab: wiki pages created by this community's members
 // that the viewer may read (public, or team pages they belong to). Private
 // pages never appear; the database decides, this just lists what came back.
 
 import Link from "next/link";
+import NewWikiPageButton from "@/components/pages/NewWikiPageButton";
 import type { MemberLivingPage } from "@/lib/server/communities";
 import { shortDate } from "@/lib/server/communityHome/communityHome";
 
@@ -11,8 +12,12 @@ export default function LivingPagesList({ pages }: { pages: MemberLivingPage[] }
     return (
       <div className="rounded-2xl glass-panel p-6">
         <p className="font-body-md text-body-md text-secondary">
-          No shared living pages yet. When a member makes a public page, or a team page you are on, it shows up here.
+          No wiki pages yet. When a member shares a public wiki page, or a team page you are on, it shows up here.
+          Ask the assistant &ldquo;make me a page on &lt;your topic&gt;&rdquo; to start one.
         </p>
+        <div className="mt-4">
+          <NewWikiPageButton />
+        </div>
       </div>
     );
   }

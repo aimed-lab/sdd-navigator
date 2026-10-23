@@ -8,7 +8,7 @@ import {
 import { createLivingPage } from "@/lib/server/pages/createPage";
 import { getCurrentUser } from "@/lib/auth";
 
-// POST /api/pages — create a topic-seeded "living page": a bare topic string
+// POST /api/pages — create a topic-seeded "wiki page": a bare topic string
 // in, a page whose wiki notes + evidence have already been researched and
 // written out. The creation itself is lib/server/pages/createPage.ts, shared
 // with the external agent's create_page tool.

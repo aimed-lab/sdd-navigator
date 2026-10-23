@@ -15,7 +15,7 @@ import type { CommunityProject } from "@/lib/server/communities";
  *  component) can build it and pass it straight into the header. */
 export default function CommunityProjectsList({ projects }: { projects: CommunityProject[] }) {
   return projects.length === 0 ? (
-    <p className="font-body-sm text-body-sm text-secondary">No projects yet.</p>
+    <p className="font-body-sm text-body-sm text-secondary">No projects yet. Use the button above to start one for this community.</p>
   ) : (
     <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {projects.map((p) => (

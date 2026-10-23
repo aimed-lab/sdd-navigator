@@ -1,19 +1,25 @@
+"use client";
+
 // "Communities near your work": three cards in the community card style (the
 // viewer's own communities first, otherwise the largest), and a link to all.
 
 import Link from "next/link";
+import { useAuth } from "@/context/AuthContext";
 import CommunityCard from "@/components/communities/CommunityCard";
 import SectionHeading from "@/components/explore/SectionHeading";
 import { pickCommunities } from "@/lib/server/explore/exploreLayout";
 import type { CommunitySummaryItem } from "@/lib/server/communities";
 
 export default function CommunitiesNear({ items }: { items: CommunitySummaryItem[] }) {
+  const { user } = useAuth();
   const picked = pickCommunities(items, 3);
   if (picked.length === 0) return null;
+  // "Near your work" only makes sense once we know your work.
+  const title = user ? "Communities near your work" : "Communities";
   return (
-    <section id="communities" aria-label="Communities near your work" className="scroll-mt-24">
+    <section id="communities" aria-label={title} className="scroll-mt-24">
       <div className="flex items-end justify-between gap-3 mb-4">
-        <SectionHeading title="Communities near your work" className="" />
+        <SectionHeading title={title} className="" />
         <Link href="/communities" className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0 pb-1">
           All communities →
         </Link>

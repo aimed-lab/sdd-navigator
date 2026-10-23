@@ -358,7 +358,7 @@ export default function AnnouncementsSection({
         )}
 
         {announcements.length === 0 ? (
-          <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
+          <p className="font-body-md text-body-md text-secondary">No announcements yet. Use the button above to post the first one.</p>
         ) : (
           <ul className="flex flex-col gap-3">
             {announcements.map((a) => (

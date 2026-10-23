@@ -105,10 +105,10 @@ export default function ShowcaseCard({
           e.stopPropagation();
           setMenuOpen((v) => !v);
         }}
-        aria-label="Entry actions"
-        className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shadow-sm"
+        aria-label="More"
+        className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center shadow-sm"
       >
-        <span className="material-symbols-outlined text-secondary text-lg">more_vert</span>
+        <span className="material-symbols-outlined text-secondary text-lg">more_horiz</span>
       </button>
 
       {menuOpen && (

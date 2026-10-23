@@ -1,6 +1,6 @@
 "use client";
 
-// Team panel on a living page. The owner can add members by email (as editor
+// Team panel on a wiki page. The owner can add members by email (as editor
 // or viewer) and remove them; editors and viewers see the list read-only.
 // Members only get access while the page is set to Team, so the panel says so
 // whenever it is not.

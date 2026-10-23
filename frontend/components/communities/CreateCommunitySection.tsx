@@ -17,7 +17,7 @@ export default function CreateCommunitySection() {
         className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md flex items-center gap-2"
       >
         <span className="material-symbols-outlined text-[20px]">add</span>
-        New community
+        Start a community
       </button>
     );
   }

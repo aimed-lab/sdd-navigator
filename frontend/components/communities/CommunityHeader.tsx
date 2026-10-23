@@ -31,7 +31,7 @@ export default function CommunityHeader({
   const shown = memberNames.slice(0, 5);
   const stats = [
     plural(memberCount, "member"),
-    pageCount !== null ? plural(pageCount, "living page") : null,
+    pageCount !== null ? plural(pageCount, "wiki page") : null,
     updatedAt ? `updated ${shortDate(updatedAt)}` : null,
   ].filter(Boolean);
 

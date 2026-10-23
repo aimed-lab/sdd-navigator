@@ -38,7 +38,7 @@ export default function FocusField({
         onClick={() => setEditing(true)}
         className="block w-full text-left font-body-sm text-body-sm text-secondary/70 line-clamp-2 hover:text-secondary transition-colors"
       >
-        {focus || "Add what you work on →"}
+        {focus || "Add your research focus →"}
       </button>
     );
   }

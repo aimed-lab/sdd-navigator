@@ -1,4 +1,4 @@
-// Visibility pill for a living page: Private / Team / Public. Existing tokens
+// Visibility pill for a wiki page: Private / Team / Public. Existing tokens
 // only; brand green (primary) marks the shared states, neutral marks Private.
 
 import { VISIBILITY_INFO, type PageVisibility } from "@/lib/server/pages/pageViewHelpers";

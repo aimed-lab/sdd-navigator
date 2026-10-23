@@ -6,6 +6,6 @@
 // unfinished.
 export default function EmptySection() {
   return (
-    <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>
+    <p className="font-body-md text-body-md text-secondary">Nothing here yet. Check back soon, or ask a community admin to add something.</p>
   );
 }

@@ -15,7 +15,7 @@ export type TabKey = (typeof TAB_ORDER)[number];
 export const TAB_LABEL: Record<TabKey, string> = {
   home: "Home",
   resources: "Resources",
-  pages: "Living pages",
+  pages: "Wiki pages",
   events: "Events",
   members: "Members",
   showcase: "Showcase",
@@ -56,7 +56,7 @@ export function viewerAccess(v: Viewer): ViewerAccess {
 const enabled = (sections: SectionLike[], key: string) => sections.some((s) => s.key === key && s.enabled);
 
 /** Tabs to show, in the fixed order. A tab whose section is turned off is
- *  hidden; Members and Living pages also need the roster to be visible to this
+ *  hidden; Members and Wiki pages also need the roster to be visible to this
  *  viewer. Showcase is public. Home is always there. */
 export function visibleTabs(sections: SectionLike[], viewer: Viewer): TabKey[] {
   const access = viewerAccess(viewer);

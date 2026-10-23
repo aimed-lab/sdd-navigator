@@ -1,7 +1,7 @@
 "use client";
 
 // Explore landing: one question, then four short blocks. In order: the big
-// question box with example topics; "Your living pages" (signed in only);
+// question box with example topics; "Your wiki" (signed in only);
 // "Today in drug discovery" (four cards from the feed); "Browse" (one tab row
 // showing one short list at a time, each with See all); "Communities near your
 // work". Everything else the old landing stacked lives behind those tabs and
@@ -342,7 +342,7 @@ function ExploreFeed() {
     <>
       <PageHeader
         title="Explore"
-        subtitle="Explore biomedical research: ask a question or jump straight to what you need."
+        subtitle="Ask a question about a disease, drug or topic and get an answer with sources, or jump to papers, trials and datasets."
         className="mb-6"
       />
       <QuestionBox

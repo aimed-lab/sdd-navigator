@@ -3,8 +3,8 @@ import { listMyPages } from "@/lib/server/pages/pageView";
 
 // GET /api/pages/mine -> { signedIn, pages: [{ slug, title, visibility, newItems }] }
 //
-// The viewer's own living pages (plus team pages they belong to) with how many
-// items arrived in the last 7 days, for Explore's "Your living pages" card.
+// The viewer's own wiki pages (plus team pages they belong to) with how many
+// items arrived in the last 7 days, for Explore's "Your wiki" card.
 // Same data as /pages (listMyPages); the owner id is never included.
 
 export const dynamic = "force-dynamic"; // depends on the session

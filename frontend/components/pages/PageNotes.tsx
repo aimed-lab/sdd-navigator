@@ -1,4 +1,4 @@
-// The notes of a living page: each one a section (title + body). [n] in a body
+// The notes of a wiki page: each one a section (title + body). [n] in a body
 // is a numbered citation that links to the cited evidence; [[Note Title]]
 // links to another note on the page. A citation the page cannot resolve stays
 // plain text. Server component.

@@ -189,7 +189,7 @@ export default function MembersSection({
   }
 
   if (roster.length === 0) {
-    return <p className="font-body-md text-body-md text-secondary">Nothing here yet.</p>;
+    return <p className="font-body-md text-body-md text-secondary">No other members yet. Share this community&apos;s link to invite people.</p>;
   }
 
   const closest = !!similar && order === "closest";

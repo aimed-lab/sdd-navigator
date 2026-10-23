@@ -45,7 +45,7 @@ export default function AddToBoardButton({
         className="btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-lg font-label-md text-label-md"
       >
         <span className="material-symbols-outlined">add</span>
-        Add to the board
+        Post what you need or offer
       </button>
 
       {open && (

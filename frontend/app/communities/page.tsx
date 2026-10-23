@@ -13,12 +13,18 @@ import PageHeader, { PageShell } from "@/components/PageHeader";
 import SectionHeading from "@/components/explore/SectionHeading";
 import CommunityCard from "@/components/communities/CommunityCard";
 import CreateCommunitySection from "@/components/communities/CreateCommunitySection";
+import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
 export const metadata = { title: "Communities · SmartDrugDiscovery" };
 
-export default async function CommunitiesPage() {
+export default async function CommunitiesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
   const [user, communities, memberships] = await Promise.all([
     getCurrentUser(),
     listCommunities(),
@@ -30,9 +36,10 @@ export default async function CommunitiesPage() {
 
   return (
     <PageShell className="flex flex-col gap-12">
+      <DeletedNotice show={wasDeleted(sp)} />
       <PageHeader
         title="Communities"
-        subtitle="Groups working on shared problems."
+        subtitle="Join a community or start one. Communities are groups of researchers working on the same problem."
         className="mb-0"
         action={
           user ? (
@@ -42,7 +49,7 @@ export default async function CommunitiesPage() {
               href="/login?callbackUrl=%2Fcommunities"
               className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
             >
-              Sign in to create one
+              Sign in to join or start one
             </a>
           )
         }
@@ -66,7 +73,7 @@ export default async function CommunitiesPage() {
             </div>
           ) : (
             <p className="font-body-sm text-body-sm text-secondary">
-              You're not in any communities yet — request to join one below, or create your own.
+              You&apos;re not in any communities yet. Join one below, or start your own with the button above.
             </p>
           )}
         </section>
@@ -88,7 +95,9 @@ export default async function CommunitiesPage() {
           </div>
         ) : (
           <p className="font-body-sm text-body-sm text-secondary">
-            {communities.length === 0 ? "No communities yet." : "That's everyone — no other communities."}
+            {communities.length === 0
+              ? "No communities yet. Start the first one with the button above."
+              : "You are in every community there is. Start a new one with the button above."}
           </p>
         )}
       </section>

@@ -236,7 +236,7 @@ def test_asking_for_a_page_offers_the_buttons_even_after_one_was_created(monkeyp
 
 def test_asking_for_a_page_with_no_topic_yet_shows_no_buttons(monkeypatch):
     Script(monkeypatch, [_text("What do you work on?")])
-    out = _run([{"role": "user", "content": "I'd like to create a living page for my research."}])
+    out = _run([{"role": "user", "content": "I'd like to create a wiki page for my research."}])
     assert out["reply"] == "What do you work on?"
     assert "choices" not in out
     assert out["query"] is None and out["related"] == [] and out["sources"] == []
@@ -244,7 +244,7 @@ def test_asking_for_a_page_with_no_topic_yet_shows_no_buttons(monkeypatch):
 
 def test_wants_page():
     ask = lambda t: asst.wants_page([{"role": "user", "content": t}])  # noqa: E731
-    assert ask("Create a living page on EGFR")
+    assert ask("Create a wiki page on EGFR")
     assert ask("can you make me a page for KRAS?")
     assert ask("I want a new page")
     assert not ask("Find resources on KRAS")
@@ -273,7 +273,7 @@ def test_strip_choice_text_keeps_the_rest_and_never_returns_empty():
 
 
 def test_the_system_prompt_only_offers_what_it_can_do():
-    for needed in ("Find resources", "Create a living page", "Show their pages", "Find, join or create a community"):
+    for needed in ("Find resources", "Create a wiki page", "Show their pages", "Find, join or create a community"):
         assert needed in asst._SYSTEM
     assert "never list Private / Team / Public" in asst._SYSTEM
 

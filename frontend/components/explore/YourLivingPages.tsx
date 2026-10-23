@@ -1,6 +1,6 @@
 "use client";
 
-// "Your living pages" on the Explore landing: up to two of the viewer's pages
+// "Your wiki" on the Explore landing: up to two of the viewer's pages
 // with what's new and who can see them, and a dashed card that opens the
 // assistant to start a new one (the assistant's usual picker and confirm step
 // follow). Hidden entirely for a signed-out visitor.
@@ -41,9 +41,9 @@ export default function YourLivingPages() {
   const shown = (pages ?? []).slice(0, 2);
 
   return (
-    <section aria-label="Your living pages">
+    <section aria-label="Your wiki">
       <div className="flex items-end justify-between gap-3 mb-4">
-        <SectionHeading title="Your living pages" className="" />
+        <SectionHeading title="Your wiki" className="" />
         <Link href="/pages" className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0 pb-1">
           All pages →
         </Link>
@@ -68,7 +68,7 @@ export default function YourLivingPages() {
           className="rounded-2xl border-2 border-dashed border-primary/50 bg-primary/5 hover:bg-primary/10 p-5 flex flex-col items-center justify-center gap-1 text-primary transition-colors min-h-[7.5rem]"
         >
           <span className="material-symbols-outlined">add</span>
-          <span className="font-label-lg text-label-lg">Start a new living page</span>
+          <span className="font-label-lg text-label-lg">New wiki page</span>
         </button>
       </div>
     </section>

@@ -54,6 +54,7 @@ export default function DeletePostConfirm({
       // page needs this explicit refresh to actually re-render with the
       // post gone. Same precedent as CreatePostForm's post-submit refresh.
       onClose();
+      router.replace("/collaborate?deleted=1");
       router.refresh();
     } else {
       setError(res.error);
@@ -82,7 +83,7 @@ export default function DeletePostConfirm({
           </span>
           <div className="min-w-0">
             <h2 className="font-headline-md text-headline-md text-on-background">
-              Delete this post?
+              Delete &ldquo;{postTitle}&rdquo;?
             </h2>
             <p className="mt-2 font-body-md text-body-md text-secondary">
               {interested > 0 ? (

@@ -1,4 +1,4 @@
-// lib/server/pages/createPage.ts — the one code path that creates a living page:
+// lib/server/pages/createPage.ts — the one code path that creates a wiki page:
 // the `pages` row, then the research run on the Python backend, then notes and
 // evidence. Used by POST /api/pages (the website) and POST
 // /api/agent/create_page (the external agent), so both behave identically.
