@@ -90,7 +90,11 @@ export default function PageControls({
   title,
   visibility,
   refreshEnabled,
+  projectName,
 }: {
+  /** Set for a project page: the page is shared with the whole project, so the
+   *  visibility, update and team boxes give way to one line and a More menu. */
+  projectName?: string;
   pageId: string;
   slug: string;
   title: string;
@@ -137,6 +141,27 @@ export default function PageControls({
       setError(res.error);
     }
   };
+
+  if (projectName) {
+    return (
+      <section className="flex flex-wrap items-center justify-between gap-3" aria-label="Page settings">
+        <p className="font-body-md text-body-md text-secondary">Shared with everyone on {projectName}.</p>
+        <MoreMenu items={[{ label: "Delete wiki page", danger: true, onClick: () => setConfirmDelete(true) }]} />
+        {confirmDelete && (
+          <Dialog
+            title={`Delete "${title}"?`}
+            body="Its notes, sources and update history will be removed. This can't be undone."
+            confirmLabel="Delete wiki page"
+            busy={busy}
+            error={error}
+            danger
+            onCancel={() => setConfirmDelete(false)}
+            onConfirm={remove}
+          />
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="glass-panel rounded-2xl p-6 flex flex-col gap-6" aria-label="Page settings">

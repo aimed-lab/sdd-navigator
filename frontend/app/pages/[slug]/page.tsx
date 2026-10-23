@@ -10,6 +10,8 @@
 
 import { AskAssistantButton } from "@/components/pages/NewWikiPageButton";
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import { pageCrumbs } from "@/lib/server/pages/pageEditCore";
 import PageControls from "@/components/pages/PageControls";
 import PageNotes from "@/components/pages/PageNotes";
 import PageSources from "@/components/pages/PageSources";
@@ -35,7 +37,8 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
     );
   }
 
-  const { page, viewer, notes, evidence, updates, members } = result.view;
+  const { page, viewer, notes, evidence, updates, members, project, parent } = result.view;
+  const crumbs = pageCrumbs({ project, parent });
   const updated = formatDay(page.last_refreshed_at);
   const showTeam = viewer.isOwner || (page.visibility === "team" && members.length > 0);
   const empty = notes.length === 0 && evidence.length === 0;
@@ -43,8 +46,21 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 flex flex-col gap-14">
       <header className="max-w-3xl">
+        {crumbs && (
+          <nav aria-label="Breadcrumb" className="mb-4 font-label-md text-label-md text-secondary">
+            <span aria-hidden>← </span>
+            {crumbs.map((c, i) => (
+              <span key={c.label + i}>
+                {i > 0 && <span className="mx-1.5 text-secondary/60">/</span>}
+                <Link href={c.href} className="hover:text-primary hover:underline underline-offset-4">
+                  {c.label}
+                </Link>
+              </span>
+            ))}
+          </nav>
+        )}
         <div className="flex flex-wrap items-center gap-3">
-          <VisibilityBadge visibility={page.visibility} />
+          {!project && <VisibilityBadge visibility={page.visibility} />}
           {updated && <span className="font-label-sm text-label-sm text-secondary">Updated {updated}</span>}
           {page.refresh_enabled && (
             <span className="inline-flex items-center gap-1 font-label-sm text-label-sm text-secondary">
@@ -57,13 +73,28 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         <p className="mt-3 font-body-lg text-body-lg text-on-background/80">
           This page updates itself with new research. Edit it, share it, or ask the assistant to add to it.
         </p>
-        <p className="mt-2 font-body-sm text-body-sm text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
+        {!project && (
+          <p className="mt-2 font-body-sm text-body-sm text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
+        )}
         <div className="mt-5">
           <AskAssistantButton title={page.title} />
         </div>
       </header>
 
-      {(viewer.isOwner || showTeam) && (
+      {project && (viewer.isOwner ? (
+        <PageControls
+          pageId={page.id}
+          slug={page.slug}
+          title={page.title}
+          visibility={page.visibility}
+          refreshEnabled={page.refresh_enabled}
+          projectName={project.name}
+        />
+      ) : (
+        <p className="font-body-md text-body-md text-secondary">Shared with everyone on {project.name}.</p>
+      ))}
+
+      {!project && (viewer.isOwner || showTeam) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
           {viewer.isOwner && (
             <PageControls
@@ -86,16 +117,26 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         </div>
       )}
 
-      {empty ? (
+      {empty && (
         <div className="glass-panel rounded-2xl p-8 text-center max-w-3xl">
           <p className="font-body-md text-body-md text-secondary">
             Nothing has been collected for this wiki page yet. It fills in after its first update, usually within a day.
             In the meantime, ask the assistant a question about this topic.
           </p>
         </div>
-      ) : (
+      )}
+
+      <PageNotes
+        notes={notes}
+        evidence={evidence}
+        pageId={page.id}
+        pageSlug={page.slug}
+        canEdit={viewer.canEdit}
+        isOwner={viewer.isOwner}
+      />
+
+      {!empty && (
         <>
-          <PageNotes notes={notes} evidence={evidence} />
           <WhatsNew
             updates={updates}
             createdLine={creationLine(

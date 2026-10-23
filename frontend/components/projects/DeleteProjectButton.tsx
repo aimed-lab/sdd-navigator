@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteProjectAction } from "@/app/projects/[id]/actions";
+import MoreMenu from "@/components/MoreMenu";
 
 export default function DeleteProjectButton({
   projectId,
@@ -45,7 +46,7 @@ export default function DeleteProjectButton({
 
     const res = await deleteProjectAction(projectId);
     if (res.ok) {
-      router.push("/projects");
+      router.push("/projects?deleted=1");
       router.refresh();
     } else {
       setError(res.error);
@@ -55,13 +56,7 @@ export default function DeleteProjectButton({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="font-label-sm text-label-sm text-secondary/60 hover:text-error transition-colors"
-      >
-        Delete project
-      </button>
+      <MoreMenu items={[{ label: "Delete project", danger: true, onClick: () => setOpen(true) }]} />
 
       {open && (
         <div
@@ -82,7 +77,7 @@ export default function DeleteProjectButton({
               </span>
               <div className="min-w-0">
                 <h2 className="font-headline-md text-headline-md text-on-background">
-                  Delete this project?
+                  Delete &ldquo;{projectName}&rdquo;?
                 </h2>
 
                 {proposalSubmitted && (

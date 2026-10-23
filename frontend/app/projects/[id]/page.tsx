@@ -1,16 +1,24 @@
-// Project detail — /projects/[id]. Step 2b, part 2: adds Resources.
-// Project-scoped Explore itself (a dedicated saved-resources listing page)
-// is still out of scope — see components/projects/ResourcesSection.tsx for
-// what "clickable" tiles actually route to instead.
-// Order follows STRUCTURE.md: Header & status → Team → Resources →
-// Checklist → Shared Folder → Proposal → Promote.
+// Project workspace — /projects/[id].
+//
+// A left sidebar (project name, label, team size, then the sections) and the
+// selected section on the right; on a phone the sidebar is a tab bar across the
+// top. The section is the URL's ?tab= (overview, wiki, tasks, files, team,
+// proposal), so links and the back button work. The existing sections are the
+// same components as before, moved into tabs:
+//   Overview  progress, next items and team on the right, wiki pages on the left
+//   Wiki      this project's wiki pages (public.pages), "Earlier notes" (the
+//             August project wiki, read only), the project agent, saved resources
+//   Tasks     ChecklistSection and WhoCanHelpSection
+//   Files     SharedFolderSection
+//   Team      TeamSection
+//   Proposal  ProposalSection (challenge projects only)
 //
 // SERVER component: redirects to /login when signed out (matches /projects
 // and /inbox), then reads through lib/server/projects.ts, whose
 // GetProjectResult collapses "doesn't exist" and "exists but you're not a
-// member" into one `not_found` — see that type's own comment for why. Either
-// way this page 404s, exactly like a mistyped id would, rather than leaking
-// which case it was.
+// member" into one `not_found`. Either way this page 404s, exactly like a
+// mistyped id would, rather than leaking which case it was. Only the data the
+// selected tab needs is read.
 
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -18,6 +26,9 @@ import { getCurrentUser } from "@/lib/auth";
 import { getProject, getProposalFileUrl } from "@/lib/server/projects";
 import { getCommunityById } from "@/lib/server/communities";
 import { listProjectResources } from "@/lib/server/projectResources";
+import { listProjectPages } from "@/lib/server/pages/projectPages";
+import { listWikiNoteSummaries } from "@/lib/server/wikiNotes";
+import { parseTab, TAB_LABEL } from "@/lib/server/projectWorkspace/workspace";
 import {
   MODALITY_LABEL,
   PROJECT_STAGE_LABEL,
@@ -34,29 +45,28 @@ import ResourcesSection from "@/components/projects/ResourcesSection";
 import AgentSection from "@/components/projects/AgentSection";
 import ProjectChatbot from "@/components/projects/ProjectChatbot";
 import DeleteProjectButton from "@/components/projects/DeleteProjectButton";
+import ProjectSidebar from "@/components/projects/workspace/ProjectSidebar";
+import OverviewTab from "@/components/projects/workspace/OverviewTab";
+import WikiList from "@/components/projects/workspace/WikiList";
+import EarlierNotes from "@/components/projects/workspace/EarlierNotes";
+import NewProjectWikiPage from "@/components/projects/workspace/NewProjectWikiPage";
 
 export const dynamic = "force-dynamic"; // depends on the session
-
-function chip(label: string) {
-  return (
-    <span
-      key={label}
-      className="px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm"
-    >
-      {label}
-    </span>
-  );
-}
+// "New wiki page" researches the topic before it returns (about a minute).
+export const maxDuration = 300;
 
 export default async function ProjectDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const user = await getCurrentUser();
   if (!user) redirect(`/login?callbackUrl=%2Fprojects`);
 
   const { id } = await params;
+  const sp = await searchParams;
   const result = await getProject(id);
 
   if (result.status === "not_found") notFound();
@@ -71,6 +81,7 @@ export default async function ProjectDetailPage({
   }
 
   const project = result.project;
+  const tab = parseTab(sp.tab, !!project.challenge_key);
 
   const chips = [
     project.target,
@@ -79,38 +90,137 @@ export default async function ProjectDetailPage({
     project.stage ? PROJECT_STAGE_LABEL[project.stage as ProjectStage] ?? project.stage : null,
   ].filter((v): v is string => !!v);
 
-  const deadlinePassed = !!project.deadline && new Date(project.deadline).getTime() < Date.now();
-
-  // Resolved here (server-side) because the bucket is private — a client
-  // component can't mint its own signed URL. Regenerated on every render,
-  // which is fine: this page is already force-dynamic.
-  let fileUrl: string | null = null;
-  if (project.proposal?.file_path) {
-    const signed = await getProposalFileUrl(project.id, project.proposal.file_path);
-    fileUrl = signed.status === "ok" ? signed.url : null;
-  }
-
-  const resourcesResult = await listProjectResources(project.id);
-  const resources =
-    resourcesResult.status === "ok"
-      ? resourcesResult.resources
-      : { total: 0, tiles: [], recent: [], items: [] };
   const exploreHref = buildProjectExploreHref(project);
 
-  // Way back to the project's community — null for a personal project
-  // (community_id itself is null), and also, deliberately, for a
-  // community_id that no longer resolves (deleted community): no fallback
-  // to /projects, this link just doesn't render. getCommunityById is a
-  // public read (same as the community page's own lookups), so this never
-  // needs its own membership check — the link only ever appears when
-  // there's a real community to point at.
+  // Way back to the project's community — null for a personal project, and
+  // also for a community_id that no longer resolves.
   const community = project.community_id ? await getCommunityById(project.community_id) : null;
+
+  // The wiki pages are needed by Overview and Wiki.
+  const pagesResult = tab === "overview" || tab === "wiki" ? await listProjectPages(project.id) : null;
+  const pages = pagesResult?.status === "ok" ? pagesResult.pages : [];
+
+  let content: React.ReactNode = null;
+
+  if (tab === "overview") {
+    content = (
+      <>
+        {pagesResult?.status === "error" && (
+          <p className="mb-4 font-body-sm text-body-sm text-error" role="alert">
+            {pagesResult.error}
+          </p>
+        )}
+        <OverviewTab
+          projectId={project.id}
+          description={project.description}
+          chips={chips}
+          checklist={project.checklist}
+          members={project.members}
+          pages={pages}
+        />
+      </>
+    );
+  } else if (tab === "wiki") {
+    const [resourcesResult, earlier] = await Promise.all([listProjectResources(project.id), listWikiNoteSummaries(project.id)]);
+    const resources =
+      resourcesResult.status === "ok" ? resourcesResult.resources : { total: 0, tiles: [], recent: [], items: [] };
+    content = (
+      <div className="flex flex-col gap-12">
+        <section className="flex flex-col gap-4">
+          <p className="font-body-md text-body-md text-secondary max-w-2xl">
+            Wiki pages for your team. Each one collects the latest papers and trials on a topic and keeps itself up to
+            date.
+          </p>
+          <div>
+            <NewProjectWikiPage projectId={project.id} />
+          </div>
+          {pagesResult?.status === "error" && (
+            <p className="font-body-sm text-body-sm text-error" role="alert">
+              {pagesResult.error}
+            </p>
+          )}
+          {pages.length > 0 ? (
+            <WikiList projectId={project.id} pages={pages} />
+          ) : (
+            <p className="font-body-md text-body-md text-secondary max-w-2xl">
+              No wiki pages yet. Click New wiki page and type the topic.
+            </p>
+          )}
+        </section>
+
+        {earlier.status === "ok" && <EarlierNotes projectId={project.id} notes={earlier.notes} />}
+
+        <hr className="border-t border-outline-variant/30 w-full" />
+
+        {/* The project agent: a prior-art digest, resources to review and, for an
+            ordinary project, checklist suggestions, from a single Run agent click. */}
+        <AgentSection
+          projectId={project.id}
+          projectName={project.name}
+          isChallenge={!!project.challenge_key}
+          storedDigest={project.digest}
+          exploreHref={exploreHref}
+        />
+
+        <hr className="border-t border-outline-variant/30 w-full" />
+
+        <ResourcesSection
+          projectId={project.id}
+          projectName={project.name}
+          exploreHref={exploreHref}
+          resources={resources}
+        />
+      </div>
+    );
+  } else if (tab === "tasks") {
+    content = (
+      <div className="flex flex-col gap-4">
+        <ChecklistSection
+          projectId={project.id}
+          projectTarget={project.target}
+          projectIndication={project.indication}
+          projectModality={project.modality}
+          projectStage={project.stage}
+          items={project.checklist}
+          isColabofest={project.challenge_key === "colabofest_2026"}
+        />
+        <hr className="border-t border-outline-variant/30 w-full mb-12" />
+        <WhoCanHelpSection projectId={project.id} />
+      </div>
+    );
+  } else if (tab === "files") {
+    content = <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />;
+  } else if (tab === "team") {
+    content = (
+      <TeamSection
+        projectId={project.id}
+        members={project.members}
+        isLead={project.is_lead}
+        viewerUserId={user.id}
+      />
+    );
+  } else if (tab === "proposal" && project.challenge_key) {
+    const deadlinePassed = !!project.deadline && new Date(project.deadline).getTime() < Date.now();
+    // The bucket is private, so the signed URL is made here on the server.
+    let fileUrl: string | null = null;
+    if (project.proposal?.file_path) {
+      const signed = await getProposalFileUrl(project.id, project.proposal.file_path);
+      fileUrl = signed.status === "ok" ? signed.url : null;
+    }
+    content = (
+      <ProposalSection
+        projectId={project.id}
+        proposal={project.proposal}
+        // Submission is ANY LEAD (lib/server/projects.ts:submitProposal).
+        isLead={project.is_lead}
+        deadlinePassed={deadlinePassed}
+        fileUrl={fileUrl}
+      />
+    );
+  }
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-6 pb-16">
-      {/* Way back to the project's community — same breadcrumb pattern as
-          Explore's own back-to-project link
-          (app/explore/[topic]/page.tsx). */}
       {community && (
         <div className="mb-4">
           <Link
@@ -123,165 +233,34 @@ export default async function ProjectDetailPage({
         </div>
       )}
 
-      {/* Header & status */}
-      <section className="mb-16">
-        <div className="flex items-start justify-between gap-8 mb-6">
-          <div>
-            <h1 className="font-display-lg text-display-lg text-on-background mb-4">
-              {project.name}
-            </h1>
-            {chips.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 mb-4">{chips.map(chip)}</div>
-            )}
-            {project.description && (
-              <p className="font-body-lg text-body-lg text-secondary max-w-3xl">
-                {project.description}
-              </p>
+      <div className="flex flex-col lg:flex-row gap-6 lg:gap-10">
+        <ProjectSidebar
+          projectId={project.id}
+          name={project.name}
+          challengeKey={project.challenge_key}
+          memberCount={project.members.length}
+          active={tab}
+        />
+
+        <main className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-4 mb-8 pb-4 border-b border-outline-variant/30">
+            <h2 className="font-display-lg text-[32px] leading-tight text-on-background">{TAB_LABEL[tab]}</h2>
+            {project.is_creator && (
+              <DeleteProjectButton
+                projectId={project.id}
+                projectName={project.name}
+                memberCount={project.members.length}
+                proposalSubmitted={!!project.proposal?.submitted_at}
+              />
             )}
           </div>
-          {project.is_creator && (
-            <DeleteProjectButton
-              projectId={project.id}
-              projectName={project.name}
-              memberCount={project.members.length}
-              proposalSubmitted={!!project.proposal?.submitted_at}
-            />
-          )}
-        </div>
+          {content}
+        </main>
+      </div>
 
-        {/* Status strip — members always; checklist progress and resource
-            count join ONLY when there's something to report, per
-            STRUCTURE.md: a new project must never read "0 of 0" or
-            "0 resources saved". */}
-        <div className="inline-flex items-center gap-6 font-label-md text-label-md text-secondary bg-surface-container-low/50 px-6 py-3 rounded-lg border border-outline-variant/30">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[18px]">group</span>
-            {project.members.length} {project.members.length === 1 ? "member" : "members"}
-          </div>
-          {resources.total > 0 && (
-            <>
-              <div className="w-px h-4 bg-outline-variant/50" />
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[18px]">bookmark</span>
-                {resources.total} {resources.total === 1 ? "resource" : "resources"} saved
-              </div>
-            </>
-          )}
-          {project.checklist.length > 0 && (
-            <>
-              <div className="w-px h-4 bg-outline-variant/50" />
-              <div className="flex items-center gap-2 text-primary">
-                <span className="material-symbols-outlined text-[18px]">check_circle</span>
-                {project.checklist.filter((c) => c.status === "ready").length} of{" "}
-                {project.checklist.length} ready
-              </div>
-            </>
-          )}
-          <div className="w-px h-4 bg-outline-variant/50" />
-          <Link
-            href={`/projects/${project.id}/wiki`}
-            className="flex items-center gap-2 hover:text-primary transition-colors"
-          >
-            <span className="material-symbols-outlined text-[18px]">hub</span>
-            What we found
-          </Link>
-        </div>
-      </section>
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      <TeamSection
-        projectId={project.id}
-        members={project.members}
-        isLead={project.is_lead}
-        viewerUserId={user.id}
-      />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      <ResourcesSection
-        projectId={project.id}
-        projectName={project.name}
-        exploreHref={exploreHref}
-        resources={resources}
-      />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      {/* Runs on every project now, including ColaboFest. A ColaboFest
-          project comes pre-filled with SPARC's own nine readiness items —
-          Chen's original "overwhelming it" concern was about proposing six
-          more checklist items on top of that, not about resource discovery,
-          which is pure value. AgentSection (and the backend pipeline behind
-          it, see tools/project_agent.py) now suppresses the checklist
-          proposal step specifically for a challenge project rather than
-          hiding the whole feature; resources (and the digest below) are
-          produced on every project the same way.
-
-          ONE button, ONE search, TWO outputs: a downloadable prior-art
-          digest, and resources/checklist proposals to review — both from a
-          single "Run agent" click. This used to be two separate sections
-          ("Run agent" and "Prior-art brief," each running its own full
-          search) merged per Chen's one-clear-purpose-per-page note, and then
-          collapsed further from two actions in one section down to one
-          action producing both outputs — see AgentSection's own module
-          docstring for the full history. Available here, including on
-          ColaboFest, since the digest serves a published ColaboFest review
-          criterion directly ("Rigor and innovation — differentiation from
-          existing approaches"). */}
-      <AgentSection
-        projectId={project.id}
-        projectName={project.name}
-        isChallenge={!!project.challenge_key}
-        storedDigest={project.digest}
-        exploreHref={exploreHref}
-      />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      <ChecklistSection
-        projectId={project.id}
-        projectTarget={project.target}
-        projectIndication={project.indication}
-        projectModality={project.modality}
-        projectStage={project.stage}
-        items={project.checklist}
-        isColabofest={project.challenge_key === "colabofest_2026"}
-      />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      <WhoCanHelpSection projectId={project.id} />
-
-      <hr className="border-t border-outline-variant/30 w-full mb-16" />
-
-      <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />
-
-      {/* Only exists at all for a ColaboFest project — not merely empty or
-          disabled for an ordinary one. */}
-      {project.challenge_key && (
-        <>
-          <hr className="border-t border-outline-variant/30 w-full mb-16" />
-          <ProposalSection
-            projectId={project.id}
-            proposal={project.proposal}
-            // Submission is ANY LEAD now, not creator-only — see
-            // lib/server/projects.ts:submitProposal(). Passing is_lead
-            // (not is_creator) keeps this button's visibility consistent
-            // with what the server action actually allows.
-            isLead={project.is_lead}
-            deadlinePassed={deadlinePassed}
-            fileUrl={fileUrl}
-          />
-        </>
-      )}
-
-      {/* Floating, out of normal flow — available on every project,
-          including ColaboFest — unlike the agent above (hidden there
-          because it pushes proposals), this is pull-based: a member asks,
+      {/* Floating, out of normal flow, on every tab. Pull-based: a member asks,
           nothing is proposed unprompted. */}
       <ProjectChatbot projectId={project.id} projectName={project.name} />
-
     </div>
   );
 }

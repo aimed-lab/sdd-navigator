@@ -39,6 +39,8 @@ export type PageNoteView = {
   note_type: string;
   is_human_edited: boolean;
   editedByViewer: boolean;
+  /** Name of the person who last edited it (when they can be named). */
+  editedByName: string | null;
   /** citation number -> page_evidence id, from this note's "Cited as [n]" filings */
   citations: Record<number, string>;
 };
@@ -52,7 +54,11 @@ export type PageMemberView = {
 
 export type PageView = {
   page: PageHeader;
-  viewer: { signedIn: boolean; isOwner: boolean; role: PageRole };
+  viewer: { signedIn: boolean; isOwner: boolean; role: PageRole; canEdit: boolean };
+  /** The project this page belongs to, when the viewer can see that project. */
+  project: { id: string; name: string } | null;
+  /** The parent page of a sub-page, when the viewer can read it. */
+  parent: { slug: string; title: string } | null;
   notes: PageNoteView[];
   evidence: EvidenceRow[];
   updates: UpdateRow[];
@@ -88,7 +94,7 @@ export async function getPageView(slug: string, ctx?: ActingContext): Promise<Pa
   try {
     const { data: row, error } = await db
       .from("pages")
-      .select("id, slug, title, owner_id, visibility, refresh_enabled, last_refreshed_at, created_at")
+      .select("id, slug, title, owner_id, visibility, refresh_enabled, last_refreshed_at, created_at, project_id, parent_page_id")
       .eq("slug", slug)
       .maybeSingle();
     if (error) throw error;
@@ -145,6 +151,47 @@ export async function getPageView(slug: string, ctx?: ActingContext): Promise<Pa
         ? myMember.role
         : null;
 
+    // May this viewer edit the page? The database's own can_edit_page() answers
+    // (owner, a page editor on a team page, or a member of the page's project).
+    let canEdit = false;
+    if (user) {
+      const { data: can } = await db.rpc("can_edit_page", { p_page_id: pageId, p_uid: user.id });
+      canEdit = can === true;
+    }
+
+    // The project (name only) and parent page, each only when the viewer can
+    // read it; both reads go through the viewer's own session.
+    let project: { id: string; name: string } | null = null;
+    if (row.project_id) {
+      const { data: pr } = await db.from("projects").select("id, name").eq("id", row.project_id).maybeSingle();
+      if (pr) project = { id: pr.id as string, name: pr.name as string };
+    }
+    let parent: { slug: string; title: string } | null = null;
+    if (row.parent_page_id) {
+      const { data: par } = await db.from("pages").select("slug, title").eq("id", row.parent_page_id).maybeSingle();
+      if (par) parent = { slug: par.slug as string, title: par.title as string };
+    }
+
+    // Names of the people who edited sections. In a project, the project's
+    // member-name function (members only); otherwise public profiles.
+    const editorIds = Array.from(new Set(notes.map((n) => n.updated_by as string | null).filter((v): v is string => !!v)));
+    const editorNames = new Map<string, string>();
+    if (editorIds.length > 0) {
+      if (project) {
+        const { data: nm } = await db.rpc("project_member_names", { project_ids: [project.id] });
+        for (const r of (nm ?? []) as { user_id: string; name: string | null }[]) {
+          if (r.name) editorNames.set(r.user_id, r.name);
+        }
+      }
+      const missing = editorIds.filter((i) => !editorNames.has(i));
+      if (missing.length > 0) {
+        const { data: us } = await db.from("users").select("id, name").in("id", missing);
+        for (const r of (us ?? []) as { id: string; name: string | null }[]) {
+          if (r.name) editorNames.set(r.id, r.name);
+        }
+      }
+    }
+
     // Citation numbers per note, from the "Cited as [n]" rationale the page
     // agent wrote when it filed each cited item.
     const citationsByNote = new Map<string, Record<number, string>>();
@@ -181,7 +228,9 @@ export async function getPageView(slug: string, ctx?: ActingContext): Promise<Pa
           refresh_enabled: !!row.refresh_enabled,
           last_refreshed_at: (row.last_refreshed_at as string | null) ?? null,
         },
-        viewer: { signedIn: !!user, isOwner, role },
+        viewer: { signedIn: !!user, isOwner, role, canEdit },
+        project,
+        parent,
         notes: notes.map((n) => ({
           id: n.id as string,
           slug: n.slug as string,
@@ -190,6 +239,7 @@ export async function getPageView(slug: string, ctx?: ActingContext): Promise<Pa
           note_type: n.note_type as string,
           is_human_edited: !!n.is_human_edited,
           editedByViewer: !!n.is_human_edited && !!user && n.updated_by === user.id,
+          editedByName: n.is_human_edited && n.updated_by ? editorNames.get(n.updated_by as string) ?? null : null,
           citations: citationsByNote.get(n.id as string) ?? {},
         })),
         evidence,

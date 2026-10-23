@@ -387,7 +387,9 @@ test("get_page shows what's new for the last 30 days only, and no owner id", () 
   const body = shapePage(
     {
       page: { id: "p", slug: "s", title: "T", created_at: null, visibility: "team", refresh_enabled: true, last_refreshed_at: null },
-      viewer: { signedIn: true, isOwner: true, role: "owner" },
+      viewer: { signedIn: true, isOwner: true, role: "owner", canEdit: true },
+      project: null,
+      parent: null,
       notes: [],
       evidence: [
         { id: "e1", item_id: "i1", kind: "paper", title: "A", summary: null, url: null, source: "s", date_iso: null, signal_metric: null, signal_value: null, signal_as_of: null },

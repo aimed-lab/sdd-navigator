@@ -19,12 +19,18 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { listMyProjects } from "@/lib/server/projects";
 import ProjectCard from "@/components/projects/ProjectCard";
+import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
 export const metadata = { title: "Your projects · SmartDrugDiscovery" };
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
   const user = await getCurrentUser();
   if (!user) redirect("/login?callbackUrl=%2Fprojects");
 
@@ -49,6 +55,8 @@ export default async function ProjectsPage() {
           New project
         </Link>
       </section>
+
+      <DeletedNotice show={wasDeleted(sp)} />
 
       {result.status === "error" && (
         <p className="font-body-sm text-body-sm text-error" role="alert">

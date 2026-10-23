@@ -66,7 +66,7 @@ export default function SharedFolderSection({
 
   return (
     <section className="mb-20">
-      <h2 className="font-headline-md text-headline-md text-on-background mb-6">Shared Folder</h2>
+      <h2 className="font-headline-md text-headline-md text-on-background mb-6">Files</h2>
 
       {!editing && current ? (
         <div className="inline-flex items-center gap-6 p-4 pr-6 bg-surface-container-lowest border border-outline-variant/40 rounded-xl shadow-sm hover:shadow-md transition-shadow group">
@@ -126,7 +126,7 @@ export default function SharedFolderSection({
               disabled={saving}
               className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? "Saving…" : current ? "Save" : "Add folder link"}
             </button>
             {current && (
               <button

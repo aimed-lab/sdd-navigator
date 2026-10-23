@@ -19,6 +19,7 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBack
 import { savePageEvidence, type PageEvidenceFilingsBySlug, type PageEvidenceItemInput } from "@/lib/server/pages/pageEvidence";
 import { savePageNotes, type PageNoteProposal } from "@/lib/server/pages/pageNotes";
 import { newPageSlug, type PageVisibility } from "@/lib/server/pages/pagesDb";
+import { insertPageRow } from "@/lib/server/pages/pageInsert";
 
 const MAX_SLUG_ATTEMPTS = 3;
 
@@ -31,6 +32,11 @@ export type CreatePageInput = {
   title: string;
   topic: string;
   visibility: PageVisibility;
+  /** A project wiki page: attach it to this project (the database refuses a
+   *  project the caller is not a member of). */
+  projectId?: string;
+  /** A sub-page of this page (same project). */
+  parentPageId?: string;
 };
 
 export type CreatePageResult =
@@ -47,33 +53,28 @@ export type CreatePageResult =
   | { ok: false; status: number; error: string };
 
 export async function createLivingPage(input: CreatePageInput): Promise<CreatePageResult> {
-  const { insertDb, ownerId, title, topic, visibility } = input;
+  const { insertDb, ownerId, title, topic, visibility, projectId, parentPageId } = input;
 
-  // A random-suffixed slug makes a first-try collision rare, but two requests
-  // seeding the same topic at once is expected, so retry on a 23505.
-  let pageId: string | null = null;
-  let slug = "";
-  let createError: string | null = null;
-  for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
-    slug = newPageSlug(topic);
-    const { data, error } = await insertDb
-      .from("pages")
-      .insert({ slug, title, seed_type: "topic", seed_input: topic, owner_id: ownerId, visibility })
-      .select("id, slug")
-      .single();
-    if (!error && data) {
-      pageId = data.id as string;
-      slug = data.slug as string;
-      createError = null;
-      break;
-    }
-    if (error && (error as { code?: string }).code === "23505") {
-      createError = error.message;
-      continue;
-    }
-    createError = error?.message ?? "unknown error creating page";
-    break;
-  }
+  // The id is made in code and the insert asks for nothing back (see
+  // pageInsert.ts for why: RETURNING fails the "Pages: read" policy for a
+  // session client). A first-try slug collision is rare but retried.
+  const inserted = await insertPageRow(
+    insertDb,
+    {
+      title,
+      seed_input: topic,
+      owner_id: ownerId,
+      visibility,
+      project_id: projectId,
+      parent_page_id: parentPageId,
+    },
+    () => newPageSlug(topic),
+    undefined,
+    MAX_SLUG_ATTEMPTS
+  );
+  const pageId: string | null = inserted.ok ? inserted.id : null;
+  const slug = inserted.ok ? inserted.slug : "";
+  const createError: string | null = inserted.ok ? null : inserted.error;
   if (!pageId) {
     console.error("createLivingPage: couldn't create page row", createError);
     return { ok: false, status: 500, error: "Couldn't create the page. Please try again." };
