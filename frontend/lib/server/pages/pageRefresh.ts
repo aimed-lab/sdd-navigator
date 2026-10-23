@@ -1,4 +1,4 @@
-// lib/server/pages/pageRefresh.ts — the scheduled refresh of living pages
+// lib/server/pages/pageRefresh.ts — the scheduled refresh of wiki pages
 // (POST /api/pages/refresh calls runRefresh()).
 //
 // Every page with refresh_enabled keeps collecting new resources from all

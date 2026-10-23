@@ -1,4 +1,4 @@
-// "What's new" on a living page: what refresh runs added (page_updates),
+// "What's new" on a wiki page: what refresh runs added (page_updates),
 // newest day first, one line per day ("Oct 20: 3 new papers, 1 new FDA
 // approval") that opens to the items, each linking out. The page's first build
 // is not an update; it is the single line at the bottom, "Page created <date>

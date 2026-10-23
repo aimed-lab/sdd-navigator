@@ -44,6 +44,7 @@ export default function DeleteShowcaseConfirm({
     const res = await deleteShowcaseAction(entryId);
     if (res.ok) {
       onClose();
+      router.replace("/promote?deleted=1");
       router.refresh();
     } else {
       setError(res.error);
@@ -72,7 +73,7 @@ export default function DeleteShowcaseConfirm({
           </span>
           <div className="min-w-0">
             <h2 className="font-headline-md text-headline-md text-on-background">
-              Delete this entry?
+              Delete &ldquo;{entryTitle}&rdquo;?
             </h2>
             <p className="mt-2 font-body-md text-body-md text-secondary">
               This can&apos;t be undone.

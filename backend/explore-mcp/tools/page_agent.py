@@ -19,7 +19,7 @@ Resources/Checklist review-and-accept UI — see CLAUDE.md's "IT PROPOSES; THE
 FRONTEND PERSISTS" note, which doesn't apply here since a page's frontend
 route persists directly (no human review step for a topic-seeded page). This
 module skips project_agent.py's step 2 (relevance ranking for a save-review
-list) and step 3 (checklist proposal) entirely — a living page only needs the
+list) and step 3 (checklist proposal) entirely — a wiki page only needs the
 candidate pool for wiki-note-writing and evidence-filing, both of which
 operate on the full candidate list, not a ranked top-8.
 """

@@ -30,6 +30,7 @@ import Link from "next/link";
 import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
 import OpenCallTile from "@/components/collaborate/OpenCallTile";
 import PostCard from "@/components/collaborate/PostCard";
+import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import SectionHeading from "@/components/explore/SectionHeading";
 import ResourceCard from "@/components/collaborate/ResourceCard";
@@ -41,9 +42,9 @@ export const dynamic = "force-dynamic"; // board content changes per request
 
 const FILTERS: { value: BoardFilter; label: string }[] = [
   { value: "all", label: "All types" },
-  { value: "offering", label: "Offering" },
-  { value: "seeking_team", label: "Seeking Teammates" },
-  { value: "seeking_resources", label: "Seeking Resources" },
+  { value: "offering", label: "Offers help" },
+  { value: "seeking_team", label: "Looking for people" },
+  { value: "seeking_resources", label: "Looking for resources" },
 ];
 
 /** Build a board URL preserving the other params. */
@@ -133,10 +134,12 @@ export default async function CollaboratePage({
     <PageShell>
       <PageHeader
         title="Collaborate"
-        subtitle="Share what your lab offers, find what you need, and build teams, for the drug discovery community."
+        subtitle="Post what you need or offer, and find people, labs and companies who can help."
         action={<AddToBoardButton newPostHref={newPostHref} newResourceHref={newResourceHref} />}
         className="mb-0"
       />
+
+      <DeletedNotice show={wasDeleted(sp)} />
 
       {/* Pinned open call: a static tile, not a post */}
       <OpenCallTile />
@@ -173,7 +176,7 @@ export default async function CollaboratePage({
             type="search"
             name="q"
             defaultValue={q}
-            placeholder="Search collaborations, resources, people…"
+            placeholder="Search posts, resources and people…"
             aria-label="Search the collaboration board"
             className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
           />
@@ -213,10 +216,11 @@ export default async function CollaboratePage({
       )}
 
       {/* Result line */}
-      {(posts.length > 0 || resources.length > 0 || filtered) && (
+      {(posts.length > 0 || filtered) && (
         <p className="mt-6 text-sm text-secondary/80">
-          {posts.length} {posts.length === 1 ? "post" : "posts"} · {resources.length}{" "}
-          {resources.length === 1 ? "resource" : "resources"}
+          {posts.length} {posts.length === 1 ? "post" : "posts"}
+          {resources.length > 0 &&
+            ` · ${resources.length} ${resources.length === 1 ? "resource" : "resources"}`}
           {filtered && " matching"}
           {filtered && (
             <>
@@ -233,11 +237,11 @@ export default async function CollaboratePage({
       {posts.length === 0 ? (
         <div className="mt-6 max-w-xl mx-auto">
           <InvitationCard
-            heading={filtered ? "Nothing matches that yet" : "Be the first to post"}
+            heading={filtered ? "Nothing matches that yet" : "No posts yet"}
             body={
               filtered
-                ? "Try a broader filter — or post what you're looking for and let the community come to you."
-                : "Invite the community to collaborate on your next breakthrough research project."
+                ? "Try a broader filter, or post what you're looking for and let the community come to you."
+                : "No posts yet. Post what you need or offer, and the community can reply."
             }
             href={newPostHref}
           />
@@ -249,7 +253,7 @@ export default async function CollaboratePage({
           ))}
           <InvitationCard
             heading="Don't see what you need?"
-            body="Invite the community to collaborate on your next breakthrough research project."
+            body="Post what you are looking for, and let the community come to you."
             href={newPostHref}
           />
         </div>
@@ -260,7 +264,7 @@ export default async function CollaboratePage({
         <div className="flex flex-wrap items-end justify-between gap-4">
           <SectionHeading
             title="Shared lab resources"
-            subtitle="Techniques, equipment, vectors, models, and more that labs have registered for others to use."
+            subtitle="Techniques, equipment and materials that labs have said others can ask to use."
             className=""
           />
           <Link
@@ -276,7 +280,7 @@ export default async function CollaboratePage({
           <div className="mt-6 max-w-xl">
             <InvitationCard
               heading="Nothing registered yet"
-              body="Add a technique, an antibody, a cell line — anything your lab is willing to share."
+              body="No resources yet. Add a technique, an antibody, a cell line or anything else your lab is willing to share."
               href={newResourceHref}
               cta="Add a resource"
             />

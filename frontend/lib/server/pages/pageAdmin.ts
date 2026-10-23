@@ -1,4 +1,4 @@
-// lib/server/pages/pageAdmin.ts — owner-only changes to a living page: its
+// lib/server/pages/pageAdmin.ts — owner-only changes to a wiki page: its
 // visibility, whether it keeps itself updated, and deleting it. Adding and
 // removing members is in pageMembers.ts.
 //

@@ -15,6 +15,7 @@ import { useState } from "react";
 import Link from "next/link";
 import ConnectModal from "./ConnectModal";
 import DeletePostConfirm from "./DeletePostConfirm";
+import MoreMenu from "@/components/MoreMenu";
 import { FUNDING_STATUS_LABEL, type CollabPost, type FundingStatus, type Stage } from "@/lib/collabTypes";
 import { TYPE_STYLES, type TypeKey } from "@/lib/typeStyles";
 
@@ -73,11 +74,11 @@ function postedLabel(createdAt: string): string {
 // stage "seeking_team", else asks-only, else offers. Tint comes from the shared
 // type tints so the board matches Explore.
 function postKind(post: CollabPost): { label: string; tint: TypeKey } {
-  if (post.stage === "seeking_team") return { label: "Seeking teammates", tint: "news" };
+  if (post.stage === "seeking_team") return { label: "Looking for people", tint: "news" };
   if (post.needs.length > 0 && post.haves.length === 0) {
-    return { label: "Seeking resources", tint: "tool" };
+    return { label: "Looking for resources", tint: "tool" };
   }
-  if (post.haves.length > 0) return { label: "Offering", tint: "dataset" };
+  if (post.haves.length > 0) return { label: "Offers help", tint: "dataset" };
   return { label: "Collaboration", tint: "other" };
 }
 
@@ -167,8 +168,8 @@ export default function PostCard({
         )}
 
         <div className="space-y-4">
-          <PillGroup label="Offering" items={post.haves} tone="offer" />
-          <PillGroup label="Seeking" items={post.needs} tone="need" />
+          <PillGroup label="Offers" items={post.haves} tone="offer" />
+          <PillGroup label="Looking for" items={post.needs} tone="need" />
         </div>
 
         {/* owner + single action */}
@@ -203,13 +204,10 @@ export default function PostCard({
               {post.is_owner && (
                 <>
                   <span className="text-secondary/40">•</span>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmingDelete(true)}
-                    className="font-label-sm text-label-sm text-secondary/60 hover:text-error transition-colors"
-                  >
-                    Delete
-                  </button>
+                  <MoreMenu
+                    up
+                    items={[{ label: "Delete post", danger: true, onClick: () => setConfirmingDelete(true) }]}
+                  />
                 </>
               )}
             </div>

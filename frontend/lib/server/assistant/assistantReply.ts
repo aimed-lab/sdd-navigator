@@ -267,10 +267,10 @@ export const STARTERS: Starter[] = [
   },
   {
     id: "create",
-    label: "Create a living page for my research",
+    label: "Create a wiki page for my research",
     hint: "private, team or public, keeps itself updated",
     kind: "send",
-    text: "I'd like to create a living page for my research.",
+    text: "I'd like to create a wiki page for my research.",
   },
   { id: "mine", label: "Show my pages", kind: "go", href: "/pages" },
   {

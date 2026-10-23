@@ -4,7 +4,7 @@ import { getPagesServiceRoleClient } from "@/lib/server/pages/pagesDb";
 import { makeSupabaseRefreshDeps, runRefresh, type BackendRefreshResult } from "@/lib/server/pages/pageRefresh";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 
-// POST /api/pages/refresh — the scheduled refresh of living pages. Called
+// POST /api/pages/refresh — the scheduled refresh of wiki pages. Called
 // hourly by .github/workflows/refresh-pages.yml; each run refreshes up to 3
 // pages that are due (see lib/server/pages/pageRefresh.ts for the rules).
 //

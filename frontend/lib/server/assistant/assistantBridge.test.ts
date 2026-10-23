@@ -14,9 +14,9 @@ test("parseAssistantRequest: send by default, fill when asked, junk refused", ()
   assert.equal(parseAssistantRequest({ text: "y".repeat(900) })!.text.length, 500);
 });
 
-test("the save flow starts with a living-page request naming the topic", () => {
-  assert.equal(saveAsLivingPageMessage("  KRAS in pancreatic cancer "), "I'd like to create a living page on KRAS in pancreatic cancer");
-  assert.match(START_LIVING_PAGE_MESSAGE, /living page/);
+test("the save flow starts with a wiki-page request naming the topic", () => {
+  assert.equal(saveAsLivingPageMessage("  KRAS in pancreatic cancer "), "I'd like to create a wiki page on KRAS in pancreatic cancer");
+  assert.match(START_LIVING_PAGE_MESSAGE, /wiki page/);
 });
 
 test("openAssistant does nothing (and does not throw) without a window", () => {

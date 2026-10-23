@@ -1,9 +1,9 @@
 // lib/server/assistant/assistantBridge.ts — how a button elsewhere on the page
-// (Explore's "Start a new living page", "Save as living page", suggested
+// (Explore's "New wiki page", "Save as wiki page", suggested
 // follow-ups) hands a message to the assistant panel. The page dispatches a
 // window event; the panel (components/explore/AssistantChat.tsx) listens, opens
 // itself and either SENDS the message as the researcher's own turn or FILLS the
-// input. Nothing is created here: a living page still goes through the panel's
+// input. Nothing is created here: a wiki page still goes through the panel's
 // usual picker and confirm step.
 //
 // No runtime imports, so `npm test` covers parseAssistantRequest.
@@ -31,8 +31,8 @@ export function openAssistant(request: AssistantRequest): void {
 
 /** The message that starts the existing save flow for a topic. */
 export function saveAsLivingPageMessage(topic: string): string {
-  return `I'd like to create a living page on ${topic.trim().slice(0, 150)}`;
+  return `I'd like to create a wiki page on ${topic.trim().slice(0, 150)}`;
 }
 
-/** The message behind the dashed "Start a new living page" card. */
-export const START_LIVING_PAGE_MESSAGE = "I'd like to create a living page for my research.";
+/** The message behind the dashed "New wiki page" card. */
+export const START_LIVING_PAGE_MESSAGE = "I'd like to create a wiki page for my research.";

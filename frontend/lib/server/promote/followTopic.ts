@@ -1,5 +1,5 @@
 // lib/server/promote/followTopic.ts — "Follow the topic" for a Promote article:
-// the best matching public living page and the best matching community, using
+// the best matching public wiki page and the best matching community, using
 // the pure matchers in topicMatch.ts. Both are optional: nothing found means the
 // box is hidden (the article page always shows the community the author attached
 // to the item, whatever this returns).

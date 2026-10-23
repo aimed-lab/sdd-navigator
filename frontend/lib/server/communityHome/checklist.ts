@@ -78,8 +78,8 @@ export function buildChecklist(a: {
     },
     {
       key: "page",
-      label: "Create or follow a living page",
-      hint: "Open the assistant and choose “Create a living page”.",
+      label: "Create or follow a wiki page",
+      hint: "Open the assistant and choose “Create a wiki page”.",
       done: a.ownsLivingPage,
       href: "/explore",
     },

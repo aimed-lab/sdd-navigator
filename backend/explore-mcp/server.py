@@ -1493,7 +1493,7 @@ async def assistant_turn_http(request):
 
 @mcp.custom_route("/api/page-refresh", methods=["POST"])
 async def page_refresh_http(request):
-    """Daily refresh of one existing living page (called by the Next.js
+    """Daily refresh of one existing wiki page (called by the Next.js
     POST /api/pages/refresh job). POST { topic: str, known_item_ids: [str],
     notes: [{slug, title, body}] } -> { new_items, evidence_filings,
     unfiled_items, project_level_items, missing_note_suggestions,

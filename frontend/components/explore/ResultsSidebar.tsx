@@ -120,14 +120,14 @@ export default function ResultsSidebar({ topic, sections }: { topic: string; sec
     <aside className="flex flex-col gap-4 min-w-0" aria-label="Next steps">
       <Card title="Keep this up to date">
         <p className="font-body-sm text-body-sm text-secondary">
-          A living page collects new papers and trials on this topic every day.
+          A wiki page collects new papers and trials on this topic every day.
         </p>
         <button
           type="button"
           onClick={() => openAssistant({ text: saveAsLivingPageMessage(topic), mode: "send" })}
           className="btn-primary self-start px-4 py-2 rounded-lg font-label-md text-label-md"
         >
-          Save as living page
+          Save as wiki page
         </button>
       </Card>
 

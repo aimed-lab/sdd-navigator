@@ -33,9 +33,14 @@ export default async function ProjectsPage() {
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-12">
       <section className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 border-b border-outline-variant/30 pb-6">
-        <h1 className="font-display-lg text-[40px] leading-tight text-on-background">
-          Your projects
-        </h1>
+        <div>
+          <h1 className="font-display-lg text-[40px] leading-tight text-on-background">
+            Your projects
+          </h1>
+          <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
+            Your team projects: a shared place for a checklist, files and the people helping.
+          </p>
+        </div>
         <Link
           href="/projects/new"
           className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md flex items-center gap-2"
@@ -73,16 +78,15 @@ export default async function ProjectsPage() {
             No projects yet
           </h3>
           <p className="font-body-lg text-body-lg text-secondary max-w-lg mb-8">
-            Start a new pharmaceutical research program to track progress, manage
-            molecular data, and collaborate with your team in a centralized
-            workspace.
+            A project is a shared workspace for your team: a checklist, files, and
+            people who can help. Create your first one to get started.
           </p>
           <Link
             href="/projects/new"
             className="btn-primary px-8 py-4 rounded-lg font-label-md text-label-md flex items-center gap-2 shadow-sm"
           >
             <span className="material-symbols-outlined text-[20px]">add</span>
-            Create your first project
+            New project
           </Link>
         </section>
       )}

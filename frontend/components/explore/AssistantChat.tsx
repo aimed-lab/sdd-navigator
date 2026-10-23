@@ -13,7 +13,7 @@
 //   moves between Explore and the /pages screens; offered on those routes only.
 // - Each answer reads top to bottom: the question, what was searched (with real
 //   counts), the cited answer, numbered source cards, quick facts, a one-time
-//   "save as a living page" offer, and related questions. The main page follows
+//   "save as a wiki page" offer, and related questions. The main page follows
 //   the search the BACKEND says it ran (/explore/<query>).
 // - The Private / Team / Public picker is shown straight away only when the
 //   researcher says what they work on or asks for a page; otherwise "Save page"
@@ -969,7 +969,7 @@ export default function AssistantChat() {
                   {ex && ex.offerSave && pickerAt !== i && !pageCreated && (
                     <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 flex items-center gap-3">
                       <p className="flex-1 font-body-sm text-body-sm text-on-background">
-                        <strong className="font-semibold">Working on this?</strong> Save it as a living page that
+                        <strong className="font-semibold">Working on this?</strong> Save it as a wiki page that
                         collects new papers and trials daily.
                       </p>
                       <button

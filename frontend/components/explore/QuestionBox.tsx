@@ -43,14 +43,15 @@ export default function QuestionBox({
           type="text"
           aria-label="Your question"
           placeholder={placeholder}
-          className="w-full h-16 px-6 pr-16 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary/20 focus:border-primary text-body-lg font-body-lg placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
+          className="w-full h-16 px-6 pr-16 sm:pr-48 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary/20 focus:border-primary text-body-lg font-body-lg placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
         />
         <button
           type="submit"
-          aria-label="Search"
-          className="absolute right-3 top-3 bottom-3 btn-primary px-5 rounded-xl flex items-center justify-center"
+          aria-label="Ask a question"
+          className="absolute right-3 top-3 bottom-3 btn-primary px-5 rounded-xl flex items-center justify-center gap-2 font-label-md text-label-md"
         >
           <span className="material-symbols-outlined">search</span>
+          <span className="hidden sm:inline">Ask a question</span>
         </button>
       </form>
 

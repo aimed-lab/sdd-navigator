@@ -1,4 +1,4 @@
-// "All sources" on a living page: page_evidence grouped by kind, rendered with
+// "All sources" on a wiki page: page_evidence grouped by kind, rendered with
 // the same lists and tiles Explore uses (PaperList for papers and preprints,
 // OtherSections for everything else). page_evidence keeps no per-source `raw`
 // details, so tiles show the title, summary and date and hide the rest.

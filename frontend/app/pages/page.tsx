@@ -1,44 +1,59 @@
-// /pages — "My pages": the living pages the signed-in user owns, plus the team
+// /pages — "Your wiki": the wiki pages the signed-in user owns, plus the team
 // pages they are a member of. Signed-out visitors are redirected to login
 // (same shape as /projects). Read through the visitor's own session, so RLS
 // decides what is listed.
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
+import NewWikiPageButton from "@/components/pages/NewWikiPageButton";
 import VisibilityBadge from "@/components/pages/VisibilityBadge";
 import { listMyPages } from "@/lib/server/pages/pageView";
 import { formatDay } from "@/lib/server/pages/pageViewHelpers";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "My pages · SmartDrugDiscovery" };
+export const metadata = { title: "Your wiki · SmartDrugDiscovery" };
 
 const ROLE_LABEL = { owner: "Owner", editor: "Editor", viewer: "Viewer" } as const;
 
-export default async function MyPagesPage() {
+export default async function MyPagesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
   const result = await listMyPages();
   if (result.status === "signed_out") redirect("/login?callbackUrl=%2Fpages");
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-10">
-      <section className="border-b border-outline-variant/30 pb-6">
-        <h1 className="font-display-lg text-[40px] leading-tight text-on-background">My pages</h1>
-        <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
-          Pages you own and team pages you belong to. They keep collecting new resources on their own.
-        </p>
+      <section className="border-b border-outline-variant/30 pb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+        <div>
+          <h1 className="font-display-lg text-[40px] leading-tight text-on-background">Your wiki</h1>
+          <p className="mt-2 font-body-md text-body-md text-secondary max-w-2xl">
+            Wiki pages you own and team pages you belong to. Each one keeps collecting new research on its own.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <NewWikiPageButton />
+        </div>
       </section>
+
+      <DeletedNotice show={wasDeleted(sp)} />
 
       {result.status === "error" && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
-          Couldn&apos;t load your pages. Please try again.
+          Couldn&apos;t load your wiki pages. Please try again.
         </p>
       )}
 
       {result.status === "ok" && result.pages.length === 0 && (
-        <div className="glass-panel rounded-2xl p-10 text-center max-w-2xl">
+        <div className="glass-panel rounded-2xl p-10 text-center max-w-2xl flex flex-col items-center gap-5">
           <p className="font-body-md text-body-md text-secondary">
-            You don&apos;t have any pages yet.
+            No wiki pages yet. Ask the assistant &ldquo;make me a page on &lt;your topic&gt;&rdquo; or click New wiki page.
           </p>
+          <NewWikiPageButton />
         </div>
       )}
 

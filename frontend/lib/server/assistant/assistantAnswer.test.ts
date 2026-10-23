@@ -51,7 +51,7 @@ test("topicFromMessage: the subject of a search request, lead-ins removed", () =
 });
 
 test("topicFromMessage: picks, small talk and a topic-less page request are not searches", () => {
-  for (const t of ["Private", "Team", "public.", "thanks!", "ok", "hi", "I'd like to create a living page for my research.", "create a page", ""]) {
+  for (const t of ["Private", "Team", "public.", "thanks!", "ok", "hi", "I'd like to create a wiki page for my research.", "create a page", ""]) {
     assert.equal(topicFromMessage(t), null, t);
   }
 });
@@ -59,13 +59,13 @@ test("topicFromMessage: picks, small talk and a topic-less page request are not 
 test("wantsPickerNow: only when they say what they work on or ask for a page, with a topic", () => {
   assert.equal(wantsPickerNow("I work on EGFR resistance"), true);
   assert.equal(wantsPickerNow("My research is on pancreatic cancer"), true);
-  assert.equal(wantsPickerNow("Create a living page on KRAS"), true);
+  assert.equal(wantsPickerNow("Create a wiki page on KRAS"), true);
   // ordinary questions never get the picker
   assert.equal(wantsPickerNow("What are the side effects of aspirin?"), false);
   assert.equal(wantsPickerNow("Find resources on KRAS"), false);
   assert.equal(wantsPickerNow("Show clinical trials on EGFR"), false);
   // a page request with no topic is not enough
-  assert.equal(wantsPickerNow("I'd like to create a living page for my research."), false);
+  assert.equal(wantsPickerNow("I'd like to create a wiki page for my research."), false);
   assert.equal(wantsPickerNow("Private"), false);
 });
 
@@ -328,7 +328,7 @@ test("shouldShowPicker: never after an ordinary question, whatever the backend s
     assert.equal(shouldShowPicker(q, false), false, q);
   }
   assert.equal(shouldShowPicker("I work on KRAS in pancreatic cancer", false), true);
-  assert.equal(shouldShowPicker("Create a living page on KRAS", false), true);
+  assert.equal(shouldShowPicker("Create a wiki page on KRAS", false), true);
   assert.equal(shouldShowPicker("I work on KRAS in pancreatic cancer", true), false, "not while a page is being proposed");
 });
 

@@ -17,6 +17,7 @@
 
 import Link from "next/link";
 import ShowcaseCard from "@/components/promote/ShowcaseCard";
+import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 import { listShowcase } from "@/lib/server/showcase";
 import { pickFeatured } from "@/lib/server/promote/showcaseKinds";
 import { SHOWCASE_TYPES, SHOWCASE_TYPE_LABEL, type ShowcaseType } from "@/lib/showcaseTypes";
@@ -81,7 +82,7 @@ export default async function PromotePage({
               What&apos;s new from our community
             </h1>
             <p className="mt-3 font-body-lg text-body-lg text-secondary max-w-2xl">
-              Papers, talks, events, funding wins, tools and more from researchers like you.
+              Papers, talks, events, funding wins and tools from researchers like you. Share yours so people can find it.
             </p>
           </div>
           <Link
@@ -92,6 +93,10 @@ export default async function PromotePage({
             Share your work
           </Link>
         </header>
+
+        <div className="mt-6">
+          <DeletedNotice show={wasDeleted(sp)} />
+        </div>
 
         {/* "All" plus only the types that have at least one published item;
             wraps onto a second line instead of scrolling sideways. */}
@@ -118,11 +123,11 @@ export default async function PromotePage({
         {!featured ? (
           <div className="mt-8 max-w-xl mx-auto">
             <InvitationCard
-              heading={filtered ? "Nothing here yet" : "Be the first to share"}
+              heading={filtered ? "Nothing here yet" : "Nothing shared yet"}
               body={
                 filtered
                   ? "Nothing of this kind has been shared yet. Share yours and it appears here."
-                  : "Put a paper, talk, event, funding win or tool in front of the community."
+                  : "Nothing has been shared yet. Share a paper, talk, event, funding win or tool."
               }
             />
           </div>

@@ -1,7 +1,7 @@
 """
 tools/assistant.py — the AI assistant side panel: a short chat that finds
 resources on a topic and helps a researcher turn "what I work on" into a
-living page.
+wiki page.
 
 SAFETY PATTERN, same as the project agent: the model only PROPOSES. This
 module never creates anything and has no database access of any kind. The
@@ -86,7 +86,7 @@ UNAVAILABLE_REPLY = "Sorry, the assistant isn't available right now. Please try 
 
 _SYSTEM = """You are the AI assistant in SmartDrugDiscovery's side panel. You help a biomedical researcher. This is everything you can do, and you offer nothing else:
 - Find resources on a topic: papers, preprints, clinical trials, FDA approvals, compounds, datasets, grants and tools.
-- Create a living page for their research: a page that collects those resources on a topic and keeps itself updated. It can be private (only them), team (them and people they invite) or public (anyone can follow it).
+- Create a wiki page for their research: a page that collects those resources on a topic and keeps itself updated. It can be private (only them), team (them and people they invite) or public (anyone can follow it).
 - Show their pages: tell them to use the "Show my pages" starter or open My pages. You cannot list them yourself.
 - Find, join or create a community: a group of researchers on a topic with shared resources and updates. You can look for existing communities and draft a new one. You cannot join for them: the app shows Join or Request to join on each match.
 If asked for anything else (editing pages, inviting people, answering general questions), say briefly that you can't do that here and offer the list above. Never promise or imply other abilities.
@@ -164,7 +164,7 @@ _TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_create_page",
             "description": (
-                "Propose creating a living page. Creates nothing; the user confirms in the UI. "
+                "Propose creating a wiki page. Creates nothing; the user confirms in the UI. "
                 "Call only after the user has chosen private, team or public."
             ),
             "parameters": {
@@ -339,7 +339,7 @@ def has_assistant_reply(messages: list[dict[str, str]]) -> bool:
 
 _WANTS_PAGE = re.compile(
     r"\b(?:(?:create|make|build|start|set\s*up|want|need|like|new|another)\b[^.?!]{0,40}\bpage|"
-    r"(?:living|new)\s+page|page\s+(?:for|on|about))\b",
+    r"(?:living|wiki|new)\s+page|page\s+(?:for|on|about))\b",
     re.I,
 )
 

@@ -1,4 +1,4 @@
-// lib/server/pages/pageMembers.ts — the team on a living page
+// lib/server/pages/pageMembers.ts — the team on a wiki page
 // (database/migrations/2026-10-20_living_pages.sql, table `page_members`).
 //
 // Owner-only, enforced twice like addProjectMember()/removeProjectMember() in

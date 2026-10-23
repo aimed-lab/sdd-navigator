@@ -3,7 +3,7 @@
 // on, by plain word overlap. No LLM and no network.
 //
 // WHAT COUNTS AS "WHAT SOMEONE WORKS ON": their focus line in this community,
-// plus the titles and seed topics of living pages they own. For the viewer that
+// plus the titles and seed topics of wiki pages they own. For the viewer that
 // is everything they own (their own private pages are theirs to use); for any
 // other member it is only what the caller passes in, which is the roster and
 // page rows the viewer is already allowed to read (public_preview rules, public
@@ -21,7 +21,7 @@ import { queryTokens } from "../assistant/communityMatch.ts";
 export type Workings = {
   /** The focus line the member set in this community. */
   focus: string | null;
-  /** Titles and seed topics of their living pages (only the ones the viewer may see). */
+  /** Titles and seed topics of their wiki pages (only the ones the viewer may see). */
   pageTexts: string[];
 };
 

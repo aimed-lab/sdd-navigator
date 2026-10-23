@@ -18,7 +18,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 export function UpcomingEventsCard() {
   return (
     <Card title="Upcoming events">
-      <p className="font-body-md text-body-md text-secondary">No events yet. Talks and meetups will be listed here.</p>
+      <p className="font-body-md text-body-md text-secondary">No events yet. When an admin adds a talk or meetup, it shows up here.</p>
     </Card>
   );
 }
@@ -40,10 +40,10 @@ export function MembersWorkingOnCard({
 }) {
   if (similar) {
     return (
-      <Card title="Members working on similar things">
+      <Card title="What members are working on">
         {similar.length === 0 ? (
           <p className="font-body-md text-body-md text-secondary">
-            Nobody has shared something close to your work yet.
+            Nobody has shared a research focus close to yours yet.
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
@@ -74,15 +74,15 @@ export function MembersWorkingOnCard({
   }
 
   return (
-    <Card title="Members working on">
+    <Card title="What members are working on">
       {focusHref && (
         <Link href={focusHref} className="font-body-sm text-body-sm text-primary hover:underline underline-offset-4">
-          Add what you work on to see who&apos;s close to you
+          Add your research focus to find people near your work
         </Link>
       )}
       {rows.length === 0 ? (
         <p className="font-body-md text-body-md text-secondary">
-          Nobody has shared what they work on yet.
+          Nobody has shared their research focus yet. Add yours to start.
         </p>
       ) : (
         <ul className="flex flex-col gap-3">

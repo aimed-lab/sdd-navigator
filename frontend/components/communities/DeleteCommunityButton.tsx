@@ -19,6 +19,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { deleteCommunityAction } from "@/app/communities/actions";
+import MoreMenu from "@/components/MoreMenu";
 
 export default function DeleteCommunityButton({
   communityId,
@@ -51,7 +52,7 @@ export default function DeleteCommunityButton({
 
     const res = await deleteCommunityAction(communityId);
     if (res.ok) {
-      router.push("/communities");
+      router.push("/communities?deleted=1");
       router.refresh();
     } else {
       setError(res.error);
@@ -61,13 +62,10 @@ export default function DeleteCommunityButton({
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="font-label-sm text-label-sm text-error hover:opacity-80 transition-opacity"
-      >
-        Delete community
-      </button>
+      <MoreMenu
+        up
+        items={[{ label: "Delete community", danger: true, onClick: () => setOpen(true) }]}
+      />
 
       {open && (
         <div
@@ -88,7 +86,7 @@ export default function DeleteCommunityButton({
               </span>
               <div className="min-w-0">
                 <h2 className="font-headline-md text-headline-md text-on-background">
-                  Delete this community?
+                  Delete &ldquo;{communityName}&rdquo;?
                 </h2>
 
                 {projectCount > 0 && (

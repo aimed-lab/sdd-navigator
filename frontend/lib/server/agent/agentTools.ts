@@ -71,7 +71,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   tool({
     name: "list_my_pages",
     description:
-      "List the living pages the researcher owns plus the team pages they are a member of, with visibility, role and how many new items arrived in the last 7 days.",
+      "List the wiki pages the researcher owns plus the team pages they are a member of, with visibility, role and how many new items arrived in the last 7 days.",
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
     needs_user_token: true,
     changes_data: false,
@@ -80,7 +80,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   tool({
     name: "get_page",
     description:
-      "Read one living page: its notes with numbered citations, what was added in the last 30 days, and source counts by kind. " +
+      "Read one wiki page: its notes with numbered citations, what was added in the last 30 days, and source counts by kind. " +
       "When the caller owns the page it also lists the team as members [{user_id, name, email, role}]. " +
       "Returns 404 for a page that does not exist or that the researcher is not allowed to see (the two are indistinguishable on purpose).",
     input_schema: { type: "object", properties: { slug: SLUG }, required: ["slug"], additionalProperties: false },
@@ -91,7 +91,7 @@ export const TOOL_SPECS: ToolSpec[] = [
   tool({
     name: "create_page",
     description:
-      "Create a living page on a topic: it researches the topic now (about a minute), then keeps itself updated. " +
+      "Create a wiki page on a topic: it researches the topic now (about a minute), then keeps itself updated. " +
       "visibility: 'private' = only the researcher; 'team' = the researcher plus people they add; 'public' = anyone can read it. " +
       "Ask the researcher which visibility they want; do not choose for them. " +
       "Call with preview:true first: it returns what would be created and any existing near-identical PUBLIC page the researcher may prefer to follow.",

@@ -1,6 +1,6 @@
 "use client";
 
-// Owner-only controls on a living page: visibility (with a confirm before
+// Owner-only controls on a wiki page: visibility (with a confirm before
 // making a page Public), "Keep this page updated", and deleting the page.
 //
 // Rendered only for the owner (app/pages/[slug]/page.tsx) as a convenience;
@@ -14,6 +14,7 @@ import {
   setRefreshEnabledAction,
   setVisibilityAction,
 } from "@/app/pages/[slug]/actions";
+import MoreMenu from "@/components/MoreMenu";
 import { VISIBILITY_INFO, type PageVisibility } from "@/lib/server/pages/pageViewHelpers";
 
 const OPTIONS: PageVisibility[] = ["private", "team", "public"];
@@ -129,7 +130,7 @@ export default function PageControls({
     setError(null);
     const res = await deletePageAction(pageId);
     if (res.ok) {
-      router.push("/pages");
+      router.push("/pages?deleted=1");
       router.refresh();
     } else {
       setBusy(false);
@@ -140,7 +141,7 @@ export default function PageControls({
   return (
     <section className="glass-panel rounded-2xl p-6 flex flex-col gap-6" aria-label="Page settings">
       <div>
-        <h2 className="font-label-md text-label-md text-on-background">Who can see this page</h2>
+        <h2 className="font-label-md text-label-md text-on-background">Who can see this wiki page</h2>
         <div role="radiogroup" aria-label="Visibility" className="mt-3 flex flex-wrap gap-2">
           {OPTIONS.map((v) => (
             <button
@@ -197,13 +198,11 @@ export default function PageControls({
       )}
 
       <div>
-        <button
-          type="button"
-          onClick={() => setConfirmDelete(true)}
-          className="font-label-sm text-label-sm text-secondary/60 hover:text-error transition-colors"
-        >
-          Delete page
-        </button>
+        <MoreMenu
+          up
+          className="-ml-2"
+          items={[{ label: "Delete wiki page", danger: true, onClick: () => setConfirmDelete(true) }]}
+        />
       </div>
 
       {confirmPublic && (
@@ -219,9 +218,9 @@ export default function PageControls({
       )}
       {confirmDelete && (
         <Dialog
-          title="Delete this page?"
-          body={`"${title}", its notes, sources and update history will be permanently removed, and team members lose access. This can't be undone.`}
-          confirmLabel="Delete page"
+          title={`Delete "${title}"?`}
+          body="Its notes, sources and update history will be removed, and team members lose access. This can't be undone."
+          confirmLabel="Delete wiki page"
           busy={busy}
           error={error}
           danger
