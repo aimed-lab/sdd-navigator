@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { UnauthorizedError } from "@/lib/auth";
 import { deletePage, setPageRefreshEnabled, setPageVisibility } from "@/lib/server/pages/pageAdmin";
+import { addPageNote, deletePageNote, updatePageNote } from "@/lib/server/pages/pageNoteEdit";
 import { addPageMember, removePageMember, type PageMemberRole } from "@/lib/server/pages/pageMembers";
 import type { PageVisibility } from "@/lib/server/pages/pageViewHelpers";
 
@@ -84,5 +85,42 @@ export async function removeMemberAction(pageId: string, slug: string, userId: s
     return { ok: true };
   } catch (e) {
     return fail(e, "removeMemberAction");
+  }
+}
+
+// ── editing the sections (notes) of a page ───────────────────────────────────
+// Anyone who can edit the page may change or add a section; only the page owner
+// may delete one. lib/server/pages/pageNoteEdit.ts and RLS are the gate.
+
+export async function editNoteAction(pageId: string, slug: string, noteId: string, title: string, body: string): Promise<ActionResult> {
+  try {
+    const r = await updatePageNote(pageId, noteId, title, body);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/pages/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "editNoteAction");
+  }
+}
+
+export async function addNoteAction(pageId: string, slug: string, title: string, body: string): Promise<ActionResult> {
+  try {
+    const r = await addPageNote(pageId, title, body);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/pages/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "addNoteAction");
+  }
+}
+
+export async function deleteNoteAction(pageId: string, slug: string, noteId: string): Promise<ActionResult> {
+  try {
+    const r = await deletePageNote(pageId, noteId);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/pages/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "deleteNoteAction");
   }
 }

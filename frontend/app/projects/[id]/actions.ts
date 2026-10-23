@@ -25,6 +25,7 @@ import {
   type ChecklistStatus,
   type SharedFolder,
 } from "@/lib/server/projects";
+import { createProjectPage } from "@/lib/server/pages/projectPages";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -311,5 +312,30 @@ export async function setSharedFolderAction(
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to set the shared folder." };
     console.error("setSharedFolderAction failed", e);
     return { ok: false, error: "Couldn't save the folder link. Please try again." };
+  }
+}
+
+// ── wiki pages in the project ────────────────────────────────────────────────
+
+export type CreateProjectWikiPageResult = { ok: true; slug: string } | { ok: false; error: string };
+
+/** Add a wiki page to the project (optionally under a parent page). The page is
+ *  researched from its title, which takes about a minute. Membership is checked
+ *  in lib/server/pages/projectPages.ts and again by the database. */
+export async function createProjectWikiPageAction(
+  projectId: string,
+  title: string,
+  parentPageId?: string | null
+): Promise<CreateProjectWikiPageResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const result = await createProjectPage({ projectId, title, parentPageId });
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, slug: result.slug };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to add a wiki page." };
+    console.error("createProjectWikiPageAction failed", e);
+    return { ok: false, error: "Couldn't create the wiki page. Please try again." };
   }
 }

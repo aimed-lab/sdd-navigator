@@ -360,7 +360,7 @@ export default function TeamSection({
               className="btn-primary px-5 py-2 rounded-lg font-label-md text-label-md flex items-center gap-2 shrink-0 disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-[18px]">add</span>
-              {adding ? "Adding…" : "Add member"}
+              {adding ? "Adding…" : "Invite by email"}
             </button>
           </form>
         )}

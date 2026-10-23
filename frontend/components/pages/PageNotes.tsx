@@ -6,9 +6,28 @@
 import SectionHeading from "@/components/explore/SectionHeading";
 import type { PageNoteView } from "@/lib/server/pages/pageView";
 import { parseNoteBody, type EvidenceRow } from "@/lib/server/pages/pageViewHelpers";
+import { editedByLabel } from "@/lib/server/pages/pageEditCore";
+import AddSection from "./AddSection";
+import NoteSection from "./NoteSection";
 
-export default function PageNotes({ notes, evidence }: { notes: PageNoteView[]; evidence: EvidenceRow[] }) {
-  if (notes.length === 0) return null;
+export default function PageNotes({
+  notes,
+  evidence,
+  pageId,
+  pageSlug,
+  canEdit = false,
+  isOwner = false,
+}: {
+  notes: PageNoteView[];
+  evidence: EvidenceRow[];
+  pageId: string;
+  pageSlug: string;
+  /** May the viewer edit sections and add one (owner, page editor, project member)? */
+  canEdit?: boolean;
+  /** Only the owner may delete a section. */
+  isOwner?: boolean;
+}) {
+  if (notes.length === 0 && !canEdit) return null;
   const evidenceById = new Map(evidence.map((e) => [e.id, e]));
   const slugByTitle = new Map(notes.map((n) => [n.title.toLowerCase(), n.slug]));
 
@@ -25,15 +44,22 @@ export default function PageNotes({ notes, evidence }: { notes: PageNoteView[]; 
             .filter((c): c is { n: number; item: EvidenceRow } => !!c.item);
 
           return (
-            <article key={note.id} id={`note-${note.slug}`} className="scroll-mt-24">
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h3 className="font-title text-[24px] leading-tight font-medium text-on-background">{note.title}</h3>
-                {note.is_human_edited && (
-                  <span className="font-label-sm text-label-sm text-secondary">
-                    {note.editedByViewer ? "Edited by you" : "Edited by a person"}
-                  </span>
-                )}
-              </div>
+            <NoteSection
+              key={note.id}
+              pageId={pageId}
+              pageSlug={pageSlug}
+              noteId={note.id}
+              noteSlug={note.slug}
+              title={note.title}
+              body={note.body}
+              editedLabel={editedByLabel({
+                isHumanEdited: note.is_human_edited,
+                editedByViewer: note.editedByViewer,
+                name: note.editedByName,
+              })}
+              canEdit={canEdit}
+              isOwner={isOwner}
+            >
               <div className="mt-3 flex flex-col gap-3">
                 {paragraphs.map((parts, i) => (
                   <p key={i} className="font-body-md text-body-md text-on-background leading-relaxed">
@@ -90,9 +116,10 @@ export default function PageNotes({ notes, evidence }: { notes: PageNoteView[]; 
                   ))}
                 </ol>
               )}
-            </article>
+            </NoteSection>
           );
         })}
+        {canEdit && <AddSection pageId={pageId} pageSlug={pageSlug} />}
       </div>
     </section>
   );
