@@ -221,7 +221,10 @@ export const TOOL_SPECS: ToolSpec[] = [
   tool({
     name: "create_community",
     description:
-      "Create a community; the researcher becomes its admin. New communities are by request (private). " +
+      "Create a TEAM or a COMMUNITY. A team is a small private group anyone can make (the researcher becomes its lead, people join by link or QR code, " +
+      "its content is for members only). A community is public and long-lived and only site admins can create one. " +
+      "If the researcher is NOT a site admin this always creates a team and says so (\"I created a team for you\"). " +
+      "If they ARE a site admin and you leave kind out, the call fails with choose_kind: ask which they want. " +
       "Search first with search_communities and, if anything similar exists, ask whether they would rather join it. " +
       "Call with preview:true first: it returns what would be created and any similar existing communities (similar_communities). " +
       "Show that to the researcher and get a clear yes before calling again without preview.",
@@ -230,6 +233,7 @@ export const TOOL_SPECS: ToolSpec[] = [
       properties: {
         name: { type: "string", description: "Community name.", minLength: 3, maxLength: 80 },
         purpose: { type: "string", description: "One line on what the community is for.", minLength: 3, maxLength: 300 },
+        kind: { type: "string", enum: ["team", "community"], description: "What to create. Needed for site admins; everyone else always gets a team." },
         preview: PREVIEW,
       },
       required: ["name", "purpose"],

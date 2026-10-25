@@ -71,7 +71,7 @@ export {
 // couldn't already look up directly. NULL community_id -> NULL here, same
 // as any other to-one embed with no matching row.
 const ENTRY_SELECT =
-  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, doi, tags, created_at, published_at, owner_id, community_id, key_facts, cta_label, cta_url, event_starts_at, event_location, featured, community:communities(id, slug, name)";
+  "id, type, title, headline, standfirst, article_body, slug, description, authors, link, image_url, journal, doi, tags, created_at, published_at, owner_id, community_id, key_facts, cta_label, cta_url, event_starts_at, event_location, featured";
 
 /** Pull the embedded `community:communities(...)` object (see ENTRY_SELECT's
  *  own comment) into a ShowcaseCommunity, or null. Supabase can return this
@@ -83,7 +83,30 @@ function toCommunity(row: Record<string, unknown>): ShowcaseCommunity | null {
   if (!c || typeof c !== "object") return null;
   const obj = c as Record<string, unknown>;
   if (!obj.id) return null;
-  return { id: obj.id as string, slug: obj.slug as string, name: obj.name as string };
+  return {
+    id: obj.id as string,
+    slug: (obj.slug as string | null) ?? null,
+    name: obj.name as string,
+    kind: obj.kind === "team" ? "team" : "community",
+  };
+}
+
+/** Fills `row.community` for each row from community_labels(). Teams are not
+ *  public rows, so the name comes from that SECURITY DEFINER function: anyone
+ *  gets a team's NAME, but the slug (the way into a team) only comes back for a
+ *  community, or for the team's own members. A failed lookup leaves no label. */
+async function attachCommunities(rows: Record<string, unknown>[]): Promise<void> {
+  const ids = [...new Set(rows.map((r) => r.community_id as string | null).filter((x): x is string => !!x))];
+  if (ids.length === 0) return;
+  const db = await getDb();
+  if (!db) return;
+  const { data, error } = await db.rpc("community_labels", { p_ids: ids });
+  if (error || !Array.isArray(data)) return;
+  const byId = new Map((data as { id: string; name: string; slug: string | null; kind: string }[]).map((l) => [l.id, l]));
+  for (const r of rows) {
+    const l = byId.get(r.community_id as string);
+    r.community = l ? { id: l.id, slug: l.slug, name: l.name, kind: l.kind } : null;
+  }
 }
 
 function toEntry(
@@ -214,6 +237,7 @@ export async function listShowcase(
   const rows = (data as Record<string, unknown>[]).filter((r) =>
     matchesType(r.type as string | null, opts.type ?? "all")
   );
+  await attachCommunities(rows);
   const viewer = await getCurrentUser();
   const [owners, heroImages] = await Promise.all([
     ownerMap(db),
@@ -244,6 +268,7 @@ export async function listShowcaseByCommunity(communityId: string): Promise<Show
   if (error || !data) return [];
 
   const rows = data as Record<string, unknown>[];
+  await attachCommunities(rows);
   const viewer = await getCurrentUser();
   const [owners, heroImages] = await Promise.all([
     ownerMap(db),
@@ -268,6 +293,7 @@ export async function getShowcaseEntry(id: string): Promise<ShowcaseEntry | null
     .maybeSingle();
 
   if (error || !data) return null;
+  await attachCommunities([data as Record<string, unknown>]);
   const viewer = await getCurrentUser();
   const [owners, heroImages] = await Promise.all([
     ownerMap(db),
@@ -807,7 +833,7 @@ export async function removeShowcaseMedia(showcaseId: string, mediaId: string): 
 // ── public article page ──────────────────────────────────────────────────────
 
 const PUBLIC_ARTICLE_SELECT =
-  "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, tags, created_at, published_at, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, community:communities(id, slug, name)";
+  "id, slug, type, headline, standfirst, article_body, linkedin_post, title, authors, doi, link, journal, image_url, tags, created_at, published_at, owner_id, key_facts, cta_label, cta_url, quote, quote_by, share_text, event_starts_at, event_location, community_id";
 
 /** Look up a PUBLISHED article by slug, for the public /promote/[slug] page.
  *
@@ -834,6 +860,7 @@ export async function getPublishedArticleBySlug(slug: string): Promise<PublicArt
     .maybeSingle();
 
   if (error || !data) return null;
+  await attachCommunities([data as Record<string, unknown>]);
 
   // Owner name/affiliation via the SAME showcase_owners() function
   // ownerMap() wraps for the gallery — never a plain join on public.users

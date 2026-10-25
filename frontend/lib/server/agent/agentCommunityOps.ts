@@ -16,7 +16,8 @@ type Row = RankableCommunity & { id: string; slug: string; is_open: boolean };
 export const realCommunityOps: CommunityOps = {
   async search(db, query, limit) {
     const [list, counts] = await Promise.all([
-      db.from("communities").select("id, slug, name, description, is_open, explore_topics"),
+      // Communities only: teams are private groups and never show in a search.
+      db.from("communities").select("id, slug, name, description, is_open, explore_topics").eq("kind", "community"),
       db.rpc("community_member_counts"),
     ]);
     if (list.error || !Array.isArray(list.data)) throw list.error ?? new Error("communities unavailable");
@@ -75,13 +76,20 @@ export const realCommunityOps: CommunityOps = {
     return { ok: true, status };
   },
 
-  async create(db, name, purpose) {
-    const { data, error } = await db.rpc("create_community_with_admin", { p_name: name, p_description: purpose }).single();
+  async create(db, name, purpose, kind) {
+    const { data, error } = await db
+      .rpc("create_community_with_admin", { p_name: name, p_description: purpose, p_kind: kind })
+      .single();
     if (error || !data) {
       console.error("agent create_community failed", error);
-      return { ok: false, error: "Couldn't create the community." };
+      return { ok: false, error: `Couldn't create the ${kind}.` };
     }
     const row = data as { id: string; slug: string };
     return { ok: true, id: row.id, slug: row.slug };
+  },
+
+  async isSiteAdmin(db) {
+    const { data, error } = await db.rpc("is_site_admin");
+    return !error && data === true;
   },
 };

@@ -41,7 +41,15 @@ export type CommunityOps = {
     user: AgentContext["user"],
     community: { id: string; isOpen: boolean }
   ): Promise<{ ok: true; status: "active" | "pending" } | { ok: false; error: string }>;
-  create(db: AgentContext["db"], name: string, purpose: string): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }>;
+  /** `kind` 'team' for anyone; 'community' only works for a site admin. */
+  create(
+    db: AgentContext["db"],
+    name: string,
+    purpose: string,
+    kind: "team" | "community"
+  ): Promise<{ ok: true; id: string; slug: string } | { ok: false; error: string }>;
+  /** Is the researcher a site admin (the only people who can create communities)? */
+  isSiteAdmin(db: AgentContext["db"]): Promise<boolean>;
 };
 
 /** The side-effecting operations the handlers use, injected so tests can run
@@ -194,11 +202,31 @@ const createCommunityTool: ToolHandler = async ({ ctx, input, preview, origin })
   const c = needCtx(ctx);
   const name = String(input.name);
   const purpose = String(input.purpose);
+  const asked = input.kind === "team" || input.kind === "community" ? input.kind : null;
+
+  // Only site admins create communities. Anyone else gets a TEAM instead (and
+  // is told so). An admin who has not said which they want is asked.
+  const siteAdmin = await svc.communities.isSiteAdmin(c.db);
+  if (siteAdmin && !asked) {
+    return fail(
+      400,
+      "choose_kind",
+      "Ask the researcher whether they want a TEAM (small, private, for a few people) or a COMMUNITY (public, long-lived, many teams). Then call again with kind set to 'team' or 'community'."
+    );
+  }
+  const kind: "team" | "community" = siteAdmin ? (asked as "team" | "community") : "team";
+  const downgraded = !siteAdmin && asked === "community";
 
   if (preview) {
-    const similar = await svc.communities.search(c.db, `${name} ${purpose}`, COMMUNITY_MATCHES);
+    const similar = kind === "community" ? await svc.communities.search(c.db, `${name} ${purpose}`, COMMUNITY_MATCHES) : [];
     return ok({
-      would_create: { name, purpose, you_become: "admin", joining: "by request" },
+      would_create:
+        kind === "team"
+          ? { kind: "team", name, purpose, you_become: "lead", joining: "anyone with the link or QR code; the content is for members only" }
+          : { name, purpose, kind: "community", you_become: "admin", joining: "by request" },
+      note_to_say: downgraded
+        ? "Only site admins can create communities, so this creates a team for the researcher. Say so plainly."
+        : undefined,
       similar_communities: similar.map((s) => ({
         slug: s.slug,
         name: s.name,
@@ -215,9 +243,18 @@ const createCommunityTool: ToolHandler = async ({ ctx, input, preview, origin })
     });
   }
 
-  const r = await svc.communities.create(c.db, name, purpose);
+  const r = await svc.communities.create(c.db, name, purpose, kind);
   if (!r.ok) return fail(400, "request_failed", r.error);
-  return ok({ slug: r.slug, url: communityUrl(origin, r.slug), you_are: "admin" });
+  if (kind === "team") {
+    return ok({
+      created: "team",
+      slug: r.slug,
+      url: `${origin}/teams/${r.slug}`,
+      you_are: "lead",
+      say: `I created a team for you: ${name}.`,
+    });
+  }
+  return ok({ created: "community", slug: r.slug, url: communityUrl(origin, r.slug), you_are: "admin" });
 };
 
 // ── write tools (each honors preview) ────────────────────────────────────────

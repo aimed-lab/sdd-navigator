@@ -135,11 +135,11 @@ test("starters: each live chip starts a flow or fills the input", () => {
   assert.match(byId.create.hint ?? "", /private, team or public, keeps itself updated/);
 });
 
-test("the panel is offered on Explore and the /pages screens only", () => {
-  for (const ok of ["/explore", "/explore/egfr", "/explore/podcast", "/pages", "/pages/egfr-abc12"]) {
+test("the panel is offered on Explore, the /pages screens and a team's own page only", () => {
+  for (const ok of ["/explore", "/explore/egfr", "/explore/podcast", "/pages", "/pages/egfr-abc12", "/teams/kras-club-a1b2c3"]) {
     assert.equal(assistantAvailableOn(ok), true, ok);
   }
-  for (const no of ["/", "/projects", "/collaborate", "/pagesx", "/exploreme", "", null, undefined]) {
+  for (const no of ["/", "/projects", "/collaborate", "/pagesx", "/exploreme", "/teams", "/teams/new", "", null, undefined]) {
     assert.equal(assistantAvailableOn(no), false, String(no));
   }
 });

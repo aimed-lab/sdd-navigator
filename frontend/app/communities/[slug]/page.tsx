@@ -14,7 +14,7 @@
 // config, requests, add-by-email, roster, leave / delete) at the foot of Home.
 
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   claimPendingCommunityMemberships,
   getCommunityBySlug,
@@ -46,6 +46,8 @@ import {
   visibleTabs,
 } from "@/lib/server/communityHome/communityHome";
 import { getCurrentUser } from "@/lib/auth";
+import { listLinkedTeams } from "@/lib/server/teams/teams";
+import { plural } from "@/lib/server/teams/teamRules";
 import AddMemberByEmailForm from "@/components/communities/AddMemberByEmailForm";
 import PendingRequestsPanel from "@/components/communities/PendingRequestsPanel";
 import MemberRoster from "@/components/communities/MemberRoster";
@@ -93,6 +95,8 @@ export default async function CommunityDetailPage({
   const query = await searchParams;
   const community = await getCommunityBySlug(slug);
   if (!community) notFound();
+  // A team has its own page; an old or shared /communities link lands there.
+  if (community.kind === "team") redirect(`/teams/${slug}`);
 
   // Claim any community_members row added by email before this account
   // existed (a direct link or a QR code straight to this page never goes
@@ -124,10 +128,12 @@ export default async function CommunityDetailPage({
     : { count: 0, items: [] };
 
   // Admin-only reads (they degrade to [] for anyone else anyway).
-  const [pendingRequests, members, projects] = await Promise.all([
+  const [pendingRequests, members, projects, linkedTeams] = await Promise.all([
     membership.isAdmin ? listPendingRequests(community.id) : Promise.resolve([]),
     membership.isAdmin ? listCommunityMembers(community.id) : Promise.resolve([]),
     isMember ? listCommunityProjects(community.id) : Promise.resolve([]),
+    // Teams linked to this community: name and size only, for members.
+    isMember && tab === "home" ? listLinkedTeams(community.id) : Promise.resolve([]),
   ]);
 
   // The roster, when this viewer may see it. Its length (not the public stat)
@@ -317,6 +323,31 @@ export default async function CommunityDetailPage({
                   }
                 >
                   <CommunityProjectsList projects={projects} />
+                </CollapsibleSection>
+              )}
+
+              {isMember && (
+                <CollapsibleSection title="Teams" count={linkedTeams.length} defaultOpen>
+                  {linkedTeams.length === 0 ? (
+                    <p className="font-body-md text-body-md text-secondary">
+                      No teams yet. A team lead can link their team here from the team&apos;s settings. Only the team&apos;s name
+                      and size show; what a team shares stays private.
+                    </p>
+                  ) : (
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {linkedTeams.map((t) => (
+                        <li
+                          key={t.team_id}
+                          className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest px-4 py-3 flex items-center justify-between gap-3"
+                        >
+                          <span className="font-label-lg text-label-lg text-on-background break-words">{t.name}</span>
+                          <span className="font-body-sm text-body-sm text-secondary shrink-0">
+                            {plural(t.member_count, "member")}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </CollapsibleSection>
               )}
             </div>

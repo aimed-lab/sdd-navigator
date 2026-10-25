@@ -24,7 +24,10 @@ export default function CopyLinkButton({
   slug,
   label = "Copy link",
   communityId,
+  team = false,
 }: {
+  /** Copy the team's page (/teams/<slug>) rather than the community's. */
+  team?: boolean;
   slug: string;
   /** Pass for an active member: copying the link ticks "Invite a colleague"
    *  on their welcome checklist. */
@@ -38,7 +41,7 @@ export default function CopyLinkButton({
     <button
       type="button"
       onClick={async () => {
-        const path = `/communities/${slug}`;
+        const path = `${team ? "/teams" : "/communities"}/${slug}${team ? "?join=1" : ""}`;
         const url = typeof window !== "undefined" ? window.location.origin + path : path;
         try {
           await navigator.clipboard.writeText(url);

@@ -10,7 +10,41 @@
 
 export const ASSISTANT_EVENT = "sdd:assistant";
 
-export type AssistantRequest = { text: string; mode: "send" | "fill" };
+/** A team the page the assistant makes should be added to ("Make learning
+ *  material" on a team page). */
+export type AssistantTeam = { id: string; name: string; slug: string };
+
+// The team whose page is open. The team page registers it so the panel knows
+// the team even when the message is typed by hand (not sent from the tile).
+// A window global, not only an event: the page's effect can run before the
+// panel's listener exists on a first load.
+declare global {
+  interface Window {
+    __sddPageTeam?: AssistantTeam | null;
+  }
+}
+
+export function setPageTeam(team: AssistantTeam | null): void {
+  if (typeof window === "undefined") return;
+  window.__sddPageTeam = team;
+}
+
+export function getPageTeam(): AssistantTeam | null {
+  return typeof window === "undefined" ? null : (window.__sddPageTeam ?? null);
+}
+
+export type AssistantRequest = { text: string; mode: "send" | "fill"; team?: AssistantTeam };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function parseTeam(raw: unknown): AssistantTeam | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const t = raw as Record<string, unknown>;
+  const name = typeof t.name === "string" ? t.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  const slug = typeof t.slug === "string" && /^[a-z0-9-]{1,200}$/.test(t.slug) ? t.slug : "";
+  if (typeof t.id !== "string" || !UUID_RE.test(t.id) || !name || !slug) return undefined;
+  return { id: t.id.toLowerCase(), name, slug };
+}
 
 const MAX_TEXT = 500;
 
@@ -20,7 +54,8 @@ export function parseAssistantRequest(raw: unknown): AssistantRequest | null {
   const r = raw as Record<string, unknown>;
   const text = typeof r.text === "string" ? r.text.trim().slice(0, MAX_TEXT) : "";
   if (!text) return null;
-  return { text, mode: r.mode === "fill" ? "fill" : "send" };
+  const team = parseTeam(r.team);
+  return { text, mode: r.mode === "fill" ? "fill" : "send", ...(team ? { team } : {}) };
 }
 
 /** Opens the assistant panel and sends (or fills) `text`. Safe to call on the server (does nothing). */

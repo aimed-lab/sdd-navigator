@@ -71,7 +71,9 @@ import {
 } from "@/lib/server/assistant/assistantAnswer";
 import type { ExploreResponse, ExploreSection } from "@/types/explore";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
-import { ASSISTANT_EVENT, parseAssistantRequest, type AssistantRequest } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
+import { canCreateCommunityAction } from "@/app/communities/actions";
+import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
 import {
   afterDuplicateChoice,
   needsEarlyDuplicateCheck,
@@ -311,6 +313,15 @@ export default function AssistantChat() {
   const [draft, setDraft] = useState<CreateCommunityAction | null>(null);
   const [draftStage, setDraftStage] = useState<DraftStage>("edit");
   const [autoSend, setAutoSend] = useState<string | null>(null);
+  // "Make learning material" on a team page: the page made next is added to
+  // this team. Cleared by New chat or by a request from anywhere else.
+  const [team, setTeam] = useState<AssistantTeam | null>(null);
+  // Whether the page just made was added to that team (null: no team involved).
+  const [teamAdded, setTeamAdded] = useState<boolean | null>(null);
+  // Whether the signed-in person is a site admin (only they may start a
+  // community; everyone else's draft becomes a team). Asked when a draft opens.
+  const [siteAdmin, setSiteAdmin] = useState<boolean | null>(null);
+  const [draftKind, setDraftKind] = useState<"team" | "community" | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Topics the save-as-a-page offer was already shown for in this chat.
@@ -321,6 +332,16 @@ export default function AssistantChat() {
   const skipDup = useRef<string | null>(null);
 
   const available = assistantAvailableOn(pathname);
+
+  // The team a page made now is added to: the one the tile attached, else the
+  // team whose page is open (a message typed by hand there).
+  const pageSlug = teamSlugFromPath(pathname);
+  const activeTeam = (): AssistantTeam | null => {
+    if (team && (!pageSlug || team.slug === pageSlug)) return team;
+    const t = getPageTeam();
+    return pageSlug && t && t.slug === pageSlug ? t : null;
+  };
+  const shownTeam = activeTeam();
 
   // Restore the conversation (e.g. after the sign-in round trip) and the width.
   useEffect(() => {
@@ -462,8 +483,15 @@ export default function AssistantChat() {
       // message's own topic (an older backend sends none). Whatever happens to
       // the panel's search below, the page still moves to the topic.
       // A community step is not an Explore search: the page stays where it is.
-      const topic = parsed.community || communityTurn ? "" : resolveTopic({ content, backendQuery: parsed.query });
-      if (topic && topic.toLowerCase() !== query.toLowerCase()) {
+      // On a team page the topic is only what follows "about:" (never the team
+      // name), and the page stays on the team: no jump to Explore.
+      const onTeam = !!activeTeam() || !!pageSlug;
+      const topic = parsed.community || communityTurn
+        ? ""
+        : onTeam
+          ? teamTopicFromMessage(content)
+          : resolveTopic({ content, backendQuery: parsed.query });
+      if (!onTeam && topic && topic.toLowerCase() !== query.toLowerCase()) {
         router.push(`/explore/${encodeURIComponent(topic)}`);
       }
 
@@ -544,14 +572,27 @@ export default function AssistantChat() {
     if (!external || !restored || typing) return;
     const req = external;
     setExternal(null);
+    setTeam(req.team ?? null);
     setOpen(true);
     if (req.mode === "send") void send(req.text);
     else {
-      setInput(req.text);
+      // For a team page the prompt ends "about: " so the topic can be typed straight after.
+      setInput(req.team ? `${req.text} ` : req.text);
       setFocusTick((t) => t + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [external, restored, typing]);
+
+  // A draft needs to know who is asking: only site admins may start a
+  // community, so everyone else's draft is a team.
+  useEffect(() => {
+    if (!draft || siteAdmin !== null) return;
+    let live = true;
+    void canCreateCommunityAction().then((r) => live && setSiteAdmin(r.siteAdmin));
+    return () => {
+      live = false;
+    };
+  }, [draft, siteAdmin]);
 
   // After the matches showed there were none, go straight to the draft.
   useEffect(() => {
@@ -608,8 +649,15 @@ export default function AssistantChat() {
       window.location.assign(`/login?callbackUrl=${encodeURIComponent(pathname + window.location.search)}`);
       return;
     }
+    // Not a site admin: a team. A site admin picks (the draft card asks).
+    const kind = siteAdmin ? draftKind : "team";
+    if (!kind) {
+      setDraftStage({ error: "Choose a team or a community first." });
+      return;
+    }
     setDraftStage("creating");
-    const res = await createCommunityAction({ name: draft.name, purpose: draft.purpose });
+    const res = await createCommunityAction({ name: draft.name, purpose: draft.purpose, kind });
+    setDraftKind(kind);
     setDraftStage(res.ok ? { done: res.slug } : { error: res.error });
   };
 
@@ -657,7 +705,12 @@ export default function AssistantChat() {
       const res = await fetch("/api/pages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic: a.seed_input, title: a.title, visibility: a.visibility }),
+        body: JSON.stringify({
+          topic: a.seed_input,
+          title: a.title,
+          visibility: a.visibility,
+          ...(activeTeam() ? { team_id: activeTeam()!.id } : {}),
+        }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || typeof json?.slug !== "string") {
@@ -666,6 +719,10 @@ export default function AssistantChat() {
       setAction(null);
       setPickerAt(null);
       setPageCreated(true);
+      const addedTo = activeTeam();
+      setTeamAdded(addedTo ? json?.team?.added === true : null);
+      // Still on the team page: re-read it so the new page shows under Team wiki pages.
+      if (addedTo && json?.team?.added === true && pageSlug === addedTo.slug) router.refresh();
       setPhase({ kind: "done", slug: json.slug, visibility: a.visibility });
     } catch (e) {
       setPhase({ kind: "error", message: e instanceof Error ? e.message : "Couldn't create the page." });
@@ -690,6 +747,8 @@ export default function AssistantChat() {
     setJoinProgress({});
     setCommunitiesChecked(false);
     setDraft(null);
+    setDraftKind(null);
+    setTeam(null);
     setDraftStage("edit");
     setAutoSend(null);
     skipDup.current = null;
@@ -1016,6 +1075,9 @@ export default function AssistantChat() {
             {draft && !typing && (
               <CommunityDraft
                 draft={draft}
+                kind={siteAdmin ? draftKind : "team"}
+                canChoose={siteAdmin === true}
+                onKind={setDraftKind}
                 stage={draftStage}
                 signedIn={!!user}
                 authLoading={authLoading}
@@ -1030,6 +1092,12 @@ export default function AssistantChat() {
                 <p className="font-body-md text-body-md text-on-background">
                   Create {action.visibility} page &lsquo;{action.title}&rsquo;?
                 </p>
+                {shownTeam && (
+                  <p className="font-body-sm text-body-sm text-secondary">
+                    It will be added to your team {shownTeam.name}. {TEAM_VISIBLE_NOTE}
+                    {action.visibility === "private" ? " Its visibility will change from private to team." : ""}
+                  </p>
+                )}
                 {!authLoading && !user && (
                   <p className="font-body-sm text-body-sm text-secondary">You&apos;ll be asked to sign in first.</p>
                 )}
@@ -1113,7 +1181,18 @@ export default function AssistantChat() {
 
             {phase.kind === "done" && (
               <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3" role="status">
-                <p className="font-body-md text-body-md text-on-background">Your page is ready.</p>
+                <p className="font-body-md text-body-md text-on-background">
+                  {shownTeam && teamAdded === true
+                    ? `Your page is ready and added to ${shownTeam.name}.`
+                    : shownTeam && teamAdded === false
+                      ? `Your page is ready, but it could not be added to ${shownTeam.name}. Add it from Curate wiki pages on the team page.`
+                      : "Your page is ready."}
+                </p>
+                {shownTeam && teamAdded === true && (
+                  <a href={`/teams/${shownTeam.slug}`} className="font-label-md text-label-md text-primary hover:underline">
+                    Back to {shownTeam.name}
+                  </a>
+                )}
                 <a
                   href={`/pages/${phase.slug}${phase.visibility === "team" ? "#team" : ""}`}
                   className="btn-primary self-start px-5 py-2 rounded-lg font-label-md text-label-md"

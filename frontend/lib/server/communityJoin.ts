@@ -10,11 +10,13 @@
 import { createClient } from "@supabase/supabase-js";
 import { getSession, requireCurrentUser } from "@/lib/auth";
 import { getMembership } from "@/lib/server/communities";
+import { canEmailJoinAsCommunity, type CommunityKind } from "@/lib/server/teams/teamRules";
 import { createRateLimiter } from "@/lib/server/rateLimit";
 import {
   EMAIL_JOIN_MAX_PER_IP,
   EMAIL_JOIN_WINDOW_MS,
   runEmailJoin,
+  runTeamEmailJoin,
   type EmailJoinResult,
 } from "@/lib/server/communityHome/emailJoin";
 import { cleanProgress, type ChecklistProgress, type TrackedStep } from "@/lib/server/communityHome/checklist";
@@ -68,8 +70,14 @@ function serviceClient() {
 export async function joinOpenCommunityByEmail(
   communityId: string,
   email: unknown,
-  ip: string
+  ip: string,
+  /** The kind of the row `communityId` came from. A team is refused here (and
+   *  again in the SQL function): teams join through joinTeamByEmail(slug). */
+  kind: CommunityKind
 ): Promise<EmailJoinResult> {
+  if (!canEmailJoinAsCommunity(kind)) {
+    return { ok: false, reason: "error", error: "Community not found." };
+  }
   return runEmailJoin({
     communityId,
     email,
@@ -79,6 +87,23 @@ export async function joinOpenCommunityByEmail(
       const db = serviceClient();
       if (!db) throw new Error("service role key not configured");
       return db.rpc("join_open_community_by_email", { p_community_id: id, p_email: normalized });
+    },
+  });
+}
+
+/** Signed-out join of a TEAM by email. Takes the team's SLUG only; the database
+ *  function join_team_by_email resolves it to the id itself, and only for a
+ *  team, so no id from a form, URL or request body can reach it. */
+export async function joinTeamByEmail(slug: string, email: unknown, ip: string): Promise<EmailJoinResult> {
+  return runTeamEmailJoin({
+    slug,
+    email,
+    ip,
+    limiter: emailJoinLimiter,
+    rpc: async (s, normalized) => {
+      const db = serviceClient();
+      if (!db) throw new Error("service role key not configured");
+      return db.rpc("join_team_by_email", { p_slug: s, p_email: normalized });
     },
   });
 }

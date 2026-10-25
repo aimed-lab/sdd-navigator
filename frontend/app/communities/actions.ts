@@ -52,31 +52,43 @@ import {
   updateCommunityIsOpen,
 } from "@/lib/server/communityJoin";
 import { isTrackedStep } from "@/lib/server/communityHome/checklist";
+import { isSiteAdmin } from "@/lib/server/showcase";
 
 export type ActionResult = { ok: true; slug: string } | { ok: false; error: string };
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
 // ── demo path ────────────────────────────────────────────────────────────
 
-/** Create a community. Any signed-in user; always private; creator becomes
- *  admin — all enforced by create_community_with_admin (RPC), not here. */
+/** Create a community (site admins only) or a team (any signed-in user); the
+ *  creator becomes its admin ("Lead" on a team). Who may create what is
+ *  enforced by create_community_with_admin (RPC) and a trigger on communities,
+ *  not here. */
 export async function createCommunityAction(input: {
   name: string;
   purpose: string;
+  kind?: "community" | "team";
 }): Promise<ActionResult> {
+  const noun = input.kind === "team" ? "team" : "community";
   try {
     const result = await createCommunity(input);
     if (result.status !== "ok") return { ok: false, error: result.error };
 
     revalidatePath("/communities");
+    revalidatePath("/teams");
     return { ok: true, slug: result.slug };
   } catch (e) {
     if (e instanceof UnauthorizedError) {
-      return { ok: false, error: "Sign in to create a community." };
+      return { ok: false, error: `Sign in to create a ${noun}.` };
     }
     console.error("createCommunityAction failed", e);
-    return { ok: false, error: "Couldn't create the community. Please try again." };
+    return { ok: false, error: `Couldn't create the ${noun}. Please try again.` };
   }
+}
+
+/** Is the signed-in person a site admin? The assistant uses it to decide
+ *  between "I created a team for you" and "team or community?". */
+export async function canCreateCommunityAction(): Promise<{ siteAdmin: boolean }> {
+  return { siteAdmin: await isSiteAdmin() };
 }
 
 /** Add a member directly by email. Admin-only — see
@@ -803,7 +815,9 @@ export async function joinByEmailAction(
     const h = await headers();
     const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
 
-    const res = await joinOpenCommunityByEmail(community.id, email, ip);
+    // The id comes from the slug, read on the server; only a community may use
+    // this path (a team uses joinTeamByEmail with its slug).
+    const res = await joinOpenCommunityByEmail(community.id, email, ip, community.kind);
     return res.ok ? { ok: true, message: res.message } : { ok: false, error: res.error };
   } catch (e) {
     console.error("joinByEmailAction failed", e);

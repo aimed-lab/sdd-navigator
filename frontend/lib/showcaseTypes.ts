@@ -97,8 +97,11 @@ export type ShowcaseOwner = {
  *  above is resolved for a signed-out visitor. */
 export type ShowcaseCommunity = {
   id: string;
-  slug: string;
+  /** Null for a TEAM the viewer is not on: the name may be shown, but there is
+   *  nothing to link to (a team's slug is its key). */
+  slug: string | null;
   name: string;
+  kind: "community" | "team";
 };
 
 export type ShowcaseEntry = {

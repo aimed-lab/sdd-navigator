@@ -70,6 +70,10 @@ const COMMUNITIES = [
   { id: "c-closed", slug: "by-request", name: "Private lab group", purpose: "A closed group", memberCount: 4, isOpen: false, why: ["KRAS"] },
 ];
 
+// Whether the fake caller is a site admin, and the kind the last create asked for.
+let FAKE_SITE_ADMIN = false;
+let LAST_CREATE_KIND = "";
+
 function fakeCommunities(calls: Calls, membersOf: Record<string, "active" | "pending"> = {}): AgentServices["communities"] {
   return {
     search: async (_db, query, limit) => (calls.push(`communities.search:${query}`), COMMUNITIES.slice(0, limit)),
@@ -79,7 +83,12 @@ function fakeCommunities(calls: Calls, membersOf: Record<string, "active" | "pen
     },
     membership: async (_db, userId, communityId) => membersOf[`${userId}|${communityId}`] ?? null,
     join: async (_db, _user, c) => (calls.push(`communities.join:${c.id}:${c.isOpen ? "active" : "pending"}`), { ok: true, status: c.isOpen ? "active" : "pending" }),
-    create: async (_db, name) => (calls.push(`communities.create:${name}`), { ok: true, id: "new-id", slug: "new-community" }),
+    create: async (_db, name, _purpose, kind) => {
+      calls.push(`communities.create:${name}`);
+      LAST_CREATE_KIND = kind;
+      return { ok: true, id: "new-id", slug: "new-community" };
+    },
+    isSiteAdmin: async () => FAKE_SITE_ADMIN,
   };
 }
 
@@ -592,30 +601,76 @@ test("join_community: the caller cannot choose the outcome (no is_open or status
   }
 });
 
-test("create_community preview: describes the draft, lists similar communities, creates nothing", async () => {
+test("create_community preview (not a site admin): it would create a TEAM, and nothing is created", async () => {
+  FAKE_SITE_ADMIN = false;
   const { deps, calls, logs } = makeDeps();
   const res = await call(deps, "create_community", { ...VALID_BODIES.create_community, preview: true });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body.would_create, {
-    name: "KRAS in Pancreatic Cancer",
-    purpose: "Researchers working on KRAS in PDAC.",
-    you_become: "admin",
-    joining: "by request",
-  });
-  const similar = res.body.similar_communities as { slug: string; url: string }[];
-  assert.deepEqual(similar.map((s) => s.slug), ["kras-pdac", "by-request"]);
-  assert.equal(similar[0].url, `${ORIGIN}/communities/kras-pdac`);
-  assert.match(String(res.body.note), /join one before creating/);
+  const would = res.body.would_create as Record<string, unknown>;
+  assert.equal(would.kind, "team");
+  assert.equal(would.you_become, "lead");
+  assert.equal(res.body.note_to_say, undefined);
+  assert.deepEqual(res.body.similar_communities, [], "a team is not matched against communities");
   assert.deepEqual(calls.filter((c) => c.startsWith("communities.create")), []);
   assert.deepEqual(logs, []);
 });
 
-test("create_community: creates for the caller, returns the link, and logs the write", async () => {
+test("create_community (not a site admin) asking for a community still makes a team, and says so", async () => {
+  FAKE_SITE_ADMIN = false;
+  const { deps } = makeDeps();
+  const res = await call(deps, "create_community", { ...VALID_BODIES.create_community, kind: "community", preview: true });
+  assert.match(String(res.body.note_to_say), /Only site admins can create communities/);
+  assert.equal((res.body.would_create as Record<string, unknown>).kind, "team");
+});
+
+test("create_community (not a site admin): creates a team for the caller and links to /teams", async () => {
+  FAKE_SITE_ADMIN = false;
   const { deps, calls, logs } = makeDeps();
   const res = await call(deps, "create_community", VALID_BODIES.create_community);
-  assert.deepEqual(res.body, { slug: "new-community", url: `${ORIGIN}/communities/new-community`, you_are: "admin" });
+  assert.deepEqual(res.body, {
+    created: "team",
+    slug: "new-community",
+    url: `${ORIGIN}/teams/new-community`,
+    you_are: "lead",
+    say: "I created a team for you: KRAS in Pancreatic Cancer.",
+  });
+  assert.equal(LAST_CREATE_KIND, "team");
   assert.ok(calls.includes("communities.create:KRAS in Pancreatic Cancer"));
   assert.deepEqual(logs, [{ event: "agent_write", user_id: ALICE, tool: "create_community", ok: true, status: 200 }]);
+});
+
+test("create_community (site admin) must say whether they want a team or a community", async () => {
+  FAKE_SITE_ADMIN = true;
+  const { deps, calls } = makeDeps();
+  const res = await call(deps, "create_community", VALID_BODIES.create_community);
+  assert.equal(res.status, 400);
+  assert.equal((res.body.error as { code: string }).code, "choose_kind");
+  assert.deepEqual(calls.filter((c) => c.startsWith("communities.create")), []);
+  FAKE_SITE_ADMIN = false;
+});
+
+test("create_community (site admin) with a kind: community keeps the old behaviour, team makes a team", async () => {
+  FAKE_SITE_ADMIN = true;
+  const asCommunity = makeDeps();
+  const c = await call(asCommunity.deps, "create_community", { ...VALID_BODIES.create_community, kind: "community" });
+  assert.deepEqual(c.body, {
+    created: "community",
+    slug: "new-community",
+    url: `${ORIGIN}/communities/new-community`,
+    you_are: "admin",
+  });
+  assert.equal(LAST_CREATE_KIND, "community");
+
+  const preview = makeDeps();
+  const p = await call(preview.deps, "create_community", { ...VALID_BODIES.create_community, kind: "community", preview: true });
+  const similar = p.body.similar_communities as { slug: string }[];
+  assert.deepEqual(similar.map((s) => s.slug), ["kras-pdac", "by-request"]);
+
+  const asTeam = makeDeps();
+  const t = await call(asTeam.deps, "create_community", { ...VALID_BODIES.create_community, kind: "team" });
+  assert.equal(t.body.created, "team");
+  assert.equal(LAST_CREATE_KIND, "team");
+  FAKE_SITE_ADMIN = false;
 });
 
 test("create_community: needs a token, a name and a purpose; is rate limited like other writes", async () => {
