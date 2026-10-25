@@ -83,6 +83,8 @@ function fakeCommunities(calls: Calls, membersOf: Record<string, "active" | "pen
   };
 }
 
+const PROJECT_ID = "5b1f6a52-0c1e-4c58-9e0a-3f1d2a9c7b10";
+
 function fakeServices(
   calls: Calls,
   visiblePageFor: (userId: string) => boolean,
@@ -91,6 +93,10 @@ function fakeServices(
   const rec = <T,>(name: string, value: T) => async (): Promise<T> => (calls.push(name), value);
   return {
     communities: fakeCommunities(calls, membersOf),
+    projects: {
+      list: async () => (calls.push("projects.list"), [{ id: PROJECT_ID, name: "CD38 Fibrosis", label: "ColaboFest 2026", challenge_key: "colabofest_2026", my_role: "lead", team_size: 3 }]),
+      status: async (_db: unknown, id: string) => (calls.push("projects.status"), id === PROJECT_ID ? ({ id, project: "CD38 Fibrosis", status: "On track", checklists: [], overdue_items: [], open_help_requests: [], latest_updates: [], wiki_pages: [] } as never) : null),
+    },
     listMyPages: rec("listMyPages", { status: "ok", pages: [] }),
     getPageView: (async (_slug: string, ctx?: { user: { id: string } }) => {
       calls.push("getPageView");
@@ -161,6 +167,8 @@ const call = (deps: AgentDeps, tool: string, body: unknown, token: string | null
 
 const VALID_BODIES: Record<string, Record<string, unknown>> = {
   list_my_pages: {},
+  list_my_projects: {},
+  get_project_status: { project_id: PROJECT_ID },
   get_page: { slug: "egfr-abc12" },
   create_page: { title: "EGFR in lung cancer", seed_input: "EGFR lung cancer", visibility: "private" },
   add_member: { slug: "egfr-abc12", email: "bob@x.org", role: "viewer" },
@@ -625,4 +633,25 @@ test("create_community: needs a token, a name and a purpose; is rate limited lik
   assert.equal((await call(deps, "create_community", { name: "Fine name" })).status, 400);
   assert.equal((await call(deps, "create_community", VALID_BODIES.create_community)).status, 200);
   assert.equal((await call(deps, "create_community", VALID_BODIES.create_community)).status, 429);
+});
+
+test("list_my_projects and get_project_status read with the researcher's own client", async () => {
+  const { deps, calls } = makeDeps();
+  const list = await call(deps, "list_my_projects", {});
+  assert.equal(list.status, 200);
+  assert.equal((list.body.projects as { name: string }[])[0].name, "CD38 Fibrosis");
+  const one = await call(deps, "get_project_status", { project_id: PROJECT_ID });
+  assert.equal(one.status, 200);
+  assert.equal(one.body.project, "CD38 Fibrosis");
+  assert.ok(calls.includes("projects.list") && calls.includes("projects.status"));
+});
+
+test("get_project_status: an unknown or malformed project id is the same 404", async () => {
+  const { deps } = makeDeps();
+  for (const id of ["5b1f6a52-0c1e-4c58-9e0a-3f1d2a9c7b99", "not-a-uuid-at-all", "../../etc/passwd/x"]) {
+    const res = await call(deps, "get_project_status", { project_id: id });
+    assert.equal(res.status, 404, id);
+  }
+  const missing = await call(deps, "get_project_status", {});
+  assert.equal(missing.status, 400);
 });

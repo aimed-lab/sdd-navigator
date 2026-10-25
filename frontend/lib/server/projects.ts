@@ -25,6 +25,7 @@
 //      the caller's server clock against it before writing anything. A
 //      client-side deadline check is a courtesy for the UI, never the gate.
 
+import { assigneeAllowed, isListKey, parseDueDate, parseGithubUrl, type ListKey } from "@/lib/server/projectWorkspace/status";
 import { getCurrentUser, getDb, requireCurrentUser, type Db } from "@/lib/auth";
 import type { CreateProjectInput, MyProjectSummary } from "@/lib/projectTypes";
 import { classifyChecklistItem } from "@/lib/server/checklistClassify";
@@ -52,7 +53,7 @@ export type ProjectMember = {
   id: string;
   email: string;
   user_id: string | null;
-  role: "lead" | "member";
+  role: "lead" | "manager" | "member";
   created_at: string;
   // Resolved via project_member_names() (2026-08-07_project_member_names.sql),
   // NOT a join on public.users — that table's own SELECT policy
@@ -117,6 +118,14 @@ export type ChecklistItem = {
   // classification failed) -> "Ask for help". Exactly one of those two
   // ever renders for a given item — see ChecklistSection.tsx.
   matched_capabilities: string[];
+  // Which of the project's lists the item is on (2026-10-27_checklist_owners_due.sql):
+  // 'team' (Team tasks), or for a challenge project 'sparc' / 'southern_research'.
+  list_key: ListKey;
+  // The member who owns the item, with their name when it can be shown, and an
+  // optional due date (YYYY-MM-DD).
+  assignee_id: string | null;
+  assignee_name: string | null;
+  due_date: string | null;
 };
 
 // projects.shared_folder_url/_set_by/_set_at — a team pastes a link to
@@ -188,6 +197,10 @@ export type ProjectDetail = {
   // (lib/server/projects.ts:submitProposal), so deletion is the one thing
   // left that checks this instead of is_lead.
   is_creator: boolean;
+  // The viewer's role on this project (lead, manager or member).
+  viewer_role: "lead" | "manager" | "member";
+  // The project's GitHub link (2026-10-27_project_github_url.sql), or null.
+  github_url: string | null;
   members: ProjectMember[];
   // Null for every project without challenge_key set, AND for a
   // challenge project that hasn't saved any proposal fields yet — both
@@ -388,7 +401,7 @@ export async function listMyProjects(): Promise<ListMyProjectsResult> {
   for (const row of (membersRes.data ?? []) as {
     project_id: string;
     user_id: string | null;
-    role: "lead" | "member";
+    role: "lead" | "manager" | "member";
   }[]) {
     memberCounts.set(row.project_id, (memberCounts.get(row.project_id) ?? 0) + 1);
     if (row.user_id === viewer.id && row.role === "lead") viewerIsLeadOf.add(row.project_id);
@@ -430,7 +443,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
     .select(
       "id, name, description, description_capabilities, description_capabilities_gate_version, " +
         "lead_id, deadline, challenge_key, target, indication, modality, stage, " +
-        "shared_folder_url, shared_folder_set_by, shared_folder_set_at, community_id"
+        "shared_folder_url, shared_folder_set_by, shared_folder_set_at, community_id, github_url"
     )
     .eq("id", id)
     .maybeSingle();
@@ -465,7 +478,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
       db.rpc("project_member_names", { project_ids: [id] }),
       db
         .from("checklist_items")
-        .select("id, label, status, position, created_at, updated_at, matched_capabilities")
+        .select("id, label, status, position, created_at, updated_at, matched_capabilities, list_key, assignee_id, due_date")
         .eq("project_id", id)
         .order("position", { ascending: true }),
       // Which checklist items already have a Collaborate post attached —
@@ -578,6 +591,10 @@ export async function getProject(id: string): Promise<GetProjectResult> {
         (m) => m.user_id === viewer.id && m.role === "lead"
       ),
       is_creator: row.lead_id === viewer.id,
+      viewer_role: (((membersRes.data ?? []) as { user_id: string | null; role: string }[]).find(
+        (m) => m.user_id === viewer.id
+      )?.role ?? "member") as "lead" | "manager" | "member",
+      github_url: (row.github_url as string | null) ?? null,
       members: ((membersRes.data ?? []) as Record<string, unknown>[]).map((m) => {
         const userId = (m.user_id as string | null) ?? null;
         const identity = userId ? names.get(userId) : undefined;
@@ -585,7 +602,7 @@ export async function getProject(id: string): Promise<GetProjectResult> {
           id: m.id as string,
           email: m.email as string,
           user_id: userId,
-          role: m.role as "lead" | "member",
+          role: m.role as "lead" | "manager" | "member",
           created_at: m.created_at as string,
           name: identity?.name ?? null,
           profile_slug: identity?.profile_slug ?? null,
@@ -617,6 +634,10 @@ export async function getProject(id: string): Promise<GetProjectResult> {
           matched_capabilities: Array.isArray(c.matched_capabilities)
             ? (c.matched_capabilities as string[])
             : [],
+          list_key: isListKey(c.list_key) ? c.list_key : "team",
+          assignee_id: (c.assignee_id as string | null) ?? null,
+          assignee_name: c.assignee_id ? names.get(c.assignee_id as string)?.name ?? null : null,
+          due_date: (c.due_date as string | null) ?? null,
         };
       }),
       shared_folder: sharedFolderUrl
@@ -758,7 +779,8 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
  *  claim_pending_project_memberships) is the backstop if this ever misses. */
 export async function addProjectMember(
   projectId: string,
-  email: string
+  email: string,
+  role: "member" | "manager" = "member"
 ): Promise<AddMemberResult> {
   const { user, db } = await requireCurrentUser();
 
@@ -794,7 +816,7 @@ export async function addProjectMember(
     .insert({
       project_id: projectId,
       email: normalized,
-      role: "member",
+      role: role === "manager" ? "manager" : "member",
       added_by: user.id,
       user_id: existingUserId,
     })
@@ -815,7 +837,7 @@ export async function addProjectMember(
       id: data.id as string,
       email: data.email as string,
       user_id: (data.user_id as string | null) ?? null,
-      role: data.role as "lead" | "member",
+      role: data.role as "lead" | "manager" | "member",
       created_at: data.created_at as string,
       // Linked immediately when an existing account was found above; name/
       // profile_slug aren't resolved here either way (a fresh add has no
@@ -1250,12 +1272,14 @@ const CHECKLIST_STATUSES: readonly ChecklistStatus[] = ["not_yet", "in_progress"
  *  the first item). */
 export async function addChecklistItem(
   projectId: string,
-  label: string
+  label: string,
+  listKey: ListKey = "team"
 ): Promise<AddChecklistItemResult> {
   const { user, db } = await requireCurrentUser();
 
   const trimmed = label.trim();
   if (!trimmed) return { status: "error", error: "A checklist item needs a label." };
+  if (!isListKey(listKey)) return { status: "error", error: "Unknown list." };
 
   const { data: lastRow, error: lastErr } = await db
     .from("checklist_items")
@@ -1288,8 +1312,9 @@ export async function addChecklistItem(
       position: nextPosition,
       updated_by: user.id,
       matched_capabilities: matchedCapabilities,
+      list_key: listKey,
     })
-    .select("id, label, status, position, updated_at, matched_capabilities")
+    .select("id, label, status, position, updated_at, matched_capabilities, list_key")
     .single();
 
   if (error || !data) {
@@ -1313,9 +1338,69 @@ export async function addChecklistItem(
       matched_capabilities: Array.isArray(data.matched_capabilities)
         ? (data.matched_capabilities as string[])
         : [],
+      list_key: isListKey(data.list_key) ? data.list_key : "team",
+      assignee_id: null,
+      assignee_name: null,
+      due_date: null,
     },
     classificationFailed,
   };
+}
+
+/** Set (or clear, with null) the member who owns a checklist item. The owner must
+ *  be a member of the project: the app checks the list below and the database
+ *  trigger checks again. Any member may do this (the checklist's own rule). */
+export async function setChecklistAssignee(
+  projectId: string,
+  itemId: string,
+  assigneeId: string | null
+): Promise<ChecklistWriteResult> {
+  const { user, db } = await requireCurrentUser();
+  if (assigneeId !== null) {
+    const { data: members, error: mErr } = await db
+      .from("project_members")
+      .select("user_id")
+      .eq("project_id", projectId);
+    if (mErr) {
+      console.error("setChecklistAssignee: members lookup failed", mErr);
+      return { status: "error", error: "Couldn't check the team." };
+    }
+    const ids = ((members ?? []) as { user_id: string | null }[]).map((m) => m.user_id);
+    if (!assigneeAllowed(ids, assigneeId)) {
+      return { status: "error", error: "The owner has to be a member of this project." };
+    }
+  }
+  const { error } = await db
+    .from("checklist_items")
+    .update({ assignee_id: assigneeId, updated_by: user.id })
+    .eq("id", itemId)
+    .eq("project_id", projectId);
+  if (error) {
+    console.error("setChecklistAssignee: update failed", error);
+    return { status: "error", error: "Couldn't change the owner." };
+  }
+  return { status: "ok" };
+}
+
+/** Set (or clear, with null / "") the due date of a checklist item. */
+export async function setChecklistDueDate(
+  projectId: string,
+  itemId: string,
+  due: string | null
+): Promise<ChecklistWriteResult> {
+  const { user, db } = await requireCurrentUser();
+  const parsed = parseDueDate(due);
+  if (!parsed.ok) return { status: "error", error: parsed.error };
+  const { error } = await db
+    .from("checklist_items")
+    .update({ due_date: parsed.value, updated_by: user.id })
+    .eq("id", itemId)
+    .eq("project_id", projectId);
+  if (error) {
+    console.error("setChecklistDueDate: update failed", error);
+    return { status: "error", error: "Couldn't change the due date." };
+  }
+  return { status: "ok" };
 }
 
 /** Change an item's status (Not yet / In progress / Ready). The CLIENT does
@@ -1393,18 +1478,24 @@ export async function moveChecklistItem(
 ): Promise<ChecklistWriteResult> {
   const { db } = await requireCurrentUser();
 
-  const { data: items, error } = await db
+  const { data: all, error } = await db
     .from("checklist_items")
-    .select("id, position")
+    .select("id, position, list_key")
     .eq("project_id", projectId)
     .order("position", { ascending: true });
 
-  if (error || !items) {
+  if (error || !all) {
     console.error("moveChecklistItem: lookup failed", error);
     return { status: "error", error: "Couldn't reorder the checklist." };
   }
 
-  const rows = items as { id: string; position: number }[];
+  // Only within the item's own list: Team tasks and the partner checklists are
+  // ordered separately.
+  const target = (all as { id: string; position: number; list_key: string }[]).find((i) => i.id === itemId);
+  if (!target) return { status: "error", error: "That item no longer exists." };
+  const rows = (all as { id: string; position: number; list_key: string }[]).filter(
+    (i) => i.list_key === target.list_key
+  );
   const idx = rows.findIndex((i) => i.id === itemId);
   if (idx === -1) return { status: "error", error: "That item no longer exists." };
 
@@ -1510,6 +1601,78 @@ export async function setSharedFolder(
   }
 
   return { status: "ok", shared_folder: { url: safe, set_by_name: setByName, set_at: setAt } };
+}
+
+// ── GitHub link ──────────────────────────────────────────────────────────────
+
+export type SetGithubResult =
+  | { status: "ok"; github_url: string | null }
+  | { status: "error"; error: string };
+
+/** Set, change or clear (empty) the project's GitHub link. ANY MEMBER, the same
+ *  rule as the shared folder ("Projects: member update"); the database also
+ *  refuses anything that is not https://github.com/... */
+export async function setGithubUrl(projectId: string, url: string): Promise<SetGithubResult> {
+  const { db } = await requireCurrentUser();
+  const parsed = parseGithubUrl(url);
+  if (!parsed.ok) return { status: "error", error: parsed.error };
+  const { error } = await db.from("projects").update({ github_url: parsed.value }).eq("id", projectId);
+  if (error) {
+    console.error("setGithubUrl: update failed", error);
+    return { status: "error", error: "Couldn't save the GitHub link." };
+  }
+  return { status: "ok", github_url: parsed.value };
+}
+
+// ── manager role ─────────────────────────────────────────────────────────────
+
+export type SetMemberRoleResult =
+  | { status: "ok" }
+  | { status: "forbidden"; error: string }
+  | { status: "error"; error: string };
+
+/** A lead makes a member a manager, or a manager a member again. Leads are never
+ *  changed here (promote / step down have their own paths). Row-level security
+ *  and the enforce_min_one_lead trigger are the real gate. */
+export async function setMemberRole(
+  projectId: string,
+  memberId: string,
+  role: "member" | "manager"
+): Promise<SetMemberRoleResult> {
+  const { user, db } = await requireCurrentUser();
+  if (role !== "member" && role !== "manager") return { status: "error", error: "Unknown role." };
+
+  const gate = await loadProjectGate(db, projectId);
+  if (!gate) return { status: "error", error: "Project not found." };
+  if (!(await isCallerLead(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead can change roles." };
+  }
+
+  const { data: member, error: memberErr } = await db
+    .from("project_members")
+    .select("id, role")
+    .eq("id", memberId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  if (memberErr) {
+    console.error("setMemberRole: lookup failed", memberErr);
+    return { status: "error", error: "Couldn't verify that member." };
+  }
+  if (!member) return { status: "error", error: "That member no longer exists." };
+  if (member.role === "lead") return { status: "forbidden", error: "A lead's role can't be changed here." };
+  if (member.role === role) return { status: "ok" };
+
+  const { data, error } = await db
+    .from("project_members")
+    .update({ role })
+    .eq("id", memberId)
+    .eq("project_id", projectId)
+    .select("id");
+  if (error || !data || data.length === 0) {
+    console.error("setMemberRole: update failed", error);
+    return { status: "error", error: "Couldn't change that role." };
+  }
+  return { status: "ok" };
 }
 
 // ── project agent digest ──────────────────────────────────────────────────────

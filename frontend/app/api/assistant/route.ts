@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { getSession } from "@/lib/auth";
+import { realProjectOps, statusOfMyProjects } from "@/lib/server/agent/agentProjectOps";
+import { formatStatusReply, projectStatusQuestion } from "@/lib/server/projectWorkspace/statusReply";
 import { buildAssistantContext, cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
@@ -41,6 +44,24 @@ export async function POST(req: Request) {
   if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
     return NextResponse.json({ error: "The last message must be from the user." }, { status: 400 });
   }
+  // "Status of my projects" is answered here, from the researcher's own
+  // projects through their own session (row-level security), not by the model:
+  // the language model has no access to anyone's data.
+  const ask = projectStatusQuestion(messages[messages.length - 1].content);
+  if (ask.matches) {
+    const session = await getSession();
+    if (!session) return NextResponse.json({ reply: "Sign in to see the status of your projects." });
+    try {
+      const { projects, total } = await statusOfMyProjects(realProjectOps, session.db, session.user.id, {
+        colabofestOnly: ask.colabofestOnly,
+      });
+      return NextResponse.json({ reply: formatStatusReply(projects, { colabofestOnly: ask.colabofestOnly, total }) });
+    } catch (e) {
+      console.error("POST /api/assistant: project status failed", e);
+      return NextResponse.json({ reply: "Sorry, I couldn't load your projects right now. Please try again." });
+    }
+  }
+
   // query, page_created and communities_checked, nothing else (the last one
   // must reach the backend on every turn after the matches were shown).
   const context = buildAssistantContext(record.context);

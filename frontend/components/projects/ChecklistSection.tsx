@@ -37,11 +37,14 @@ import {
   addChecklistItemAction,
   deleteChecklistItemAction,
   moveChecklistItemAction,
+  setChecklistAssigneeAction,
+  setChecklistDueDateAction,
   updateChecklistLabelAction,
   updateChecklistStatusAction,
 } from "@/app/projects/[id]/actions";
 import type { ChecklistItem, ChecklistStatus } from "@/lib/server/projects";
 import { buildProjectContextLine } from "@/lib/projectTypes";
+import { dueLabel, isOverdue, listProgress, type ListKey } from "@/lib/server/projectWorkspace/status";
 import ServiceProvidersSection, {
   type SelectedServiceItem,
 } from "@/components/projects/ServiceProvidersSection";
@@ -155,7 +158,19 @@ export default function ChecklistSection({
   projectStage,
   items,
   isColabofest,
+  listKey = "team",
+  title = "Checklist",
+  members = [],
+  today = "",
 }: {
+  /** Which of the project's lists this section shows and adds to. */
+  listKey?: ListKey;
+  /** The group's heading ("Team tasks", "UAB SPARC checklist", ...). */
+  title?: string;
+  /** Project members who can own an item (people who have an account). */
+  members?: { user_id: string; label: string }[];
+  /** Today as YYYY-MM-DD, for the Overdue tag. */
+  today?: string;
   projectId: string;
   projectTarget: string | null;
   projectIndication: string | null;
@@ -227,6 +242,33 @@ export default function ChecklistSection({
     }
   };
 
+  const changeAssignee = async (item: ChecklistItem, next: string) => {
+    const previous = { id: item.assignee_id, name: item.assignee_name };
+    const nextName = members.find((m) => m.user_id === next)?.label ?? null;
+    setList((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, assignee_id: next || null, assignee_name: next ? nextName : null } : i))
+    );
+    setBusy(item.id, true);
+    const res = await setChecklistAssigneeAction(projectId, item.id, next || null);
+    setBusy(item.id, false);
+    if (!res.ok) {
+      setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, assignee_id: previous.id, assignee_name: previous.name } : i)));
+      setRowErrors((prev) => ({ ...prev, [item.id]: res.error }));
+    }
+  };
+
+  const changeDue = async (item: ChecklistItem, next: string) => {
+    const previous = item.due_date;
+    setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, due_date: next || null } : i)));
+    setBusy(item.id, true);
+    const res = await setChecklistDueDateAction(projectId, item.id, next);
+    setBusy(item.id, false);
+    if (!res.ok) {
+      setList((prev) => prev.map((i) => (i.id === item.id ? { ...i, due_date: previous } : i)));
+      setRowErrors((prev) => ({ ...prev, [item.id]: res.error }));
+    }
+  };
+
   const move = async (item: ChecklistItem, direction: "up" | "down") => {
     setBusy(item.id, true);
     const res = await moveChecklistItemAction(projectId, item.id, direction);
@@ -245,7 +287,7 @@ export default function ChecklistSection({
     setAddError(null);
     setAddWarning(null);
 
-    const res = await addChecklistItemAction(projectId, draft);
+    const res = await addChecklistItemAction(projectId, draft, listKey);
     if (res.ok) {
       setList((prev) => [...prev, res.item]);
       setDraft("");
@@ -342,7 +384,12 @@ export default function ChecklistSection({
           (isColabofest ? "mb-2" : "mb-8")
         }
       >
-        Checklist
+        {title}
+        {list.length > 0 && (
+          <span className="ml-3 font-label-md text-label-md text-secondary">
+            {listProgress(list).ready} of {listProgress(list).total} ready
+          </span>
+        )}
       </h2>
 
       {isColabofest && (
@@ -363,7 +410,9 @@ export default function ChecklistSection({
       )}
 
       {list.length === 0 ? (
-        <p className="font-body-md text-body-md text-secondary mb-6">No checklist items yet.</p>
+        <p className="font-body-md text-body-md text-secondary mb-6">
+          Nothing on this list yet. Type an item below and click Add item.
+        </p>
       ) : (
         <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-2xl overflow-hidden shadow-sm">
           {list.map((item, idx) => {
@@ -423,6 +472,43 @@ export default function ChecklistSection({
                       {item.collab_post_responses === 1 ? "response" : "responses"}
                     </Link>
                   )}
+
+                  {/* Owner, due date and the Overdue tag. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <label className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">
+                      Owner
+                      <select
+                        value={item.assignee_id ?? ""}
+                        disabled={busy}
+                        onChange={(e) => changeAssignee(item, e.target.value)}
+                        aria-label={`Owner of ${item.label}`}
+                        className="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 font-body-sm text-body-sm text-on-background"
+                      >
+                        <option value="">Nobody yet</option>
+                        {members.map((m) => (
+                          <option key={m.user_id} value={m.user_id}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">
+                      Due
+                      <input
+                        type="date"
+                        value={item.due_date ?? ""}
+                        disabled={busy}
+                        onChange={(e) => changeDue(item, e.target.value)}
+                        aria-label={`Due date of ${item.label}`}
+                        className="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1 font-body-sm text-body-sm text-on-background"
+                      />
+                    </label>
+                    {today && isOverdue(item, today) && (
+                      <span className="px-2 py-0.5 rounded-full bg-error/10 text-error font-label-sm text-label-sm">
+                        Overdue{dueLabel(item.due_date) ? ` · ${dueLabel(item.due_date)}` : ""}
+                      </span>
+                    )}
+                  </div>
 
                   {rowErrors[item.id] && (
                     <p className="mt-1 font-body-sm text-body-sm text-error" role="alert">

@@ -78,6 +78,31 @@ export const TOOL_SPECS: ToolSpec[] = [
     supports_preview: false,
   }),
   tool({
+    name: "list_my_projects",
+    description:
+      "List the projects the researcher is on (their team projects, such as ColaboFest 2026 projects): name, label, their role and team size. " +
+      "Use it to answer 'what projects am I on' and to find a project_id for get_project_status. Read-only.",
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    needs_user_token: true,
+    changes_data: false,
+    supports_preview: false,
+  }),
+  tool({
+    name: "get_project_status",
+    description:
+      "The status of one project the researcher is on: checklist progress per list, overdue items with their owners, unresolved help requests, " +
+      "the last 3 updates and the titles of the project's wiki pages. Returns 404 for a project that does not exist or that the researcher is not on. Read-only.",
+    input_schema: {
+      type: "object",
+      properties: { project_id: { type: "string", description: "The project's id, from list_my_projects.", minLength: 8, maxLength: 64 } },
+      required: ["project_id"],
+      additionalProperties: false,
+    },
+    needs_user_token: true,
+    changes_data: false,
+    supports_preview: false,
+  }),
+  tool({
     name: "get_page",
     description:
       "Read one wiki page: its notes with numbered citations, what was added in the last 30 days, and source counts by kind. " +

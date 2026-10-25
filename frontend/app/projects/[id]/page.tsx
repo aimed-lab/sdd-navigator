@@ -29,6 +29,10 @@ import { listProjectResources } from "@/lib/server/projectResources";
 import { listProjectPages } from "@/lib/server/pages/projectPages";
 import { listWikiNoteSummaries } from "@/lib/server/wikiNotes";
 import { parseTab, TAB_LABEL } from "@/lib/server/projectWorkspace/workspace";
+import { LIST_LABEL, todayIso, visibleLists } from "@/lib/server/projectWorkspace/status";
+import { listOpenHelp, listProjectUpdates } from "@/lib/server/projectWorkspace/updates";
+import UpdatesTab from "@/components/projects/workspace/UpdatesTab";
+import GithubLinkSection from "@/components/projects/workspace/GithubLinkSection";
 import {
   MODALITY_LABEL,
   PROJECT_STAGE_LABEL,
@@ -101,8 +105,14 @@ export default async function ProjectDetailPage({
   const pages = pagesResult?.status === "ok" ? pagesResult.pages : [];
 
   let content: React.ReactNode = null;
+  const today = todayIso();
+  // People who can own an item: members with an account, named when we can.
+  const owners = project.members
+    .filter((m): m is typeof m & { user_id: string } => !!m.user_id)
+    .map((m) => ({ user_id: m.user_id, label: m.name || m.email }));
 
   if (tab === "overview") {
+    const helpPosts = await listOpenHelp(project.id);
     content = (
       <>
         {pagesResult?.status === "error" && (
@@ -117,9 +127,22 @@ export default async function ProjectDetailPage({
           checklist={project.checklist}
           members={project.members}
           pages={pages}
+          today={today}
+          role={project.viewer_role}
+          helpPosts={helpPosts}
         />
       </>
     );
+  } else if (tab === "updates") {
+    const upd = await listProjectUpdates(project.id);
+    content =
+      upd.status === "ok" ? (
+        <UpdatesTab projectId={project.id} role={project.viewer_role} updates={upd.updates} />
+      ) : (
+        <p className="font-body-md text-body-md text-error" role="alert">
+          {upd.error}
+        </p>
+      );
   } else if (tab === "wiki") {
     const [resourcesResult, earlier] = await Promise.all([listProjectResources(project.id), listWikiNoteSummaries(project.id)]);
     const resources =
@@ -173,23 +196,37 @@ export default async function ProjectDetailPage({
       </div>
     );
   } else if (tab === "tasks") {
+    // Up to three lists: the two partner checklists (challenge projects only),
+    // then Team tasks. Each has its own Add item and progress count.
     content = (
       <div className="flex flex-col gap-4">
-        <ChecklistSection
-          projectId={project.id}
-          projectTarget={project.target}
-          projectIndication={project.indication}
-          projectModality={project.modality}
-          projectStage={project.stage}
-          items={project.checklist}
-          isColabofest={project.challenge_key === "colabofest_2026"}
-        />
+        {visibleLists(!!project.challenge_key).map((key) => (
+          <ChecklistSection
+            key={key}
+            listKey={key}
+            title={LIST_LABEL[key]}
+            members={owners}
+            today={today}
+            projectId={project.id}
+            projectTarget={project.target}
+            projectIndication={project.indication}
+            projectModality={project.modality}
+            projectStage={project.stage}
+            items={project.checklist.filter((i) => i.list_key === key)}
+            isColabofest={key === "team" && project.challenge_key === "colabofest_2026"}
+          />
+        ))}
         <hr className="border-t border-outline-variant/30 w-full mb-12" />
         <WhoCanHelpSection projectId={project.id} />
       </div>
     );
   } else if (tab === "files") {
-    content = <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />;
+    content = (
+      <>
+        <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />
+        <GithubLinkSection projectId={project.id} githubUrl={project.github_url} />
+      </>
+    );
   } else if (tab === "team") {
     content = (
       <TeamSection

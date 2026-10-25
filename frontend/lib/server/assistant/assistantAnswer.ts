@@ -8,6 +8,7 @@
 // plus a normal /api/explore response, so the panel needs no backend change.
 
 import type { ExploreSection } from "@/types/explore";
+import { projectStatusQuestion } from "../projectWorkspace/statusReply.ts";
 
 // ── what is the message about? ───────────────────────────────────────────────
 
@@ -59,6 +60,9 @@ const LEAD = new RegExp(
 export function topicFromMessage(text: string): string | null {
   const t = (text ?? "").trim();
   if (t.length < 3 || PICK.test(t) || CHITCHAT.test(t) || PAGE_REQUEST_NO_TOPIC.test(t)) return null;
+  // "What's the status of my projects?" is answered from the researcher's own
+  // projects, not a topic to search for.
+  if (projectStatusQuestion(t).matches) return null;
   const topic = t
     .replace(LEAD, "")
     .replace(/[\s?!.]+$/, "")

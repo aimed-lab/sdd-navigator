@@ -37,6 +37,7 @@ import { useRouter } from "next/navigation";
 import {
   addMemberAction,
   promoteMemberAction,
+  setMemberRoleAction,
   removeMemberAction,
   stepDownAction,
 } from "@/app/projects/[id]/actions";
@@ -141,6 +142,8 @@ export default function TeamSection({
   const router = useRouter();
 
   const [email, setEmail] = useState("");
+  const [asManager, setAsManager] = useState(false);
+  const [roleBusyId, setRoleBusyId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -160,7 +163,7 @@ export default function TeamSection({
     setAdding(true);
     setAddError(null);
 
-    const res = await addMemberAction(projectId, email);
+    const res = await addMemberAction(projectId, email, asManager ? "manager" : "member");
     if (res.ok) {
       setEmail("");
       router.refresh();
@@ -197,6 +200,16 @@ export default function TeamSection({
       setPromoteError(res.error);
     }
     setPromotingId(null);
+  };
+
+  const changeRole = async (memberId: string, role: "member" | "manager") => {
+    if (roleBusyId) return;
+    setRoleBusyId(memberId);
+    setPromoteError(null);
+    const res = await setMemberRoleAction(projectId, memberId, role);
+    if (res.ok) router.refresh();
+    else setPromoteError(res.error);
+    setRoleBusyId(null);
   };
 
   const stepDown = async () => {
@@ -255,6 +268,11 @@ export default function TeamSection({
                         Lead
                       </span>
                     )}
+                    {m.role === "manager" && (
+                      <span className="shrink-0 bg-tertiary/10 text-tertiary px-2 py-0.5 rounded-full font-label-sm text-[10px] uppercase tracking-wider">
+                        Manager
+                      </span>
+                    )}
                     {pending && m.role !== "lead" && (
                       <span className="shrink-0 bg-surface-dim text-secondary px-2 py-0.5 rounded-full font-label-sm text-[10px] uppercase tracking-wider">
                         Pending
@@ -285,9 +303,17 @@ export default function TeamSection({
               </div>
 
               {isLead && (
-                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-4 shrink-0">
-                  {m.role === "member" && (
+                <div className="md:opacity-0 md:group-hover:opacity-100 transition-opacity flex items-center gap-4 shrink-0">
+                  {(m.role === "member" || m.role === "manager") && (
                     <>
+                      <button
+                        type="button"
+                        onClick={() => changeRole(m.id, m.role === "manager" ? "member" : "manager")}
+                        disabled={roleBusyId === m.id}
+                        className="font-label-sm text-label-sm text-primary hover:underline disabled:opacity-50"
+                      >
+                        {m.role === "manager" ? "Make member" : "Make manager"}
+                      </button>
                       {!pending && (
                         <button
                           type="button"
@@ -354,6 +380,15 @@ export default function TeamSection({
               aria-label="Email address to invite"
               className="flex-1 bg-transparent border-none focus:ring-0 p-0 font-body-md text-body-md text-on-background placeholder:text-secondary/60 outline-none min-w-0"
             />
+            <select
+              value={asManager ? "manager" : "member"}
+              onChange={(e) => setAsManager(e.target.value === "manager")}
+              aria-label="Role for the new person"
+              className="bg-surface-container-low border border-outline-variant/40 rounded-md px-2 py-1.5 font-body-sm text-body-sm text-on-background shrink-0"
+            >
+              <option value="member">Member</option>
+              <option value="manager">Manager</option>
+            </select>
             <button
               type="submit"
               disabled={adding}

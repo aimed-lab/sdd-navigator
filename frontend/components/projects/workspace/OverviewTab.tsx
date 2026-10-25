@@ -3,11 +3,9 @@
 // The one primary button is "New wiki page". Server-safe.
 
 import Link from "next/link";
-import {
-  checklistProgress,
-  nextItems,
-  tabHref,
-} from "@/lib/server/projectWorkspace/workspace";
+import { tabHref } from "@/lib/server/projectWorkspace/workspace";
+import { dueLabel, isOverdue, listProgress, nextUp } from "@/lib/server/projectWorkspace/status";
+import HelpBanner from "./HelpBanner";
 import type { ChecklistItem, ProjectMember } from "@/lib/server/projects";
 import type { ProjectPage } from "@/lib/server/pages/projectPages";
 import NewProjectWikiPage from "./NewProjectWikiPage";
@@ -36,7 +34,15 @@ export default function OverviewTab({
   checklist,
   members,
   pages,
+  today,
+  role,
+  helpPosts,
 }: {
+  today: string;
+  /** The viewer's role on the project (lead, manager or member). */
+  role: string;
+  /** Unresolved help posts, newest first. */
+  helpPosts: { id: string; body: string }[];
   projectId: string;
   description: string | null;
   chips: string[];
@@ -44,12 +50,15 @@ export default function OverviewTab({
   members: ProjectMember[];
   pages: ProjectPage[];
 }) {
-  const progress = checklistProgress(checklist);
-  const next = nextItems(checklist, 4);
+  // All three lists together: overdue first, then by due date.
+  const lp = listProgress(checklist);
+  const progress = { ...lp, percent: lp.total === 0 ? 0 : Math.round((lp.ready / lp.total) * 100) };
+  const next = nextUp(checklist, today, 4);
 
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-8 items-start">
       <div className="flex flex-col gap-8 min-w-0">
+        <HelpBanner projectId={projectId} role={role} posts={helpPosts} />
         <section className="flex flex-col gap-4">
           {chips.length > 0 && (
             <div className="flex flex-wrap gap-2">
@@ -118,7 +127,17 @@ export default function OverviewTab({
                   <span className="material-symbols-outlined text-[18px] text-secondary mt-0.5">
                     {i.status === "in_progress" ? "pending" : "radio_button_unchecked"}
                   </span>
-                  <span className="min-w-0 break-words">{i.label}</span>
+                  <span className="min-w-0 break-words">
+                    {i.label}
+                    {i.assignee_name && <span className="text-secondary"> · {i.assignee_name}</span>}
+                    {i.due_date && (
+                      <span className={isOverdue(i, today) ? " text-error font-medium" : " text-secondary"}>
+                        {" "}
+                        · {isOverdue(i, today) ? "Overdue " : "Due "}
+                        {dueLabel(i.due_date)}
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

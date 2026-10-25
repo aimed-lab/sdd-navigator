@@ -3,11 +3,12 @@
 // nesting of a project's wiki pages. No I/O, no next/* imports, so
 // `npm test` covers it and client components may import it.
 
-export const TAB_KEYS = ["overview", "wiki", "tasks", "files", "team", "proposal"] as const;
+export const TAB_KEYS = ["overview", "updates", "wiki", "tasks", "files", "team", "proposal"] as const;
 export type TabKey = (typeof TAB_KEYS)[number];
 
 export const TAB_LABEL: Record<TabKey, string> = {
   overview: "Overview",
+  updates: "Updates",
   wiki: "Wiki",
   tasks: "Tasks & checklists",
   files: "Files",
@@ -17,6 +18,7 @@ export const TAB_LABEL: Record<TabKey, string> = {
 
 export const TAB_ICON: Record<TabKey, string> = {
   overview: "dashboard",
+  updates: "campaign",
   wiki: "menu_book",
   tasks: "checklist",
   files: "folder_shared",

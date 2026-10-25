@@ -274,6 +274,13 @@ export const STARTERS: Starter[] = [
   },
   { id: "mine", label: "Show my pages", kind: "go", href: "/pages" },
   {
+    id: "projects",
+    label: "Status of my projects",
+    hint: "checklists, overdue items, help requests and latest updates",
+    kind: "send",
+    text: "What's the status of my projects?",
+  },
+  {
     id: "communities",
     label: "Find or create a community",
     hint: "see what exists first, then join or start one",

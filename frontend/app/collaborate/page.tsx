@@ -241,7 +241,7 @@ export default async function CollaboratePage({
             body={
               filtered
                 ? "Try a broader filter, or post what you're looking for and let the community come to you."
-                : "No posts yet. Post what you need or offer, and the community can reply."
+                : "Post what you need or offer, and the community can reply."
             }
             href={newPostHref}
           />

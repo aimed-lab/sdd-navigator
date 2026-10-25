@@ -15,14 +15,15 @@ import {
 
 // ── tab routing ──────────────────────────────────────────────────────────────
 
-test("an ordinary project has five tabs; a challenge project adds Proposal last", () => {
-  assert.deepEqual(visibleTabs(false), ["overview", "wiki", "tasks", "files", "team"]);
-  assert.deepEqual(visibleTabs(true), ["overview", "wiki", "tasks", "files", "team", "proposal"]);
+test("an ordinary project has six tabs (Updates right after Overview); a challenge project adds Proposal last", () => {
+  assert.deepEqual(visibleTabs(false), ["overview", "updates", "wiki", "tasks", "files", "team"]);
+  assert.deepEqual(visibleTabs(true), ["overview", "updates", "wiki", "tasks", "files", "team", "proposal"]);
 });
 
 test("?tab= picks the tab; missing or unknown means Overview", () => {
   assert.equal(parseTab(undefined, false), "overview");
   assert.equal(parseTab("", false), "overview");
+  assert.equal(parseTab("updates", false), "updates");
   assert.equal(parseTab("wiki", false), "wiki");
   assert.equal(parseTab("tasks", false), "tasks");
   assert.equal(parseTab("files", false), "files");
