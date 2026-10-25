@@ -54,13 +54,7 @@ export default function CuratePagesPanel({
   const visible = (rows ?? []).filter((p) => !added[p.id]);
 
   return (
-    <div className="rounded-xl bg-surface-container-low p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="font-label-lg text-label-lg text-on-background">Add wiki pages to the team</h3>
-        <button type="button" onClick={onClose} className="font-label-md text-label-md text-secondary hover:text-on-background">
-          Done
-        </button>
-      </div>
+    <div className="flex flex-col gap-4">
       <input
         type="search"
         value={query}

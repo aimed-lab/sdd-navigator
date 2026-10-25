@@ -20,11 +20,8 @@ import { parseTeamId } from "@/lib/server/teams/teamRules";
 // searches plus an LLM call).
 //
 // VISIBILITY: the body takes `visibility` ('private' | 'team' | 'public',
-// default 'private'). A private or team page needs a signed-in caller, who
-// becomes its owner (owner_id = the session user, never a body field). A
-// public page may also be created with no session: owner_id is then null (a
-// site-created topic page; the table's CHECK allows a null owner only when
-// public). A signed-in caller creating a public page owns it.
+// default 'private'). The caller must be signed in (401 otherwise) and becomes
+// the page's owner (owner_id = the session user, never a body field).
 //
 // TEAM: an optional `team_id` (a team the signed-in caller is on) curates the
 // new page into that team ("Made by AI" on the team page). The page is created
@@ -56,6 +53,12 @@ function validateTopic(raw: unknown): { ok: true; topic: string } | { ok: false;
 }
 
 export async function POST(req: Request) {
+  // Only the assistant panel calls this, and the panel needs sign-in: no
+  // session, no page (public or not), before anything is read or created.
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Sign in to create a page." }, { status: 401 });
+  }
   let body: unknown;
   try {
     body = await req.json();
@@ -78,21 +81,10 @@ export async function POST(req: Request) {
   }
   const visibility = isPageVisibility(fields.visibility) ? fields.visibility : DEFAULT_PAGE_VISIBILITY;
 
-  const user = await getCurrentUser();
   const teamId = fields.team_id === undefined ? null : parseTeamId(fields.team_id);
   if (fields.team_id !== undefined && !teamId) {
     return NextResponse.json({ error: "team_id must be a team id." }, { status: 400 });
   }
-  if (teamId && !user) {
-    return NextResponse.json({ error: "Sign in to add a page to a team." }, { status: 401 });
-  }
-  if (!user && visibility !== "public") {
-    return NextResponse.json(
-      { error: "Sign in to create a private or team page." },
-      { status: 401 }
-    );
-  }
-
   const db = getPagesServiceRoleClient();
   if (!db) {
     return NextResponse.json(
@@ -108,7 +100,7 @@ export async function POST(req: Request) {
 
   const result = await createLivingPage({
     insertDb: db,
-    ownerId: user?.id ?? null,
+    ownerId: user.id,
     title,
     topic,
     visibility,

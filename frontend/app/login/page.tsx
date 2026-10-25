@@ -18,11 +18,11 @@
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ssoLoginAction } from "@/app/auth/actions";
-import { safeCallback } from "@/lib/safeRedirect";
+import { postLoginPath } from "@/lib/safeRedirect";
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const callbackUrl = safeCallback(searchParams.get("callbackUrl"));
+  const callbackUrl = postLoginPath(searchParams.get("callbackUrl"));
   const ssoFailed = searchParams.get("sso") === "failed";
 
   const [error, setError] = useState("");

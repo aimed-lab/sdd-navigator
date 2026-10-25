@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/auth";
+import { getCurrentUser, getDb } from "@/lib/auth";
 import { findSimilarPublicPage } from "@/lib/server/pages/similarPages";
 
 // GET /api/pages/similar?title=...&seed=... — is there already a PUBLIC page
@@ -10,6 +10,10 @@ import { findSimilarPublicPage } from "@/lib/server/pages/similarPages";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  // Only the assistant panel calls this, and the panel needs sign-in.
+  if (!(await getCurrentUser())) {
+    return NextResponse.json({ error: "Sign in to use the assistant." }, { status: 401 });
+  }
   const url = new URL(req.url);
   const db = await getDb();
   const match = await findSimilarPublicPage(

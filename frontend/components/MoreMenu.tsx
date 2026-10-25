@@ -20,11 +20,14 @@ export default function MoreMenu({
   up = false,
   className = "",
   buttonClassName = "",
+  iconOnly = false,
 }: {
   items: MoreMenuItem[];
   up?: boolean;
   className?: string;
   buttonClassName?: string;
+  /** Show only the ⋯ icon (the button is still labelled "More" for screen readers). */
+  iconOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -56,13 +59,14 @@ export default function MoreMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={iconOnly ? "More" : undefined}
         className={
           "inline-flex items-center gap-1 px-2 py-1 rounded-lg font-label-sm text-label-sm text-secondary hover:bg-surface-container-low hover:text-on-background transition-colors " +
           buttonClassName
         }
       >
         <span className="material-symbols-outlined text-lg">more_horiz</span>
-        More
+        {!iconOnly && "More"}
       </button>
       {open && (
         <div

@@ -152,6 +152,14 @@ export default function Nav() {
                     onMouseLeave={() => setMenuOpen(false)}
                   >
                     <Link
+                      href="/start"
+                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      <span className="material-symbols-outlined text-secondary text-base">waving_hand</span>
+                      Getting started
+                    </Link>
+                    <Link
                       href="/projects"
                       className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
                       onClick={() => setMenuOpen(false)}
@@ -255,6 +263,9 @@ export default function Nav() {
                     {unseen > 99 ? "99+" : unseen}
                   </span>
                 )}
+              </Link>
+              <Link href="/start" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
+                Getting started
               </Link>
               <Link href="/projects" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 My projects

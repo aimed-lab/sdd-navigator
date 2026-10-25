@@ -147,6 +147,16 @@ export default function GeneralFeedback() {
   // lifted clear of it by one more button-height-and-gap.
   const panelBottom = buttonBottom + BUTTON_PX + STACK_GAP_PX;
 
+  // Below 640px both floating buttons are small round icons stacked bottom-right;
+  // the assistant button sits above this one and needs to know how far the
+  // footer has lifted it (see AssistantChat).
+  useEffect(() => {
+    document.documentElement.style.setProperty("--fb-clear", `${footerClearance}px`);
+    return () => {
+      document.documentElement.style.removeProperty("--fb-clear");
+    };
+  }, [footerClearance]);
+
   const [open, setOpen] = useState(false);
   const [stage, setStage] = useState<Stage>("tap");
   const [useful, setUseful] = useState<boolean | null>(null);
@@ -200,10 +210,10 @@ export default function GeneralFeedback() {
           onClick={() => setOpen(true)}
           aria-label="Give feedback"
           style={{ bottom: `${buttonBottom}px`, height: `${BUTTON_PX}px` }}
-          className="fixed right-6 z-[55] px-4 rounded-full bg-surface-container-lowest text-on-background border border-outline-variant/50 shadow-lg flex items-center gap-2 hover:bg-surface-container-low transition-colors"
+          className="fixed right-6 max-sm:right-5 z-[55] px-4 max-sm:px-0 max-sm:justify-center max-sm:!h-10 max-sm:!w-10 max-sm:!bottom-[calc(16px+var(--fb-clear,0px))] rounded-full bg-surface-container-lowest text-on-background border border-outline-variant/50 shadow-lg flex items-center gap-2 hover:bg-surface-container-low transition-colors"
         >
-          <span className="material-symbols-outlined text-[22px]">edit_note</span>
-          <span className="font-label-sm text-label-sm">Feedback</span>
+          <span className="material-symbols-outlined text-[22px] max-sm:text-[20px]">edit_note</span>
+          <span className="font-label-sm text-label-sm max-sm:hidden">Feedback</span>
         </button>
       )}
 

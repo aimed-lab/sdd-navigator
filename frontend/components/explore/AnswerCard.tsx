@@ -2,12 +2,13 @@
 
 // The "Answer" card at the top of /explore/<topic>: the assistant's short,
 // cited answer for the topic (the same /api/assistant call and the same answer
-// rendering the side panel uses), with the quick-facts row under it. While the
+// rendering the side panel uses; signed-in people only), with the quick-facts row under it. While the
 // answer loads a placeholder shows; if the call fails the card is hidden and the
 // results below are untouched. The quick facts come from the results already on
 // the page and link to the matching tab.
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { Markdown } from "@/components/explore/AssistantChat";
 import { parseAssistantReply } from "@/lib/server/assistant/assistantReply";
 import { quickFacts, sourcesToCards, stripChoiceText, type ResultCard } from "@/lib/server/assistant/assistantAnswer";
@@ -29,9 +30,16 @@ export default function AnswerCard({
   onOpenTab: (kind: string) => void;
 }) {
   const [state, setState] = useState<State>({ kind: "loading" });
+  const { user, loading: authLoading } = useAuth();
 
   useEffect(() => {
-    if (!topic.trim()) return;
+    if (!topic.trim() || authLoading) return;
+    // The AI answer needs sign-in (/api/assistant answers 401 otherwise). Signed
+    // out, the card stays hidden and the search results below are untouched.
+    if (!user) {
+      setState({ kind: "failed" });
+      return;
+    }
     const ctl = new AbortController();
     setState({ kind: "loading" });
     (async () => {
@@ -54,7 +62,7 @@ export default function AnswerCard({
       }
     })();
     return () => ctl.abort();
-  }, [topic]);
+  }, [topic, user, authLoading]);
 
   const facts = quickFacts(sections, topic);
 

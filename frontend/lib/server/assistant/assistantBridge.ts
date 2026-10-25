@@ -33,7 +33,7 @@ export function getPageTeam(): AssistantTeam | null {
   return typeof window === "undefined" ? null : (window.__sddPageTeam ?? null);
 }
 
-export type AssistantRequest = { text: string; mode: "send" | "fill"; team?: AssistantTeam };
+export type AssistantRequest = { text: string; mode: "send" | "fill" | "open"; team?: AssistantTeam };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,6 +52,8 @@ const MAX_TEXT = 500;
 export function parseAssistantRequest(raw: unknown): AssistantRequest | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
+  // "open" just opens the panel (the /start tile): no text needed.
+  if (r.mode === "open") return { text: "", mode: "open" };
   const text = typeof r.text === "string" ? r.text.trim().slice(0, MAX_TEXT) : "";
   if (!text) return null;
   const team = parseTeam(r.team);

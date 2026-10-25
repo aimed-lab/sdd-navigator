@@ -109,13 +109,14 @@ test("greeting text is exactly the agreed sentence", () => {
   assert.equal(GREETING, "Hi, I'm your SmartDrugDiscovery assistant. I can help you:");
 });
 
-test("starters: the four chips, in order, all live (Communities is a real option now)", () => {
+test("starters: the five chips, in order, all live (Communities is a real option now)", () => {
   assert.deepEqual(
     STARTERS.map((s) => s.label),
     [
       "Find resources on a topic",
       "Create a wiki page for my research",
       "Show my pages",
+      "Create a team",
       "Find or create a community",
     ]
   );
@@ -129,6 +130,8 @@ test("starters: each live chip starts a flow or fills the input", () => {
   assert.equal(byId.create.kind, "send");
   assert.match((byId.create as { text: string }).text, /wiki page/);
   assert.deepEqual({ kind: byId.mine.kind, href: (byId.mine as { href: string }).href }, { kind: "go", href: "/pages" });
+  assert.equal(byId.team.kind, "send");
+  assert.equal((byId.team as { text: string }).text, "Create a team");
   assert.equal(byId.communities.kind, "send");
   assert.match((byId.communities as { text: string }).text, /community/);
   assert.match(byId.find.hint ?? "", /papers, trials, FDA approvals, compounds, datasets, grants, tools/);
@@ -136,7 +139,7 @@ test("starters: each live chip starts a flow or fills the input", () => {
 });
 
 test("the panel is offered on Explore, the /pages screens and a team's own page only", () => {
-  for (const ok of ["/explore", "/explore/egfr", "/explore/podcast", "/pages", "/pages/egfr-abc12", "/teams/kras-club-a1b2c3"]) {
+  for (const ok of ["/explore", "/explore/egfr", "/explore/podcast", "/pages", "/pages/egfr-abc12", "/teams/kras-club-a1b2c3", "/start"]) {
     assert.equal(assistantAvailableOn(ok), true, ok);
   }
   for (const no of ["/", "/projects", "/collaborate", "/pagesx", "/exploreme", "/teams", "/teams/new", "", null, undefined]) {

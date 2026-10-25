@@ -18,3 +18,11 @@ export function safeCallback(raw: unknown, fallback = "/explore"): string {
   if (raw.startsWith("/\\")) return fallback; // backslash trick some parsers accept
   return raw;
 }
+
+/** Where a person lands after signing in: the page they were headed to, or the
+ *  welcome page (/start) when there was no callbackUrl or it is just "/". An
+ *  unsafe value counts as none. */
+export function postLoginPath(raw: unknown): string {
+  const safe = safeCallback(raw, "");
+  return safe === "" || safe === "/" ? "/start" : safe;
+}

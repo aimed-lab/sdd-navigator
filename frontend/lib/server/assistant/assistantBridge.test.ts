@@ -37,3 +37,8 @@ test("the save flow starts with a wiki-page request naming the topic", () => {
 test("openAssistant does nothing (and does not throw) without a window", () => {
   assert.doesNotThrow(() => openAssistant({ text: "hi", mode: "send" }));
 });
+
+test("parseAssistantRequest: open mode needs no text", () => {
+  assert.deepEqual(parseAssistantRequest({ text: "", mode: "open" }), { text: "", mode: "open" });
+  assert.equal(parseAssistantRequest({ text: "" }), null);
+});
