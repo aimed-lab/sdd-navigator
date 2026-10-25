@@ -6,12 +6,13 @@
 // app/communities/actions.ts; only what is new for teams lives here.
 
 import { revalidatePath } from "next/cache";
-import { UnauthorizedError } from "@/lib/auth";
+import { getCurrentUser, UnauthorizedError } from "@/lib/auth";
 import {
   addPageToTeam,
   createTeam,
   joinTeam,
   linkTeamToCommunity,
+  listMyTeams,
   removePageFromTeam,
   searchPagesForTeam,
   unlinkTeamFromCommunity,
@@ -45,6 +46,19 @@ export async function createTeamAction(input: {
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in or create an account to create your team." };
     return fail(e, "createTeamAction");
+  }
+}
+
+/** The signed-in person's teams by name, for the assistant's "my teams". */
+export async function listMyTeamsAction(): Promise<
+  { ok: true; signedIn: boolean; teams: { name: string; slug: string }[] } | { ok: false; error: string }
+> {
+  try {
+    const signedIn = !!(await getCurrentUser());
+    const teams = signedIn ? (await listMyTeams()).map((t) => ({ name: t.name, slug: t.slug })) : [];
+    return { ok: true, signedIn, teams };
+  } catch (e) {
+    return fail(e, "listMyTeamsAction");
   }
 }
 

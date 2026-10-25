@@ -274,6 +274,13 @@ export const STARTERS: Starter[] = [
   },
   { id: "mine", label: "Show my pages", kind: "go", href: "/pages" },
   {
+    id: "team",
+    label: "Create a team",
+    hint: "a small private group, with a QR code to bring people in",
+    kind: "send",
+    text: "Create a team",
+  },
+  {
     id: "communities",
     label: "Find or create a community",
     hint: "see what exists first, then join or start one",
@@ -287,6 +294,8 @@ export function assistantAvailableOn(pathname: string | null | undefined): boole
   if (!pathname) return false;
   // A team page too: its "Make learning material" tile opens the assistant.
   if (pathname.startsWith("/teams/") && pathname !== "/teams/new") return true;
+  // The welcome page's "Ask the AI assistant" tile opens it.
+  if (pathname === "/start") return true;
   return pathname === "/explore" || pathname.startsWith("/explore/") || pathname === "/pages" || pathname.startsWith("/pages/");
 }
 

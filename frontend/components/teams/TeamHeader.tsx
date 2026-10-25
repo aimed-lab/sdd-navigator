@@ -1,14 +1,15 @@
-// The team page header: a green banner with the team label, name, one-line
-// description, member avatars and, on the right, the QR box ("Scan to join",
-// Download QR) and the Team settings button (leads). A server component; the
-// interactive parts are the client components it renders.
+// The team page hero: a deep green card with the eyebrow, team name (serif),
+// one-line description, an avatar stack with the member count, and on the right
+// a white card with the join QR. Leads also get a "Team settings" button at the
+// top right. Stacks on a phone, with the QR card full width under the text.
+// A server component; the interactive parts are the client components it renders.
 
 import Link from "next/link";
 import { initials } from "@/lib/server/communityHome/communityHome";
-import { teamHeaderLine } from "@/lib/server/teams/teamRules";
-import JoinQr from "@/components/communities/JoinQr";
-import CopyLinkButton from "@/components/communities/CopyLinkButton";
+import { plural } from "@/lib/server/teams/teamRules";
+import { avatarOverflow } from "@/lib/server/teams/teamUi";
 import TeamDescription from "./TeamDescription";
+import TeamQrCard from "./TeamQrCard";
 
 export default function TeamHeader({
   team,
@@ -22,43 +23,52 @@ export default function TeamHeader({
   isLead: boolean;
 }) {
   const shown = memberNames.slice(0, 6);
+  const more = avatarOverflow(memberCount);
 
   return (
-    <header className="rounded-2xl bg-primary text-on-primary overflow-hidden">
-      <div className="flex flex-col lg:flex-row lg:items-center gap-6 p-6 sm:p-7 min-h-[11rem]">
+    <header
+      className="relative rounded-[20px] text-white overflow-hidden"
+      style={{ background: "linear-gradient(135deg, #0b3d22, #0f6b33 60%, #1f8a4a)" }}
+    >
+      <div className="flex flex-col lg:flex-row lg:items-center gap-6 p-5 sm:p-7">
         <div className="flex-1 min-w-0 flex flex-col gap-3">
-          <span className="font-label-sm text-label-sm tracking-widest text-on-primary/80">
-            {teamHeaderLine(memberCount).toUpperCase()}
-          </span>
-          <h1 className="font-headline-lg text-headline-lg text-on-primary break-words">{team.name}</h1>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-[12px] leading-5 font-semibold tracking-[0.14em] text-white/80">TEAM · PRIVATE</span>
+            {isLead && (
+              <Link
+                href={`/teams/${team.slug}?settings=1#settings`}
+                className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-white/70 px-3 py-1.5 text-[13px] font-semibold leading-5 text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              >
+                <span className="material-symbols-outlined text-[18px]">settings</span>
+                Team settings
+              </Link>
+            )}
+          </div>
+          <h1 className="font-headline-lg text-[28px] sm:text-[32px] leading-[1.2] text-white break-words">{team.name}</h1>
           <TeamDescription teamId={team.id} slug={team.slug} description={team.description} isLead={isLead} />
-          {shown.length > 0 && (
-            <div className="flex -space-x-2 pt-1" aria-hidden>
-              {shown.map((n, i) => (
-                <span
-                  key={i}
-                  className="w-8 h-8 rounded-full bg-white/90 text-primary border-2 border-primary flex items-center justify-center font-label-sm text-[11px] font-semibold"
-                >
-                  {initials(n)}
-                </span>
-              ))}
-            </div>
-          )}
+          <div className="flex items-center gap-3 pt-1">
+            {shown.length > 0 && (
+              <div className="flex -space-x-2" aria-hidden>
+                {shown.map((n, i) => (
+                  <span
+                    key={i}
+                    className="w-8 h-8 rounded-full bg-white text-[#0f6b33] border-2 border-[#0f6b33] flex items-center justify-center text-[11px] font-semibold"
+                  >
+                    {initials(n)}
+                  </span>
+                ))}
+                {more && (
+                  <span className="w-8 h-8 rounded-full bg-[#0b3d22] text-white border-2 border-[#0f6b33] flex items-center justify-center text-[11px] font-semibold">
+                    {more}
+                  </span>
+                )}
+              </div>
+            )}
+            <span className="text-[14px] leading-5 text-white/90">{plural(memberCount, "member")}</span>
+          </div>
         </div>
 
-        <div className="lg:w-64 shrink-0 rounded-xl bg-surface-container-lowest text-on-background p-4 flex flex-col items-stretch gap-3 shadow-sm">
-          <JoinQr slug={team.slug} name={team.name} isAdmin team />
-          <CopyLinkButton slug={team.slug} label="Copy join link" team />
-          {isLead && (
-            <Link
-              href={`/teams/${team.slug}?settings=1#settings`}
-              className="btn-outline px-4 py-2 rounded-lg font-label-md text-label-md text-center inline-flex items-center justify-center gap-1.5"
-            >
-              <span className="material-symbols-outlined text-[18px]">settings</span>
-              Team settings
-            </Link>
-          )}
-        </div>
+        <TeamQrCard slug={team.slug} name={team.name} />
       </div>
     </header>
   );

@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { NON_ADMIN_COMMUNITY_NOTE } from "@/lib/server/assistant/teamIntent";
 import {
   joinSentences,
   MAX_COMMUNITY_NAME_CHARS,
@@ -88,7 +89,7 @@ export default function CommunityDraft({
         </p>
         {!canChoose && (
           <p className="font-body-sm text-body-sm text-secondary">
-            Only site admins can start a community, so I&apos;ll create a team for you instead.
+            {NON_ADMIN_COMMUNITY_NOTE}
           </p>
         )}
         {!authLoading && !signedIn && (
@@ -151,7 +152,7 @@ export default function CommunityDraft({
         </fieldset>
       ) : (
         <p className="font-body-sm text-body-sm text-secondary">
-          This will be a team: a small private group. Only site admins can start a community.
+          {NON_ADMIN_COMMUNITY_NOTE} A team is a small private group.
         </p>
       )}
       <label className="flex flex-col gap-1">

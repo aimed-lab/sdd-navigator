@@ -43,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen flex flex-col bg-background text-on-background font-body-md">
         <AuthProvider>
           <Nav />
-          <main className="flex-1 pt-16">{children}</main>
+          <main className="flex-1 pt-16 max-sm:pb-24">{children}</main>
           <Footer />
           {/* Floating, out of normal flow — available on every page, unlike
               the per-page card it replaced. See its own docstring. */}

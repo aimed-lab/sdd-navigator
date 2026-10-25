@@ -82,8 +82,7 @@ export default function AddDocumentPanel({
   };
 
   return (
-    <form onSubmit={submit} className="rounded-xl bg-surface-container-low p-5 flex flex-col gap-4">
-      <h3 className="font-label-lg text-label-lg text-on-background">Share a document with the team</h3>
+    <form onSubmit={submit} className="flex flex-col gap-4">
       <input
         type="text"
         value={title}

@@ -70,6 +70,9 @@ import {
   type ResultCard,
 } from "@/lib/server/assistant/assistantAnswer";
 import type { ExploreResponse, ExploreSection } from "@/types/explore";
+import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/explore/TeamAssistantCards";
+import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
+import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
 import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
@@ -322,6 +325,10 @@ export default function AssistantChat() {
   // community; everyone else's draft becomes a team). Asked when a draft opens.
   const [siteAdmin, setSiteAdmin] = useState<boolean | null>(null);
   const [draftKind, setDraftKind] = useState<"team" | "community" | null>(null);
+  // Team commands ("create a team", "my teams") are answered here, never searched:
+  // the card under an assistant message, and the list once it is fetched.
+  const [teamCards, setTeamCards] = useState<Record<number, TeamIntent>>({});
+  const [teamLists, setTeamLists] = useState<Record<number, TeamListState>>({});
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Topics the save-as-a-page offer was already shown for in this chat.
@@ -332,6 +339,9 @@ export default function AssistantChat() {
   const skipDup = useRef<string | null>(null);
 
   const available = assistantAvailableOn(pathname);
+  // The assistant is for signed-in people. Signed out, the button still shows
+  // and the panel only offers sign-in (the API routes refuse with 401 anyway).
+  const signedOut = !authLoading && !user;
 
   // The team a page made now is added to: the one the tile attached, else the
   // team whose page is open (a message typed by hand there).
@@ -443,10 +453,47 @@ export default function AssistantChat() {
 
   const send = async (text: string) => {
     const content = text.trim();
-    if (!content || typing) return;
+    if (!content || typing || !user) return;
     // The search is whatever the backend reports it ran; until then, a guess
     // (used only to pick the progress text, and by an older backend).
     const next: ChatMessage[] = [...messages, { role: "user", content }];
+
+    // A clear team command: answer it here. No backend call, no search, no
+    // page move, no Save page, no Related questions.
+    const teamIntent = detectTeamIntent(content);
+    if (teamIntent) {
+      const index = next.length;
+      setInput("");
+      setPickerAt(null);
+      setAction(null);
+      setDraft(null);
+      setPhase({ kind: "idle" });
+      setError(null);
+      if (teamIntent.kind === "create") {
+        setMessages([...next, { role: "assistant", content: teamDraftReply(teamIntent.name) }]);
+        setTeamCards((c) => ({ ...c, [index]: teamIntent }));
+      } else {
+        setMessages([...next, { role: "assistant", content: "Here are your teams." }]);
+        setTeamCards((c) => ({ ...c, [index]: teamIntent }));
+        setTeamLists((l) => ({ ...l, [index]: "loading" }));
+        const chat = chatId.current;
+        void listMyTeamsAction().then((res) => {
+          if (chat !== chatId.current) return;
+          const state: TeamListState = !res.ok
+            ? { error: res.error }
+            : res.signedIn
+              ? { signedIn: true, teams: res.teams }
+              : { signedIn: false };
+          setTeamLists((l) => ({ ...l, [index]: state }));
+          if (res.ok && res.signedIn) {
+            setMessages((m) => m.map((x, i) => (i === index ? { ...x, content: teamListReply(res.teams.length) } : x)));
+          } else if (res.ok) {
+            setMessages((m) => m.map((x, i) => (i === index ? { ...x, content: "Sign in to see your teams." } : x)));
+          }
+        });
+      }
+      return;
+    }
     // A community request (or the answer to "which topic?") is not an Explore
     // search: no panel search, no page move, no cards / facts / Save page / Related.
     const communityTurn = isCommunityTurn(next);
@@ -569,19 +616,25 @@ export default function AssistantChat() {
     return () => window.removeEventListener(ASSISTANT_EVENT, on);
   }, []);
   useEffect(() => {
-    if (!external || !restored || typing) return;
+    if (!external || !restored || typing || authLoading) return;
     const req = external;
     setExternal(null);
+    // Signed out: just open the panel, which asks them to sign in. Nothing is sent.
+    if (!user) {
+      setOpen(true);
+      return;
+    }
     setTeam(req.team ?? null);
     setOpen(true);
-    if (req.mode === "send") void send(req.text);
+    if (req.mode === "open") setFocusTick((t) => t + 1);
+    else if (req.mode === "send") void send(req.text);
     else {
       // For a team page the prompt ends "about: " so the topic can be typed straight after.
       setInput(req.team ? `${req.text} ` : req.text);
       setFocusTick((t) => t + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [external, restored, typing]);
+  }, [external, restored, typing, authLoading, user]);
 
   // A draft needs to know who is asking: only site admins may start a
   // community, so everyone else's draft is a team.
@@ -749,6 +802,8 @@ export default function AssistantChat() {
     setDraft(null);
     setDraftKind(null);
     setTeam(null);
+    setTeamCards({});
+    setTeamLists({});
     setDraftStage("edit");
     setAutoSend(null);
     skipDup.current = null;
@@ -822,10 +877,11 @@ export default function AssistantChat() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="fixed right-6 bottom-24 z-[56] h-12 px-5 rounded-full btn-primary shadow-lg flex items-center gap-2 font-label-md text-label-md"
+          aria-label="Ask AI assistant"
+          className="fixed right-6 bottom-24 max-sm:right-4 max-sm:bottom-[calc(68px+var(--fb-clear,0px))] z-[56] h-12 px-5 max-sm:w-12 max-sm:px-0 max-sm:justify-center rounded-full btn-primary shadow-lg flex items-center gap-2 font-label-md text-label-md"
         >
-          <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
-          Ask AI assistant
+          <span className="material-symbols-outlined text-[20px] max-sm:text-[24px]">auto_awesome</span>
+          <span className="max-sm:hidden">Ask AI assistant</span>
         </button>
       )}
       {open && (
@@ -896,6 +952,22 @@ export default function AssistantChat() {
             </div>
           </div>
 
+          {signedOut ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-4 overflow-y-auto px-5 py-8">
+              <p className="font-title text-[22px] leading-snug text-on-background">
+                Sign in to use the assistant. It can find research, make wiki pages and create teams for you.
+              </p>
+              <a
+                href={`/login?callbackUrl=${encodeURIComponent(
+                  pathname + (typeof window !== "undefined" ? window.location.search : "")
+                )}`}
+                className="btn-primary self-start px-6 py-2.5 rounded-lg font-label-md text-label-md"
+              >
+                Sign in
+              </a>
+            </div>
+          ) : (
+            <>
           <div className="flex-1 min-h-0 flex flex-col gap-5 overflow-y-auto px-5 py-5" aria-live="polite">
             {messages.length === 0 && (
               <div className="flex flex-col gap-3">
@@ -931,7 +1003,7 @@ export default function AssistantChat() {
             {messages.map((m, i) => {
               if (m.role === "user") {
                 // A page-type pick is a small reply, not a new question.
-                return isPagePick(m.content) ? (
+                return isPagePick(m.content) || detectTeamIntent(m.content) ? (
                   <div
                     key={i}
                     className="self-end px-4 py-2 rounded-2xl rounded-br-md bg-primary/10 text-on-background font-body-md text-body-md"
@@ -969,6 +1041,16 @@ export default function AssistantChat() {
                       <Markdown text={m.content} maxCite={ex ? ex.cards.length : 0} />
                     </div>
                   </div>
+
+                  {teamCards[i]?.kind === "create" && (
+                    <TeamDraftCard
+                      initialName={(teamCards[i] as Extract<TeamIntent, { kind: "create" }>).name}
+                      signedIn={!!user}
+                      authLoading={authLoading}
+                      onCreated={() => router.refresh()}
+                    />
+                  )}
+                  {teamCards[i]?.kind === "list" && teamLists[i] && <TeamListCard state={teamLists[i]} />}
 
                   {/* The assistant's sentence first, then the matches it introduces. */}
                   {cards[i] && (
@@ -1268,6 +1350,8 @@ export default function AssistantChat() {
               Answers use only the sources shown. Check citations before relying on them.
             </p>
           </div>
+            </>
+          )}
         </aside>
       )}
     </>

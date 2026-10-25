@@ -86,6 +86,30 @@ export async function listMyTeams(): Promise<TeamSummary[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** The signed-in person's own teams, newest first, at most `limit`. Session
+ *  client, so RLS returns only teams they are an active member of. Empty when
+ *  signed out. */
+export async function listMyTeamsNewest(limit: number): Promise<{ slug: string; name: string }[]> {
+  noStore();
+  const session = await getSession();
+  if (!session) return [];
+
+  const { data, error } = await session.db
+    .from("community_members")
+    .select("communities(slug, name, kind, created_at)")
+    .eq("user_id", session.user.id)
+    .eq("status", "active");
+  if (error || !data) return [];
+
+  type Row = { slug: string; name: string; kind: string; created_at: string };
+  return (data as { communities: Row | Row[] | null }[])
+    .map((r) => one(r.communities))
+    .filter((c): c is Row => !!c && c.kind === "team")
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+    .slice(0, limit)
+    .map((c) => ({ slug: c.slug, name: c.name }));
+}
+
 async function memberCounts(db: { rpc: (fn: string) => PromiseLike<{ data: unknown; error: unknown }> }) {
   const res = await db.rpc("community_member_counts");
   const out = new Map<string, number>();

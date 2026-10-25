@@ -43,7 +43,7 @@ export default function NewsPanel({
   };
 
   return (
-    <div className="rounded-xl bg-surface-container-low p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       {isLead ? (
         <form onSubmit={post} className="flex flex-col gap-3">
           <h3 className="font-label-lg text-label-lg text-on-background">Post team news</h3>

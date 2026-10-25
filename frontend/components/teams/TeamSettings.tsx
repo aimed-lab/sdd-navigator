@@ -22,9 +22,9 @@ import type { LinkedCommunity } from "@/lib/server/teams/teams";
 const INPUT =
   "bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
 
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
+function Block({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 border-t border-outline-variant/20 pt-6 first:border-t-0 first:pt-0">
+    <div id={id} className="flex flex-col gap-3 border-t border-outline-variant/20 pt-6 first:border-t-0 first:pt-0">
       <h3 className="font-label-lg text-label-lg text-on-background">{title}</h3>
       {children}
     </div>
@@ -99,7 +99,7 @@ export default function TeamSettings({
           <CopyLinkButton slug={team.slug} label="Copy join link" team />
         </Block>
 
-        <Block title="Invite by email">
+        <Block title="Invite by email" id="team-invite">
           <AddMemberByEmailForm communityId={team.id} slug={team.slug} />
         </Block>
 

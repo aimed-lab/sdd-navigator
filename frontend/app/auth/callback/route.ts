@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { confirmEmailLink } from "@/lib/auth";
-import { safeCallback } from "@/lib/safeRedirect";
+import { postLoginPath } from "@/lib/safeRedirect";
 
 // GET /auth/callback — SSO (SPARC Keycloak) return leg.
 //
@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic"; // depends on cookies + query
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const next = safeCallback(url.searchParams.get("next"));
+  const next = postLoginPath(url.searchParams.get("next"));
 
   const result = await confirmEmailLink({ code: url.searchParams.get("code") });
 

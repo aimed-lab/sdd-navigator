@@ -37,6 +37,7 @@ import ResourceCard from "@/components/collaborate/ResourceCard";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
+import { listMyTeamsNewest } from "@/lib/server/teams/teams";
 
 export const dynamic = "force-dynamic"; // board content changes per request
 
@@ -102,6 +103,8 @@ export default async function CollaboratePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  // The Teams card: the signed-in person's own teams (session client, RLS), newest first.
+  const myTeams = await listMyTeamsNewest(5).catch(() => []);
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
   const q = one(sp.q).trim();
@@ -165,18 +168,44 @@ export default async function CollaboratePage({
           </span>
         </Link>
 
-        <Link href="/teams" className="tile group p-6 flex items-center justify-between gap-6">
-          <span className="min-w-0">
+        {myTeams.length > 0 ? (
+          <div className="tile p-6 flex flex-col gap-3">
             <span className="block font-title text-[22px] font-medium text-on-background">Teams</span>
-            <span className="block mt-1 font-body-md text-body-md text-secondary">
-              A small private group with its own documents and wiki pages. Make one in seconds.
+            <ul className="flex flex-col gap-1">
+              {myTeams.map((t) => (
+                <li key={t.slug}>
+                  <Link
+                    href={`/teams/${t.slug}`}
+                    className="font-body-md text-body-md text-primary hover:underline underline-offset-4 break-words"
+                  >
+                    {t.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <span className="flex flex-wrap gap-x-5 gap-y-1 font-label-md text-label-md">
+              <Link href="/teams" className="text-primary hover:underline underline-offset-4">
+                See all
+              </Link>
+              <Link href="/teams/new" className="text-primary hover:underline underline-offset-4">
+                Create a team
+              </Link>
             </span>
-          </span>
-          <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
-            Open
-            <span className="material-symbols-outlined">arrow_forward</span>
-          </span>
-        </Link>
+          </div>
+        ) : (
+                  <Link href="/teams" className="tile group p-6 flex items-center justify-between gap-6">
+            <span className="min-w-0">
+              <span className="block font-title text-[22px] font-medium text-on-background">Teams</span>
+              <span className="block mt-1 font-body-md text-body-md text-secondary">
+                A small private group with its own documents and wiki pages. Make one in seconds.
+              </span>
+            </span>
+            <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
+              Open
+              <span className="material-symbols-outlined">arrow_forward</span>
+            </span>
+          </Link>
+        )}
       </div>
 
       {/* Search (plain GET form — keeps every view linkable) */}

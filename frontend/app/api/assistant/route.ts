@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/lib/auth";
 import { buildAssistantContext, cleanMessagesForSend } from "@/lib/server/assistant/assistantReply";
 import { EXPLORE_API_URL, exploreBackendHeaders } from "@/lib/server/exploreBackend";
 import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimiter } from "@/lib/server/rateLimit";
@@ -9,10 +10,10 @@ import { ASSISTANT_MAX_REQUESTS, ASSISTANT_WINDOW_MS, clientIp, createRateLimite
 // POST /api/pages the browser makes with the user's own session after they
 // click Confirm.
 //
-// SIGNED-OUT USERS CAN CHAT (that is why there is no auth check); creating
-// needs sign-in, enforced by /api/pages. Because it is an unauthenticated
-// route that spends LLM tokens, it has a small per-IP limit and a body size
-// cap. The limit lives in this process's memory, so it is best-effort
+// SIGN-IN REQUIRED: the assistant spends LLM tokens, so a request with no
+// signed-in user is answered 401 first, before the rate limiter, the body is
+// read, or the backend is called. On top of that it keeps a small per-IP limit
+// and a body size cap. The limit lives in this process's memory, so it is best-effort
 // protection against casual abuse, not a guarantee across instances.
 
 export const maxDuration = 60;
@@ -21,6 +22,9 @@ const MAX_BODY_BYTES = 40_000;
 const limiter = createRateLimiter(ASSISTANT_WINDOW_MS, ASSISTANT_MAX_REQUESTS);
 
 export async function POST(req: Request) {
+  if (!(await getCurrentUser())) {
+    return NextResponse.json({ error: "Sign in to use the assistant." }, { status: 401 });
+  }
   if (limiter.limited(clientIp(req))) {
     return NextResponse.json({ error: "Too many messages. Please wait a few minutes." }, { status: 429 });
   }
