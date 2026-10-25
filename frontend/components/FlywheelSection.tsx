@@ -30,8 +30,8 @@ const MODES = [
 
 const SCALES = [
   { name: "Individual", body: "Work on your own, at your own pace." },
-  { name: "Team", body: "Formed by people you met at an event, online or in person, or brought together by a leader." },
-  { name: "Community", body: "Events from communities such as CFDE, ATTIS and Bridge2AI." },
+  { name: "Team", body: "Formed by people you met at an event, online or in person, or brought together by a leader.", href: "/teams" },
+  { name: "Community", body: "Events from communities such as CFDE, ATTIS and Bridge2AI.", href: "/communities" },
 ];
 
 export default function FlywheelSection() {
@@ -67,12 +67,27 @@ export default function FlywheelSection() {
         <div className="mt-10">
           <p className="type-label text-secondary mb-3">Every step works at three scales</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-gutter">
-            {SCALES.map((s) => (
-              <div key={s.name} className="rounded-lg border border-[#e7e4dc] p-5">
-                <p className="font-label-md text-label-md text-on-background">{s.name}</p>
-                <p className="mt-1 font-body-md text-body-md text-secondary">{s.body}</p>
-              </div>
-            ))}
+            {SCALES.map((s) => {
+              const inner = (
+                <>
+                  <p className="font-label-md text-label-md text-on-background">{s.name}</p>
+                  <p className="mt-1 font-body-md text-body-md text-secondary">{s.body}</p>
+                </>
+              );
+              return s.href ? (
+                <Link
+                  key={s.name}
+                  href={s.href}
+                  className="block rounded-lg border border-[#e7e4dc] p-5 transition duration-150 hover:-translate-y-0.5 hover:border-primary hover:shadow-[0_8px_24px_rgba(40,36,28,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+                >
+                  {inner}
+                </Link>
+              ) : (
+                <div key={s.name} className="rounded-lg border border-[#e7e4dc] p-5">
+                  {inner}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
