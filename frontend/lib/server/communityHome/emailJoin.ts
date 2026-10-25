@@ -62,7 +62,39 @@ export async function runEmailJoin(args: {
     return { ok: false, reason: "error", error: "Couldn't add you just now. Please try again." };
   }
 
-  switch (answer.data) {
+  return emailAnswerToResult(answer.data);
+}
+
+/** The team version of runEmailJoin. The target is the team's SLUG (the
+ *  database function join_team_by_email resolves it to an id itself); an empty
+ *  slug never reaches the database. Same limit, validation and messages. */
+export async function runTeamEmailJoin(args: {
+  slug: string;
+  email: unknown;
+  ip: string;
+  limiter: { limited(key: string): boolean };
+  rpc: (slug: string, email: string) => Promise<RpcAnswer>;
+}): Promise<EmailJoinResult> {
+  if (args.limiter.limited(`email-join:${args.ip}`)) {
+    return { ok: false, reason: "rate_limited", error: "Too many attempts from this network. Please try again in a few minutes." };
+  }
+  const parsed = normalizeJoinEmail(args.email);
+  if (!parsed.ok) return { ok: false, reason: "invalid", error: parsed.error };
+  if (!args.slug || typeof args.slug !== "string") return { ok: false, reason: "error", error: "Team not found." };
+
+  let answer: RpcAnswer;
+  try {
+    answer = await args.rpc(args.slug, parsed.email);
+  } catch {
+    return { ok: false, reason: "error", error: "Couldn't add you just now. Please try again." };
+  }
+  if (answer.error) return { ok: false, reason: "error", error: "Couldn't add you just now. Please try again." };
+  if (answer.data === "not_found") return { ok: false, reason: "error", error: "Team not found." };
+  return emailAnswerToResult(answer.data);
+}
+
+function emailAnswerToResult(data: unknown): EmailJoinResult {
+  switch (data) {
     // 'already_member' reads exactly like 'joined', so this form cannot be
     // used to find out who is already in a community.
     case "joined":

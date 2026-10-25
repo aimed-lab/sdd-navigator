@@ -88,7 +88,12 @@ function extractReadmeCommands(readme: string | null): string[] {
 
 export default function SubmitFlow({
   communities = [],
+  initialCommunityId = null,
 }: {
+  /** Pre-select this community or team (it must be one of `communities`):
+   *  "Share a photo or result" on a team page opens the flow with the team
+   *  already attached, so the item gets the share buttons and is tied to it. */
+  initialCommunityId?: string | null;
   /** Communities the signed-in author is an active member of — threaded
    *  straight through to ArticleEditor's own picker (see that component's
    *  prop comment). The picker only ever appears once you're in
@@ -96,6 +101,8 @@ export default function SubmitFlow({
    *  nothing here needs it beyond passing it along. */
   communities?: { id: string; slug: string; name: string }[];
 }) {
+  const startCommunityId =
+    initialCommunityId && communities.some((c) => c.id === initialCommunityId) ? initialCommunityId : null;
   // DOI path — unchanged.
   const [input, setInput] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -164,7 +171,7 @@ export default function SubmitFlow({
         doi: null,
         link: null,
         journal: null,
-        communityId: null,
+        communityId: startCommunityId,
       });
       if (!created.ok) throw new Error(created.error);
       return { id: created.id, slug: created.slug };
@@ -246,7 +253,7 @@ export default function SubmitFlow({
           doi: paperInfo.doi,
           link: paperInfo.sourceUrl,
           journal: paperInfo.journal,
-          communityId: null,
+          communityId: startCommunityId,
           keyFacts: paperFacts,
         });
         if (created.ok) setEntry({ id: created.id, slug: created.slug });
@@ -391,7 +398,7 @@ export default function SubmitFlow({
           articleBody,
           linkedinPost,
           authors,
-          communityId: null,
+          communityId: startCommunityId,
           keyFacts,
         }}
         media={[]}

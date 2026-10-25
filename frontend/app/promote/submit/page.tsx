@@ -17,7 +17,15 @@ import { listMyActiveCommunities } from "@/lib/server/communities";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export default async function SubmitShowcasePage() {
+export default async function SubmitShowcasePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  // ?community=<id> arrives from a team page's "Share a photo or result"; it is
+  // only used when it is one of the viewer's own communities or teams.
+  const sp = await searchParams;
+  const startCommunity = typeof sp.community === "string" ? sp.community : null;
   const user = await getCurrentUser();
   // Only fetched for a signed-in user — listMyActiveCommunities() itself
   // degrades to [] when signed out, but there's nothing to hand it to below
@@ -48,7 +56,7 @@ export default async function SubmitShowcasePage() {
 
       <div className="mt-10">
         {user ? (
-          <SubmitFlow communities={communities} />
+          <SubmitFlow communities={communities} initialCommunityId={startCommunity} />
         ) : (
           <div className="glass-panel rounded-2xl p-10 text-center">
             <span className="material-symbols-outlined text-4xl text-primary">lock</span>
@@ -61,7 +69,9 @@ export default async function SubmitShowcasePage() {
             </p>
             <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link
-                href="/login?callbackUrl=%2Fpromote%2Fsubmit"
+                href={`/login?callbackUrl=${encodeURIComponent(
+                  startCommunity ? `/promote/submit?community=${startCommunity}` : "/promote/submit"
+                )}`}
                 className="btn-primary px-6 py-3 rounded-lg font-label-md text-label-md"
               >
                 Sign in to submit

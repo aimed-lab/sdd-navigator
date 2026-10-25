@@ -64,7 +64,7 @@ export default function AddMemberByEmailForm({
         </button>
       </div>
       <p className="font-body-sm text-body-sm text-secondary">
-        They're a member right away — linked now if they already have an account, or the moment
+        They're a member right away, linked now if they already have an account, or the moment
         they sign in if not.
       </p>
       {added && (

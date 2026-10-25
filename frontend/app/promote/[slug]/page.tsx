@@ -21,6 +21,7 @@
 // to this file) is the og:image and twitter:image; og:url and the canonical use
 // the site URL config (lib/articleFormat.ts), never a hardcoded host.
 
+import { teamLabelHref } from "@/lib/server/teams/teamRules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -112,8 +113,11 @@ export default async function ArticlePage({ params }: PageProps) {
   // one is the fallback.
   const follow = {
     page: found.page,
+    // A team the viewer is not on shows by name only (no slug, no link).
     community: article.community
-      ? { slug: article.community.slug, name: article.community.name }
+      ? article.community.slug && article.community.kind === "community"
+        ? { slug: article.community.slug, name: article.community.name }
+        : null
       : found.community,
   };
 
@@ -230,14 +234,19 @@ export default async function ArticlePage({ params }: PageProps) {
             <span className="px-3 py-1 rounded-full bg-white/15 font-label-sm text-label-sm uppercase tracking-wide">
               {typeLabel}
             </span>
-            {article.community && (
-              <Link
-                href={`/communities/${article.community.slug}`}
-                className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors font-label-sm text-label-sm"
-              >
-                {article.community.name}
-              </Link>
-            )}
+            {article.community &&
+              (teamLabelHref(article.community) ? (
+                <Link
+                  href={teamLabelHref(article.community) as string}
+                  className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition-colors font-label-sm text-label-sm"
+                >
+                  {article.community.name}
+                </Link>
+              ) : (
+                <span className="px-3 py-1 rounded-full bg-white/10 font-label-sm text-label-sm">
+                  {article.community.name}
+                </span>
+              ))}
             {isOwner && <OwnerMenu id={article.id} slug={article.slug} title={article.headline} />}
           </div>
 

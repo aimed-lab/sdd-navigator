@@ -152,3 +152,69 @@ test("progress table: only the member can read or write their own row", () => {
   for (const p of policies) assert.match(p, /user_id = auth\.uid\(\)/);
   assert.doesNotMatch(sql, /GRANT[^;]*community_member_progress[^;]*\banon\b/);
 });
+
+// ── teams: the email join takes a slug, never an id ──────────────────────────
+
+import { runTeamEmailJoin } from "./emailJoin.ts";
+import { canEmailJoinAsCommunity } from "../teams/teamRules.ts";
+
+const teamsSql = readFileSync(new URL("../../../../database/migrations/2026-10-28_teams.sql", import.meta.url), "utf8");
+const communityFn = teamsSql.slice(
+  teamsSql.indexOf("CREATE OR REPLACE FUNCTION public.join_open_community_by_email"),
+  teamsSql.indexOf("CREATE OR REPLACE FUNCTION public.join_team_by_email")
+);
+const teamFn = teamsSql.slice(
+  teamsSql.indexOf("CREATE OR REPLACE FUNCTION public.join_team_by_email"),
+  teamsSql.indexOf("-- 4. community_members self-insert")
+);
+
+test("a team id sent to the community email join is refused (app guard and SQL)", () => {
+  assert.equal(canEmailJoinAsCommunity("community"), true);
+  assert.equal(canEmailJoinAsCommunity("team"), false);
+  assert.equal(canEmailJoinAsCommunity(undefined), false);
+  assert.equal(canEmailJoinAsCommunity(null), false);
+  // The SQL function keeps its signature and refuses kind = 'team' before anything is written.
+  assert.match(communityFn, /join_open_community_by_email\(p_community_id UUID, p_email TEXT\)/);
+  assert.match(communityFn, /IF v_kind = 'team' THEN\s+RETURN 'not_found';/);
+  assert.ok(communityFn.indexOf("v_kind = 'team'") < communityFn.indexOf("INSERT INTO"), "refused before the insert");
+  assert.match(teamsSql, /GRANT EXECUTE ON FUNCTION public\.join_open_community_by_email\(UUID, TEXT\) TO service_role;/);
+  assert.doesNotMatch(teamsSql, /GRANT EXECUTE ON FUNCTION public\.join_open_community_by_email[^;]*(anon|authenticated)/);
+});
+
+test("the team email join works only with a slug: the database function resolves it, for teams only", () => {
+  assert.match(teamFn, /join_team_by_email\(p_slug TEXT, p_email TEXT\)/);
+  assert.match(teamFn, /WHERE c\.slug = p_slug AND c\.kind = 'team'/);
+  assert.doesNotMatch(teamFn, /p_community_id|p_team_id|UUID,/, "no id parameter");
+  assert.match(teamsSql, /REVOKE ALL ON FUNCTION public\.join_team_by_email\(TEXT, TEXT\) FROM anon;/);
+  assert.match(teamsSql, /REVOKE ALL ON FUNCTION public\.join_team_by_email\(TEXT, TEXT\) FROM authenticated;/);
+  assert.match(teamsSql, /GRANT EXECUTE ON FUNCTION public\.join_team_by_email\(TEXT, TEXT\) TO service_role;/);
+  assert.doesNotMatch(teamsSql, /GRANT EXECUTE ON FUNCTION public\.join_team_by_email[^;]*(anon|authenticated)/);
+});
+
+test("runTeamEmailJoin: hands the slug (not an id) to the database, validates and limits first", async () => {
+  const seen: string[] = [];
+  const rpc = async (slug: string, email: string) => (seen.push(`${slug}|${email}`), { data: "joined", error: null });
+  const ok = await runTeamEmailJoin({ slug: "kras-a1b2c3", email: " Ada@X.org ", ip: "t1", limiter: createRateLimiter(1000, 5), rpc });
+  assert.deepEqual(ok, { ok: true, message: JOINED_MESSAGE });
+  assert.deepEqual(seen, ["kras-a1b2c3|ada@x.org"]);
+
+  const none = await runTeamEmailJoin({ slug: "", email: "a@b.org", ip: "t2", limiter: createRateLimiter(1000, 5), rpc });
+  assert.equal(none.ok, false);
+  const bad = await runTeamEmailJoin({ slug: "s", email: "nope", ip: "t3", limiter: createRateLimiter(1000, 5), rpc });
+  assert.equal(!bad.ok && bad.reason, "invalid");
+  assert.equal(seen.length, 1, "bad input never reaches the database");
+
+  const lim = createRateLimiter(1000, 1);
+  await runTeamEmailJoin({ slug: "s", email: "a@b.org", ip: "t4", limiter: lim, rpc });
+  const limited = await runTeamEmailJoin({ slug: "s", email: "a@b.org", ip: "t4", limiter: lim, rpc });
+  assert.equal(!limited.ok && limited.reason, "rate_limited");
+
+  const missing = await runTeamEmailJoin({
+    slug: "nope",
+    email: "a@b.org",
+    ip: "t5",
+    limiter: createRateLimiter(1000, 5),
+    rpc: async () => ({ data: "not_found", error: null }),
+  });
+  assert.equal(!missing.ok && missing.error, "Team not found.");
+});

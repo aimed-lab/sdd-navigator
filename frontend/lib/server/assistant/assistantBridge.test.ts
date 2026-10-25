@@ -14,6 +14,21 @@ test("parseAssistantRequest: send by default, fill when asked, junk refused", ()
   assert.equal(parseAssistantRequest({ text: "y".repeat(900) })!.text.length, 500);
 });
 
+test("parseAssistantRequest: a team is kept only with a real id, a name and a slug", () => {
+  const id = "0b9d7f58-6c5a-4a0e-9d3c-2f1d9a8b7c6e";
+  const ok = parseAssistantRequest({ text: "Make a wiki page for my team X about:", mode: "fill", team: { id: id.toUpperCase(), name: "  KRAS   club ", slug: "kras-club-a1b2c3" } });
+  assert.deepEqual(ok, { text: "Make a wiki page for my team X about:", mode: "fill", team: { id, name: "KRAS club", slug: "kras-club-a1b2c3" } });
+  for (const bad of [
+    { id: "nope", name: "X", slug: "x" },
+    { id, name: "", slug: "x" },
+    { id, name: "X", slug: "../x" },
+    { id, name: "X" },
+    "team",
+  ]) {
+    assert.equal("team" in parseAssistantRequest({ text: "hi", team: bad })!, false, JSON.stringify(bad));
+  }
+});
+
 test("the save flow starts with a wiki-page request naming the topic", () => {
   assert.equal(saveAsLivingPageMessage("  KRAS in pancreatic cancer "), "I'd like to create a wiki page on KRAS in pancreatic cancer");
   assert.match(START_LIVING_PAGE_MESSAGE, /wiki page/);

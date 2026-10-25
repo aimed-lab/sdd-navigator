@@ -285,6 +285,8 @@ export const STARTERS: Starter[] = [
 /** The panel is offered on Explore and on the /pages screens only. */
 export function assistantAvailableOn(pathname: string | null | undefined): boolean {
   if (!pathname) return false;
+  // A team page too: its "Make learning material" tile opens the assistant.
+  if (pathname.startsWith("/teams/") && pathname !== "/teams/new") return true;
   return pathname === "/explore" || pathname.startsWith("/explore/") || pathname === "/pages" || pathname.startsWith("/pages/");
 }
 

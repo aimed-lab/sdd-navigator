@@ -57,10 +57,15 @@ import {
 import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
 import { MATCH_LIMIT, MATCH_MIN_COVERAGE, rankCommunities, type RankedCommunity } from "./assistant/communityMatch";
 import type { ExploreItem } from "@/types/explore";
+import { canAddResource, type CommunityKind } from "./teams/teamRules";
 
 export type Community = {
   id: string;
   slug: string;
+  // 'community' (public, long-lived, made by site admins) or 'team' (small,
+  // private, made by anyone) — database/migrations/2026-10-28_teams.sql.
+  // Fixed after creation.
+  kind: CommunityKind;
   name: string;
   description: string | null;
   is_open: boolean;
@@ -118,7 +123,10 @@ export type Community = {
  *  never blocks this read on failure. Communities themselves are public
  *  reads (getAnonServerClient), but the claim needs the caller's own
  *  session, so it only runs when one exists. */
-export async function listCommunities(): Promise<Community[]> {
+export async function listCommunities(
+  opts: { kind?: CommunityKind | "all" } = {}
+): Promise<Community[]> {
+  const kind = opts.kind ?? "community"; // teams never show up in community lists
   const session = await getSession();
   if (session) {
     const { error } = await session.db.rpc("claim_pending_community_memberships");
@@ -128,13 +136,16 @@ export async function listCommunities(): Promise<Community[]> {
   const supabase = getAnonServerClient();
   if (!supabase) return [];
 
+  let listQuery = supabase
+    .from("communities")
+    .select(
+      "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview, kind"
+    )
+    .order("name", { ascending: true });
+  if (kind !== "all") listQuery = listQuery.eq("kind", kind);
+
   const [{ data, error }, countsResult] = await Promise.all([
-    supabase
-      .from("communities")
-      .select(
-        "id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview"
-      )
-      .order("name", { ascending: true }),
+    listQuery,
     supabase.rpc("community_member_counts"),
   ]);
 
@@ -210,7 +221,9 @@ export type CreateCommunityResult =
   | { status: "ok"; id: string; slug: string }
   | { status: "error"; error: string };
 
-/** Create a community. Any signed-in user — create_community_with_admin
+/** Create a community or a team (see `kind`). A TEAM: any signed-in user. A
+ *  COMMUNITY: site admins only (2026-10-28_teams.sql; before that file any
+ *  signed-in user could). create_community_with_admin
  *  (database/migrations/2026-08-30_community_admin_membership.sql) inserts
  *  the community row AND the caller's own admin membership row in one
  *  transaction, same move as create_project_with_lead. ALL COMMUNITIES ARE
@@ -219,17 +232,23 @@ export type CreateCommunityResult =
 export async function createCommunity(input: {
   name: string;
   purpose: string;
+  /** 'team' for a team (any signed-in user); 'community' (default) is for site
+   *  admins only — the RPC and a trigger on communities enforce that, not this
+   *  function. */
+  kind?: CommunityKind;
 }): Promise<CreateCommunityResult> {
   const { db } = await requireCurrentUser();
+  const kind: CommunityKind = input.kind ?? "community";
+  const noun = kind === "team" ? "team" : "community";
 
   const name = input.name.trim();
-  if (!name) return { status: "error", error: "A community name is required." };
+  if (!name) return { status: "error", error: `A ${noun} name is required.` };
 
   const purpose = input.purpose.trim();
-  if (!purpose) return { status: "error", error: "Say what this community is for." };
+  if (!purpose && kind === "community") return { status: "error", error: "Say what this community is for." };
 
   const { data, error } = await db
-    .rpc("create_community_with_admin", { p_name: name, p_description: purpose })
+    .rpc("create_community_with_admin", { p_name: name, p_description: purpose || null, p_kind: kind })
     .single();
 
   if (error || !data) {
@@ -246,13 +265,13 @@ export async function createCommunity(input: {
     // going and reading the server log.
     if (error?.code === "P0001" && error.message) {
       const reason = error.message.replace(/^create_community_with_admin:\s*/, "");
-      return { status: "error", error: `Couldn't create the community — ${reason}.` };
+      return { status: "error", error: `Couldn't create the ${noun}: ${reason}.` };
     }
 
     return {
       status: "error",
       error:
-        "Couldn't create the community — this is a server-side problem, not something wrong with what you entered. Check the server log (code: " +
+        `Couldn't create the ${noun}. This is a server-side problem, not something wrong with what you entered. Check the server log (code: ` +
         (error?.code ?? "unknown") +
         ").",
     };
@@ -262,15 +281,24 @@ export async function createCommunity(input: {
   return { status: "ok", id: row.id, slug: row.slug };
 }
 
+/** The client community reads go through. Communities are public, but a TEAM
+ *  row is readable only by its own members and site admins (2026-10-28_teams.sql),
+ *  so a signed-in reader uses their own session; a visitor falls back to the
+ *  anon client and simply gets no row for a team. */
+async function readerDb(): Promise<Db | ReturnType<typeof getAnonServerClient>> {
+  const session = await getSession();
+  return session ? session.db : getAnonServerClient();
+}
+
 /** One community by slug — used to resolve the ?community= URL param into an
  *  id for filtering posts/resources. Null when the slug doesn't exist. */
 export async function getCommunityBySlug(slug: string): Promise<Community | null> {
-  const supabase = getAnonServerClient();
+  const supabase = await readerDb();
   if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview, kind")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -283,12 +311,12 @@ export async function getCommunityBySlug(slug: string): Promise<Community | null
  *  which needs the SLUG back to redirect into /communities/<slug> after
  *  create). Same public read as getCommunityBySlug. */
 export async function getCommunityById(id: string): Promise<Community | null> {
-  const supabase = getAnonServerClient();
+  const supabase = await readerDb();
   if (!supabase) return null;
 
   const { data, error } = await supabase
     .from("communities")
-    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview")
+    .select("id, slug, name, description, is_open, sections, explore_sources, explore_topics, explore_refreshed_at, explore_paper_scope, explore_grant_activity_codes, public_preview, kind")
     .eq("id", id)
     .maybeSingle();
 
@@ -397,6 +425,16 @@ export async function getMembership(communityId: string): Promise<Membership> {
   const active = data.status === "active";
   const role = active ? (data.role as CommunityRole) : null;
   return { state: active ? "active" : "pending", role, isAdmin: role === "admin" };
+}
+
+/** Is this id a team or a community? Reads the public communities row;
+ *  'community' when the row can't be read, which is the stricter default for
+ *  every permission that depends on it. */
+export async function getCommunityKind(communityId: string): Promise<CommunityKind> {
+  const supabase = await readerDb();
+  if (!supabase) return "community";
+  const { data } = await supabase.from("communities").select("kind").eq("id", communityId).maybeSingle();
+  return (data as { kind?: string } | null)?.kind === "team" ? "team" : "community";
 }
 
 /** Join (open community) or request to join (closed community). Which one
@@ -1624,8 +1662,12 @@ export async function createCommunityResource(
   const { user, db } = await requireCurrentUser();
 
   const membership = await getMembership(communityId);
-  if (!membership.isAdmin) {
-    return { status: "error", error: "Only a community admin can add a resource." };
+  const kind = await getCommunityKind(communityId);
+  if (!canAddResource({ kind, isMember: membership.state === "active", isAdmin: membership.isAdmin })) {
+    return {
+      status: "error",
+      error: kind === "team" ? "Only team members can add to this team." : "Only a community admin can add a resource.",
+    };
   }
 
   const title = input.title.trim();
@@ -1684,7 +1726,10 @@ export async function updateCommunityResource(
   const { db } = await requireCurrentUser();
 
   const membership = await getMembership(communityId);
-  if (!membership.isAdmin) {
+  // In a team the person who added it may edit it; the database decides which
+  // rows that is (a member's attempt on someone else's matches zero rows).
+  const kind = await getCommunityKind(communityId);
+  if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
     return { status: "error", error: "Only a community admin can edit a resource." };
   }
 
@@ -1700,7 +1745,7 @@ export async function updateCommunityResource(
     return { status: "error", error: "Please paste a valid http:// or https:// link, or leave it blank." };
   }
 
-  const { error } = await db
+  const { data: updated, error } = await db
     .from("community_resources")
     .update({
       title,
@@ -1709,7 +1754,12 @@ export async function updateCommunityResource(
       description: input.description.trim(),
     })
     .eq("id", resourceId)
-    .eq("community_id", communityId);
+    .eq("community_id", communityId)
+    .select("id");
+
+  if (!error && (!updated || updated.length === 0)) {
+    return { status: "error", error: "Only the person who added this, or a team lead, can change it." };
+  }
 
   if (error) {
     console.error("updateCommunityResource: update failed", error);
@@ -1741,15 +1791,22 @@ export async function deleteCommunityResource(
   const { db } = await requireCurrentUser();
 
   const membership = await getMembership(communityId);
-  if (!membership.isAdmin) {
+  const kind = await getCommunityKind(communityId);
+  if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
     return { status: "error", error: "Only a community admin can delete a resource." };
   }
 
-  const { error } = await db
+  const { data: removed, error } = await db
     .from("community_resources")
     .delete()
     .eq("id", resourceId)
-    .eq("community_id", communityId);
+    .eq("community_id", communityId)
+    .select("id");
+
+  if (!error && (!removed || removed.length === 0)) {
+    // In a team the database lets only the uploader or a lead remove it.
+    return { status: "error", error: "Only the person who added this, or a team lead, can remove it." };
+  }
 
   if (error) {
     console.error("deleteCommunityResource: delete failed", error);
@@ -1876,7 +1933,10 @@ export async function addCommunityResourceFile(
   const { user, db } = await requireCurrentUser();
 
   const membership = await getMembership(communityId);
-  if (!membership.isAdmin) throw new Error("Only a community admin can attach a file.");
+  const kind = await getCommunityKind(communityId);
+  if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
+    throw new Error("Only a community admin can attach a file.");
+  }
 
   if (!file || file.size === 0) throw new Error("No file selected.");
   if (!RESOURCE_FILE_ALLOWED_MIME.has(file.type)) throw new Error("Use PNG, JPEG, WebP, GIF, PDF or PPTX.");
@@ -1927,7 +1987,10 @@ export async function removeCommunityResourceFile(
   const { db } = await requireCurrentUser();
 
   const membership = await getMembership(communityId);
-  if (!membership.isAdmin) throw new Error("Only a community admin can remove a file.");
+  const kind = await getCommunityKind(communityId);
+  if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
+    throw new Error("Only a community admin can remove a file.");
+  }
 
   const { data, error } = await db
     .from("community_resource_files")
@@ -1938,6 +2001,7 @@ export async function removeCommunityResourceFile(
     .select("url")
     .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("Only the person who added this file, or a team lead, can remove it.");
 
   const path = (data?.url as string) ?? null;
   if (path) {

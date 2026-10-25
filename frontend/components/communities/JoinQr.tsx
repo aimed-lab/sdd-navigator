@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { joinUrl } from "@/lib/server/communityHome/communityHome";
+import { teamJoinUrl } from "@/lib/server/teams/teamRules";
 
 const INK = "#191c1e";
 
@@ -16,16 +17,20 @@ export default function JoinQr({
   slug,
   name,
   isAdmin,
+  team = false,
 }: {
   slug: string;
   name: string;
   isAdmin: boolean;
+  /** A team's join link is /teams/<slug>?join=1 instead of the community's. */
+  team?: boolean;
 }) {
+  const urlFor = (origin: string) => (team ? teamJoinUrl(origin, slug) : joinUrl(origin, slug));
   const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    QRCode.toDataURL(joinUrl(window.location.origin, slug), {
+    QRCode.toDataURL(urlFor(window.location.origin), {
       width: 320,
       margin: 1,
       errorCorrectionLevel: "M",
@@ -36,11 +41,11 @@ export default function JoinQr({
     return () => {
       live = false;
     };
-  }, [slug]);
+  }, [slug, team]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function download() {
     // A big, high-contrast PNG: crisp when projected or printed.
-    const url = await QRCode.toDataURL(joinUrl(window.location.origin, slug), {
+    const url = await QRCode.toDataURL(urlFor(window.location.origin), {
       width: 1200,
       margin: 4,
       errorCorrectionLevel: "H",

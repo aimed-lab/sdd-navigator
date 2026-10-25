@@ -9,6 +9,7 @@
 
 import { getCurrentUser } from "@/lib/auth";
 import { listCommunities, listMyMemberships } from "@/lib/server/communities";
+import { isSiteAdmin } from "@/lib/server/showcase";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import SectionHeading from "@/components/explore/SectionHeading";
 import CommunityCard from "@/components/communities/CommunityCard";
@@ -27,9 +28,11 @@ export default async function CommunitiesPage({
   const sp = await searchParams;
   const [user, communities, memberships] = await Promise.all([
     getCurrentUser(),
-    listCommunities(),
+    listCommunities(), // communities only; teams live under /teams
     listMyMemberships(),
   ]);
+  // Only site admins start communities. Everyone else makes teams (/teams/new).
+  const siteAdmin = user ? await isSiteAdmin() : false;
 
   const yours = communities.filter((c) => memberships[c.id]?.status === "active");
   const others = communities.filter((c) => memberships[c.id]?.status !== "active");
@@ -39,19 +42,23 @@ export default async function CommunitiesPage({
       <DeletedNotice show={wasDeleted(sp)} />
       <PageHeader
         title="Communities"
-        subtitle="Join a community or start one. Communities are groups of researchers working on the same problem."
+        subtitle={
+          siteAdmin
+            ? "Join a community or start one. Communities are groups of researchers working on the same problem."
+            : "Communities are groups of researchers working on the same problem. Join one that fits your work."
+        }
         className="mb-0"
         action={
-          user ? (
-            <CreateCommunitySection />
-          ) : (
+          !user ? (
             <a
               href="/login?callbackUrl=%2Fcommunities"
               className="btn-outline px-6 py-3 rounded-lg font-label-md text-label-md"
             >
-              Sign in to join or start one
+              Sign in to join a community
             </a>
-          )
+          ) : siteAdmin ? (
+            <CreateCommunitySection />
+          ) : undefined
         }
       />
 
@@ -73,7 +80,7 @@ export default async function CommunitiesPage({
             </div>
           ) : (
             <p className="font-body-sm text-body-sm text-secondary">
-              You&apos;re not in any communities yet. Join one below, or start your own with the button above.
+              You&apos;re not in any communities yet. Join one below.
             </p>
           )}
         </section>
@@ -96,8 +103,10 @@ export default async function CommunitiesPage({
         ) : (
           <p className="font-body-sm text-body-sm text-secondary">
             {communities.length === 0
-              ? "No communities yet. Start the first one with the button above."
-              : "You are in every community there is. Start a new one with the button above."}
+              ? siteAdmin
+                ? "No communities yet. Start the first one with the button above."
+                : "No communities yet."
+              : "You are in every community there is."}
           </p>
         )}
       </section>

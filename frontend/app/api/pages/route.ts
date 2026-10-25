@@ -7,6 +7,8 @@ import {
 } from "@/lib/server/pages/pagesDb";
 import { createLivingPage } from "@/lib/server/pages/createPage";
 import { getCurrentUser } from "@/lib/auth";
+import { addPageToTeam } from "@/lib/server/teams/teams";
+import { parseTeamId } from "@/lib/server/teams/teamRules";
 
 // POST /api/pages — create a topic-seeded "wiki page": a bare topic string
 // in, a page whose wiki notes + evidence have already been researched and
@@ -23,6 +25,12 @@ import { getCurrentUser } from "@/lib/auth";
 // public page may also be created with no session: owner_id is then null (a
 // site-created topic page; the table's CHECK allows a null owner only when
 // public). A signed-in caller creating a public page owns it.
+//
+// TEAM: an optional `team_id` (a team the signed-in caller is on) curates the
+// new page into that team ("Made by AI" on the team page). The page is created
+// first and added second, with the caller's own session, so the database still
+// decides whether they may add to that team. If adding fails the page is kept
+// and the response says so (`team.added: false`).
 //
 // The `pages` row is inserted with the service-role client because an
 // ownerless page has no session to scope to; see 2026-10-20_living_pages.sql.
@@ -71,6 +79,13 @@ export async function POST(req: Request) {
   const visibility = isPageVisibility(fields.visibility) ? fields.visibility : DEFAULT_PAGE_VISIBILITY;
 
   const user = await getCurrentUser();
+  const teamId = fields.team_id === undefined ? null : parseTeamId(fields.team_id);
+  if (fields.team_id !== undefined && !teamId) {
+    return NextResponse.json({ error: "team_id must be a team id." }, { status: 400 });
+  }
+  if (teamId && !user) {
+    return NextResponse.json({ error: "Sign in to add a page to a team." }, { status: 401 });
+  }
   if (!user && visibility !== "public") {
     return NextResponse.json(
       { error: "Sign in to create a private or team page." },
@@ -102,7 +117,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
+  let team: { added: boolean; error?: string } | undefined;
+  if (teamId) {
+    try {
+      const added = await addPageToTeam(teamId, result.pageId, "made");
+      team = added.status === "ok" ? { added: true } : { added: false, error: added.error };
+    } catch (e) {
+      console.error("POST /api/pages: adding the page to the team failed", e);
+      team = { added: false, error: "The page was made but could not be added to the team." };
+    }
+  }
+
   return NextResponse.json({
+    ...(team ? { team } : {}),
     slug: result.slug,
     visibility: result.visibility,
     pageId: result.pageId,
