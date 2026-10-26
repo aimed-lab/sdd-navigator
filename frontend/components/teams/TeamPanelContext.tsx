@@ -6,7 +6,7 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 
-export type TeamPanel = "document" | "pages" | "news" | null;
+export type TeamPanel = "document" | "pages" | "share" | null;
 
 type Ctx = {
   panel: TeamPanel;

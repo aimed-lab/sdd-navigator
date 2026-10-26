@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { TEAMS_MODE, teamsModeRedirects } from "./lib/siteMode";
 
 const nextConfig: NextConfig = {
   async redirects() {
@@ -14,6 +15,8 @@ const nextConfig: NextConfig = {
         destination: "/",
         permanent: true,
       },
+      // Teams mode only (NEXT_PUBLIC_SITE_MODE=teams): drug-discovery routes go home.
+      ...teamsModeRedirects(TEAMS_MODE),
     ];
   },
   images: {

@@ -24,6 +24,7 @@ import { getTeamJoinInfo, listCommunitiesToLink, listTeamCommunities, listTeamPa
 import { PageShell } from "@/components/PageHeader";
 import TeamHeader from "@/components/teams/TeamHeader";
 import TeamJoinCard from "@/components/teams/TeamJoinCard";
+import { siteTitle } from "@/lib/siteMode";
 import TeamTiles from "@/components/teams/TeamTiles";
 import { TeamPanelProvider } from "@/components/teams/TeamPanelContext";
 import TeamSettings from "@/components/teams/TeamSettings";
@@ -34,7 +35,7 @@ export const dynamic = "force-dynamic"; // depends on the session
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const team = await getCommunityBySlug(slug);
-  return { title: team ? `${team.name} · Team · SmartDrugDiscovery` : "Team · SmartDrugDiscovery" };
+  return { title: siteTitle(team ? `${team.name} · Team` : "Team") };
 }
 
 export default async function TeamPage({
@@ -125,7 +126,7 @@ export default async function TeamPage({
           isLead={isLead}
         />
 
-        <TeamTiles teamId={team.id} slug={team.slug} name={team.name} isLead={isLead} />
+        <TeamTiles teamId={team.id} slug={team.slug} name={team.name} description={team.description} isLead={isLead} />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">

@@ -18,12 +18,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { TEAMS_BRAND, TEAMS_MODE, accountLinks, navPillars } from "@/lib/siteMode";
 
-const PILLARS = [
-  { label: "Explore", href: "/explore" },
-  { label: "Collaborate", href: "/collaborate" },
-  { label: "Promote", href: "/promote" },
-] as const;
+// Explore / Collaborate / Promote, or Teams / My pages in teams mode (lib/siteMode.ts).
+const PILLARS = navPillars(TEAMS_MODE);
+const ACCOUNT = accountLinks(TEAMS_MODE);
+const ACCOUNT_ICON: Record<string, string> = { "/projects": "folder", "/pages": "article", "/saved": "bookmark" };
 
 // Projects used to be a pillar here (added only when signed in, since a
 // signed-out visitor has nothing to see at /projects — it redirects
@@ -77,7 +77,8 @@ export default function Nav() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" || pathname.startsWith("/teams") : pathname === href || pathname.startsWith(href + "/");
 
   return (
     <nav className="fixed top-0 left-0 w-full z-50 h-16 bg-[#fbfaf7]/85 backdrop-blur-xl border-b border-[#e7e4dc]">
@@ -85,7 +86,7 @@ export default function Nav() {
         {/* Left: wordmark + center pillars */}
         <div className="flex items-center gap-8">
           <Link href="/" className="font-label-md text-[24px] leading-8 font-bold text-on-background">
-            SmartDrugDiscovery
+            {TEAMS_MODE ? TEAMS_BRAND : "SmartDrugDiscovery"}
           </Link>
           <div className="hidden md:flex items-center gap-6">
             {PILLARS.map((p) => (
@@ -159,30 +160,17 @@ export default function Nav() {
                       <span className="material-symbols-outlined text-secondary text-base">group</span>
                       My teams
                     </Link>
-                    <Link
-                      href="/projects"
-                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <span className="material-symbols-outlined text-secondary text-base">folder</span>
-                      My projects
-                    </Link>
-                    <Link
-                      href="/pages"
-                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <span className="material-symbols-outlined text-secondary text-base">article</span>
-                      My pages
-                    </Link>
-                    <Link
-                      href="/saved"
-                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <span className="material-symbols-outlined text-secondary text-base">bookmark</span>
-                      Saved items
-                    </Link>
+                    {ACCOUNT.map((l) => (
+                      <Link
+                        key={l.href}
+                        href={l.href}
+                        className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        <span className="material-symbols-outlined text-secondary text-base">{ACCOUNT_ICON[l.href]}</span>
+                        {l.label}
+                      </Link>
+                    ))}
                     <Link
                       href="/settings"
                       className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
@@ -259,15 +247,11 @@ export default function Nav() {
               <Link href="/teams" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 My teams
               </Link>
-              <Link href="/projects" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
-                My projects
-              </Link>
-              <Link href="/pages" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
-                My pages
-              </Link>
-              <Link href="/saved" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
-                Saved items
-              </Link>
+              {ACCOUNT.map((l) => (
+                <Link key={l.href} href={l.href} onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
+                  {l.label}
+                </Link>
+              ))}
               <Link href="/settings" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 Settings
               </Link>

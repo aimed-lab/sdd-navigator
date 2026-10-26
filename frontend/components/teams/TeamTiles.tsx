@@ -10,12 +10,12 @@ import { makePagePrompt } from "@/lib/server/teams/teamRules";
 import ActionTile, { type Tone } from "@/components/ui/ActionTile";
 import AddDocumentPanel from "./AddDocumentPanel";
 import CuratePagesPanel from "./CuratePagesPanel";
-import NewsPanel from "./NewsPanel";
 import PanelFrame from "./PanelFrame";
+import SharePromotePanel from "./SharePromotePanel";
 import { useTeamPanel } from "./TeamPanelContext";
 
 const TILES: {
-  key: "document" | "pages" | "learn" | "news";
+  key: "document" | "pages" | "learn" | "share";
   icon: string;
   title: string;
   blurb: string;
@@ -25,24 +25,26 @@ const TILES: {
   { key: "document", icon: "upload_file", title: "Share a document", blurb: "Upload a file or add a link.", action: "Upload or add a link →", tone: "blue" },
   { key: "pages", icon: "menu_book", title: "Curate wiki pages", blurb: "Add your pages or public ones.", action: "Add pages →", tone: "amber" },
   { key: "learn", icon: "auto_awesome", title: "Make learning material", blurb: "The assistant writes a wiki page for the team.", action: "Ask the AI →", tone: "green" },
-  { key: "news", icon: "campaign", title: "News & promote", blurb: "Post team news or share a result.", action: "Post news →", tone: "rose" },
+  { key: "share", icon: "campaign", title: "Share & promote", blurb: "Post a photo to LinkedIn, X or Facebook, or share team news.", action: "Share →", tone: "purple" },
 ];
 
 const PANEL_TITLE = {
   document: "Share a document with the team",
   pages: "Add wiki pages to the team",
-  news: "News & promote",
+  share: "Share & promote",
 } as const;
 
 export default function TeamTiles({
   teamId,
   slug,
   name,
+  description,
   isLead,
 }: {
   teamId: string;
   slug: string;
   name: string;
+  description: string | null;
   isLead: boolean;
 }) {
   const { panel, toggle, close } = useTeamPanel();
@@ -70,19 +72,21 @@ export default function TeamTiles({
       </h2>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {TILES.map((t) => (
-          <ActionTile
-            key={t.key}
-            icon={t.icon}
-            title={t.title}
-            description={t.blurb}
-            action={t.action}
-            tone={t.tone}
-            featured={t.key === "learn"}
-            badge={t.key === "learn" ? "AI" : undefined}
-            active={t.key !== "learn" && panel === t.key}
-            expanded={t.key === "learn" ? undefined : panel === t.key}
-            onClick={() => pick(t.key)}
-          />
+          // The share tile comes first on a phone (2 columns); on desktop it keeps its place in the row.
+          <div key={t.key} className={t.key === "share" ? "flex order-first lg:order-none" : "flex"}>
+            <ActionTile
+              icon={t.icon}
+              title={t.title}
+              description={t.blurb}
+              action={t.action}
+              tone={t.tone}
+              featured={t.key === "learn"}
+              badge={t.key === "learn" ? "AI" : undefined}
+              active={t.key !== "learn" && panel === t.key}
+              expanded={t.key === "learn" ? undefined : panel === t.key}
+              onClick={() => pick(t.key)}
+            />
+          </div>
         ))}
       </div>
 
@@ -96,9 +100,9 @@ export default function TeamTiles({
           <CuratePagesPanel teamId={teamId} slug={slug} onClose={close} />
         </PanelFrame>
       )}
-      {panel === "news" && (
-        <PanelFrame title={PANEL_TITLE.news} onClose={close}>
-          <NewsPanel teamId={teamId} slug={slug} isLead={isLead} onClose={close} />
+      {panel === "share" && (
+        <PanelFrame title={PANEL_TITLE.share} onClose={close}>
+          <SharePromotePanel teamId={teamId} slug={slug} name={name} description={description} isLead={isLead} onClose={close} />
         </PanelFrame>
       )}
     </section>

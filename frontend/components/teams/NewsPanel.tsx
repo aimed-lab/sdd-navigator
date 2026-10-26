@@ -17,11 +17,14 @@ export default function NewsPanel({
   slug,
   isLead,
   onClose,
+  section = "both",
 }: {
   teamId: string;
   slug: string;
   isLead: boolean;
   onClose: () => void;
+  /** Which half to show: the news form, the Promote link, or both side by side. */
+  section?: "news" | "promote" | "both";
 }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -43,8 +46,8 @@ export default function NewsPanel({
   };
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {isLead ? (
+    <div className={section === "both" ? "grid grid-cols-1 md:grid-cols-2 gap-6" : "flex flex-col gap-6"}>
+      {section === "promote" ? null : isLead ? (
         <form onSubmit={post} className="flex flex-col gap-3">
           <h3 className="font-label-lg text-label-lg text-on-background">Post team news</h3>
           <input
@@ -90,6 +93,7 @@ export default function NewsPanel({
         </div>
       )}
 
+      {section !== "news" && (
       <div className="flex flex-col gap-2">
         <h3 className="font-label-lg text-label-lg text-on-background">Share a photo or result</h3>
         <p className="font-body-md text-body-md text-secondary">
@@ -103,6 +107,7 @@ export default function NewsPanel({
           Share a photo or result
         </Link>
       </div>
+      )}
     </div>
   );
 }

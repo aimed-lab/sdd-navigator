@@ -8,6 +8,7 @@ import Nav from "@/components/Nav";
 import Footer from "@/components/Footer";
 import GeneralFeedback from "@/components/feedback/GeneralFeedback";
 import AssistantChat from "@/components/explore/AssistantChat";
+import { TEAMS_BRAND, TEAMS_MODE } from "@/lib/siteMode";
 
 // Serif for editorial titles (Explore, homepage tiles). Exposed as --font-title,
 // used by the `font-title` Tailwind class. Body and labels keep Inter/Geist.
@@ -18,11 +19,16 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "SmartDrugDiscovery",
-  description:
-    "Explore, Build, Promote — one platform for the drug-discovery community.",
-};
+export const metadata: Metadata = TEAMS_MODE
+  ? {
+      title: TEAMS_BRAND,
+      description: "A private space for your group: slides, papers, AI-updated learning pages, and people.",
+    }
+  : {
+      title: "SmartDrugDiscovery",
+      description:
+        "Explore, Build, Promote — one platform for the drug-discovery community.",
+    };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

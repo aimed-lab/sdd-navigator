@@ -6,10 +6,11 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import CreateTeamForm from "@/components/teams/CreateTeamForm";
+import { siteTitle } from "@/lib/siteMode";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Create a team · SmartDrugDiscovery" };
+export const metadata = { title: siteTitle("Create a team") };
 
 export default async function NewTeamPage({
   searchParams,

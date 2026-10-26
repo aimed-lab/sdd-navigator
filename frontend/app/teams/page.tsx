@@ -6,10 +6,11 @@ import { listMyTeams } from "@/lib/server/teams/teams";
 import { plural, roleLabel, teamPath } from "@/lib/server/teams/teamRules";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
+import { siteTitle } from "@/lib/siteMode";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Your teams · SmartDrugDiscovery" };
+export const metadata = { title: siteTitle("Your teams") };
 
 export default async function TeamsPage({
   searchParams,

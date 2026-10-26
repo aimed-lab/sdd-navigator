@@ -19,6 +19,8 @@
 // AND is at least MIN_COUNT_TO_SHOW. Nothing here is a typed-in statistic.
 
 import Link from "next/link";
+import TeamsHome from "@/components/teams/TeamsHome";
+import { TEAMS_MODE } from "@/lib/siteMode";
 import FlywheelSection from "@/components/FlywheelSection";
 import DiscoveryMap from "@/components/DiscoveryMap";
 import PhgdhRouteList from "@/components/PhgdhRouteList";
@@ -67,7 +69,13 @@ async function getEpisodeCount(): Promise<number | null> {
 const DARK = "bg-gradient-to-br from-on-primary-fixed to-on-primary-fixed-variant text-white";
 const WRAP = "max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop";
 
+// Teams mode (NEXT_PUBLIC_SITE_MODE=teams) shows a simple teams landing instead.
 export default async function Home() {
+  if (TEAMS_MODE) return <TeamsHome />;
+  return <DiscoveryHome />;
+}
+
+async function DiscoveryHome() {
   const [news, episodes] = await Promise.all([getLatestNews(), getEpisodeCount()]);
   const showEpisodes = episodes !== null && episodes >= MIN_COUNT_TO_SHOW;
 

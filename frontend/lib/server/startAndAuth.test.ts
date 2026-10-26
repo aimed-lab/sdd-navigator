@@ -37,8 +37,9 @@ test("account menu: My teams first, no Getting started, desktop and mobile", () 
   const nav = read("components/Nav.tsx");
   assert.ok(!nav.includes('href="/start"') && !nav.includes("Getting started"));
   assert.equal(nav.split("My teams").length - 1, 2);
-  assert.ok(nav.indexOf('href="/teams"') < nav.indexOf('href="/projects"'));
-  assert.ok(nav.lastIndexOf('href="/teams"') < nav.lastIndexOf('href="/projects"'));
+  // The other account links (projects, pages, saved) come from accountLinks() in lib/siteMode.ts.
+  assert.ok(nav.indexOf('href="/teams"') < nav.indexOf("ACCOUNT.map"));
+  assert.ok(nav.lastIndexOf('href="/teams"') < nav.lastIndexOf("ACCOUNT.map"));
   assert.ok(!nav.includes("Your teams"));
 });
 

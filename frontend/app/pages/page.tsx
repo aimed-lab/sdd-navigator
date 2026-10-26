@@ -10,10 +10,11 @@ import NewWikiPageButton from "@/components/pages/NewWikiPageButton";
 import VisibilityBadge from "@/components/pages/VisibilityBadge";
 import { listMyPages } from "@/lib/server/pages/pageView";
 import { formatDay } from "@/lib/server/pages/pageViewHelpers";
+import { siteTitle } from "@/lib/siteMode";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export const metadata = { title: "Your wiki · SmartDrugDiscovery" };
+export const metadata = { title: siteTitle("Your wiki") };
 
 const ROLE_LABEL = { owner: "Owner", editor: "Editor", viewer: "Viewer" } as const;
 

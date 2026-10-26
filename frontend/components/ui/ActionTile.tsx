@@ -13,13 +13,14 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
-export type Tone = "blue" | "amber" | "rose" | "green";
+export type Tone = "blue" | "amber" | "rose" | "green" | "purple";
 
 export const TONES: Record<Tone, { bg: string; fg: string }> = {
   blue: { bg: "#e6ecfb", fg: "#2c4a9a" },
   amber: { bg: "#fef3c7", fg: "#b45309" },
   rose: { bg: "#fde8e6", fg: "#b42318" },
   green: { bg: "#d6efdc", fg: "#166534" },
+  purple: { bg: "#f3e8ff", fg: "#7e22ce" },
 };
 
 export default function ActionTile({
