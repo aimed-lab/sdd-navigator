@@ -17,7 +17,7 @@
 // use.
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { joinCommunityAction, leaveCommunityAction } from "@/app/communities/actions";
 import type { Membership } from "@/lib/server/communities";
@@ -43,6 +43,25 @@ export default function JoinLeaveControl({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoJoinStarted = useRef(false);
+
+  // Arrived by the join QR code/link (?join=1) while signed in and not yet a
+  // member: join (or request to join) immediately, then drop ?join=1 so a
+  // later Leave doesn't re-trigger it.
+  useEffect(() => {
+    if (!autoOpenJoin || membership.state !== "none" || autoJoinStarted.current) return;
+    autoJoinStarted.current = true;
+    setBusy(true);
+    joinCommunityAction(communityId, isOpen, slug).then((res) => {
+      if (res.ok) {
+        router.replace(`/communities/${slug}`);
+        router.refresh();
+      } else {
+        setError(res.error);
+        setBusy(false);
+      }
+    });
+  }, [autoOpenJoin, membership.state, communityId, isOpen, slug, router]);
 
   if (membership.state === "signed_out" && isOpen) {
     // An open community: a visitor can join with just an email, no account.
