@@ -257,8 +257,8 @@ export function teamPath(slug: string): string {
 }
 
 /** Where sign-in brings someone back to: this team page, which then joins them. */
-export function teamReturnPath(slug: string): string {
-  return `/teams/${slug}?join=signin`;
+export function teamReturnPath(slug: string, open?: string): string {
+  return `/teams/${slug}?join=signin${open ? `&open=${open}` : ""}`;
 }
 
 export function teamJoinUrl(origin: string, slug: string): string {

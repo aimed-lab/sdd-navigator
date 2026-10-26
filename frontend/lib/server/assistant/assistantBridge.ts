@@ -33,6 +33,24 @@ export function getPageTeam(): AssistantTeam | null {
   return typeof window === "undefined" ? null : (window.__sddPageTeam ?? null);
 }
 
+// On a team page for someone who is not on the team, the floating "Ask AI
+// assistant" button asks for sign-in/join instead of opening the panel. The team
+// page registers the function that does that.
+declare global {
+  interface Window {
+    __sddAssistantGate?: (() => void) | null;
+  }
+}
+
+export function setAssistantGate(gate: (() => void) | null): void {
+  if (typeof window === "undefined") return;
+  window.__sddAssistantGate = gate;
+}
+
+export function getAssistantGate(): (() => void) | null {
+  return typeof window === "undefined" ? null : (window.__sddAssistantGate ?? null);
+}
+
 export type AssistantRequest = { text: string; mode: "send" | "fill" | "open"; team?: AssistantTeam };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

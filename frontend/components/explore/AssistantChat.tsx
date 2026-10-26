@@ -74,7 +74,7 @@ import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/ex
 import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
-import { ASSISTANT_EVENT, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_EVENT, getAssistantGate, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
 import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
 import {
@@ -876,7 +876,11 @@ export default function AssistantChat() {
       {!open && (
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            const gate = getAssistantGate();
+            if (gate) gate();
+            else setOpen(true);
+          }}
           aria-label="Ask AI assistant"
           className="fixed right-6 bottom-24 max-sm:right-4 max-sm:bottom-[calc(68px+var(--fb-clear,0px))] z-[56] h-12 px-5 max-sm:w-12 max-sm:px-0 max-sm:justify-center rounded-full btn-primary shadow-lg flex items-center gap-2 font-label-md text-label-md"
         >

@@ -14,7 +14,7 @@ import PanelFrame from "./PanelFrame";
 import SharePromotePanel from "./SharePromotePanel";
 import { useTeamPanel } from "./TeamPanelContext";
 
-const TILES: {
+export const TILES: {
   key: "document" | "pages" | "learn" | "share";
   icon: string;
   title: string;
@@ -40,12 +40,15 @@ export default function TeamTiles({
   name,
   description,
   isLead,
+  autoOpenLearn = false,
 }: {
   teamId: string;
   slug: string;
   name: string;
   description: string | null;
   isLead: boolean;
+  /** Arrived after clicking "Make learning material" before joining: open the assistant. */
+  autoOpenLearn?: boolean;
 }) {
   const { panel, toggle, close } = useTeamPanel();
 
@@ -55,6 +58,17 @@ export default function TeamTiles({
     setPageTeam({ id: teamId, name, slug });
     return () => setPageTeam(null);
   }, [teamId, name, slug]);
+
+  useEffect(() => {
+    if (!autoOpenLearn) return;
+    // The assistant panel mounts a moment after the page; give it time to listen.
+    const t = window.setTimeout(
+      () => openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug } }),
+      700
+    );
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenLearn]);
 
   const pick = (key: (typeof TILES)[number]["key"]) => {
     if (key === "learn") {

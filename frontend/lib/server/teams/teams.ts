@@ -33,6 +33,7 @@ import {
   parseTeamName,
   type CuratedHow,
 } from "./teamRules";
+import { normalizePreview, type TeamPreview } from "./teamPreview";
 
 // ── reading a team ──────────────────────────────────────────────────────────
 
@@ -137,6 +138,22 @@ export async function getTeamJoinInfo(slug: string): Promise<TeamJoinInfo | null
   if (error || !Array.isArray(data) || data.length === 0) return null;
   const r = data[0] as { id: string; name: string; description: string | null; member_count: number | string };
   return { id: r.id, name: r.name, description: r.description, member_count: Number(r.member_count) || 0 };
+}
+
+/** What a visitor who is not on the team may see: name, description, size and the
+ *  titles (with a type) of its documents and wiki pages. Through the database
+ *  function get_team_preview, which never returns links, files, page content or
+ *  names. Null for an unknown slug or a community. */
+export async function getTeamPreview(slug: string): Promise<TeamPreview | null> {
+  const session = await getSession();
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return null;
+  const { data, error } = await db.rpc("get_team_preview", { p_slug: slug });
+  if (error) {
+    console.error("getTeamPreview failed", error);
+    return null;
+  }
+  return normalizePreview(data);
 }
 
 /** Join a team by its slug (signed in). The database function links an invite

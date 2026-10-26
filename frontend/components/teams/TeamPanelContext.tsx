@@ -17,8 +17,15 @@ type Ctx = {
 
 const PanelCtx = createContext<Ctx | null>(null);
 
-export function TeamPanelProvider({ children }: { children: React.ReactNode }) {
-  const [panel, setPanel] = useState<TeamPanel>(null);
+export function TeamPanelProvider({
+  children,
+  initialPanel = null,
+}: {
+  children: React.ReactNode;
+  /** A panel to have open on arrival (a tile the visitor clicked before joining). */
+  initialPanel?: TeamPanel;
+}) {
+  const [panel, setPanel] = useState<TeamPanel>(initialPanel);
   const open = useCallback((p: Exclude<TeamPanel, null>) => {
     setPanel(p);
     // Bring the panel (it sits right under the tiles) into view.
