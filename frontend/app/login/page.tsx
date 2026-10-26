@@ -15,9 +15,11 @@
 // ssoLoginAction returns the Keycloak authorization URL; this page does the
 // actual cross-origin navigation, since only the browser can do that.
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ssoLoginAction } from "@/app/auth/actions";
+import { demoAuthEnabledAction } from "@/app/auth/demoActions";
+import { startDemoSession } from "@/lib/demoAuth";
 import { postLoginPath } from "@/lib/safeRedirect";
 
 function LoginForm() {
@@ -27,6 +29,11 @@ function LoginForm() {
 
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [demoEnabled, setDemoEnabled] = useState(false);
+
+  useEffect(() => {
+    demoAuthEnabledAction().then(setDemoEnabled);
+  }, []);
 
   async function handleSignIn() {
     if (submitting) return;
@@ -91,6 +98,25 @@ function LoginForm() {
             "Sign in or create an account"
           )}
         </button>
+
+        {demoEnabled && (
+          <div className="mt-6 pt-6 border-t border-outline-variant/40">
+            <button
+              type="button"
+              onClick={() => {
+                startDemoSession();
+                window.location.assign(callbackUrl);
+              }}
+              className="w-full py-3 rounded-xl border border-dashed border-outline font-label-md text-label-md text-secondary hover:bg-surface-container"
+            >
+              Demo sign-in (sandbox only)
+            </button>
+            <p className="mt-2 text-center font-body-sm text-body-sm text-secondary">
+              Development only — signs in a mock user in this browser. No real account or backend
+              access.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );
