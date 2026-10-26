@@ -53,6 +53,14 @@ export const PROJECT_STAGE_LABEL: Record<ProjectStage, string> = {
 // the one this UI currently knows how to create.
 export const COLABOFEST_CHALLENGE_KEY = "colabofest_2026";
 
+// The PROGRAM a project belongs to: projects.program (2026-10-31_project_program.sql).
+// Not the registration flow above: a winning team is in the program without ever
+// having registered, so it gets the ColaboFest project home (Welcome card, Box
+// folder, Progress, finalist, affiliation, the program view) but no Proposal tab,
+// submission status or deadline. Only a site admin can set it. This is the ONE
+// constant for that value; use it, never the literal.
+export const COLABOFEST_PROGRAM = "colabofest_2026";
+
 /** One project as listed on /projects. Never carries lead_id or any member's
  *  user_id — `is_lead` is the server-computed boolean the client is allowed to
  *  see; see lib/server/projects.ts:listMyProjects. */
@@ -64,6 +72,8 @@ export type MyProjectSummary = {
   is_lead: boolean;
   deadline: string | null;
   challenge_key: string | null;
+  /** The program the project is in (projects.program), or null. */
+  program: string | null;
   proposal_submitted: boolean;
 };
 

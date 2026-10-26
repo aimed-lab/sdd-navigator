@@ -82,12 +82,14 @@ export default function CommunityCard({
           <span
             className={
               "px-2.5 py-1 rounded-full font-label-sm text-label-sm " +
-              (community.is_open
+              (member || community.is_open
                 ? "bg-primary/10 text-primary"
                 : "border border-outline-variant/50 text-secondary")
             }
           >
-            {mode}
+            {/* A member has already joined: "Request to join" / "Open to join"
+                would be wrong, so the card just says Open. */}
+            {member ? "Open" : mode}
           </span>
         </div>
       </div>

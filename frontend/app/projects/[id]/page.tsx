@@ -13,22 +13,38 @@
 //   Team      TeamSection
 //   Proposal  ProposalSection (challenge projects only)
 //
-// SERVER component: redirects to /login when signed out (matches /projects
-// and /inbox), then reads through lib/server/projects.ts, whose
-// GetProjectResult collapses "doesn't exist" and "exists but you're not a
-// member" into one `not_found`. Either way this page 404s, exactly like a
-// mistyped id would, rather than leaking which case it was. Only the data the
-// selected tab needs is read.
+// ACCESS (invite-only): the link alone is never enough. Before anything about the
+// project is read:
+//   signed out        a bare sign-in page (no title, no data) that returns here
+//   signed in         claim_pending_project_memberships() runs first, so a first
+//                     sign-in with the invited email gets straight in
+//   not a member      "Restricted access" (no title, no data); getProject's
+//                     `not_found` covers "no such project" and "not on it" alike,
+//                     so the page never says which
+//   member            the workspace
+// Only the data the selected tab needs is read.
 
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { headers } from "next/headers";
+import { getCurrentUser, getDb } from "@/lib/auth";
 import { getProject, getProposalFileUrl } from "@/lib/server/projects";
 import { getCommunityById } from "@/lib/server/communities";
 import { listProjectResources } from "@/lib/server/projectResources";
 import { listProjectPages } from "@/lib/server/pages/projectPages";
 import { listWikiNoteSummaries } from "@/lib/server/wikiNotes";
-import { parseTab, TAB_LABEL } from "@/lib/server/projectWorkspace/workspace";
+import { parseTab, tabHref, TAB_LABEL } from "@/lib/server/projectWorkspace/workspace";
+import { LIST_LABEL, todayIso, visibleLists } from "@/lib/server/projectWorkspace/status";
+import { COLABOFEST_CHALLENGE_KEY, COLABOFEST_PROGRAM } from "@/lib/projectTypes";
+import { listOpenHelp, listProjectUpdates } from "@/lib/server/projectWorkspace/updates";
+import { getThread, listThreads } from "@/lib/server/projectWorkspace/discussions";
+import { isWelcomeDismissed } from "@/lib/server/projectWorkspace/welcome";
+import { viewerIsSiteAdmin } from "@/lib/server/projectWorkspace/colabofestOps";
+import { arrangeAnnouncements, decideAccess, firstName, hasProjectMemberRow, showWelcome } from "@/lib/server/projectWorkspace/colabofest";
+import AnnouncementsTab from "@/components/projects/workspace/AnnouncementsTab";
+import { DiscussionsList, ThreadView } from "@/components/projects/workspace/DiscussionsTab";
+import { RestrictedAccess, SignInGate } from "@/components/projects/workspace/AccessScreens";
+import FinalistToggle from "@/components/projects/workspace/FinalistToggle";
+import GithubLinkSection from "@/components/projects/workspace/GithubLinkSection";
 import {
   MODALITY_LABEL,
   PROJECT_STAGE_LABEL,
@@ -62,14 +78,46 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const user = await getCurrentUser();
-  if (!user) redirect(`/login?callbackUrl=%2Fprojects`);
-
   const { id } = await params;
   const sp = await searchParams;
-  const result = await getProject(id);
+  const returnPath = `/projects/${encodeURIComponent(id)}`;
 
-  if (result.status === "not_found") notFound();
+  const user = await getCurrentUser();
+  if (!user || decideAccess({ signedIn: !!user, isMember: false }) === "sign_in") {
+    return <SignInGate returnPath={returnPath} />;
+  }
+
+  // A first sign-in with the invited email: link the invitation to this account
+  // before deciding. Best effort; a failure just means "not linked yet".
+  const db = await getDb();
+  if (db) {
+    const { error: claimErr } = await db.rpc("claim_pending_project_memberships");
+    if (claimErr) console.error("claim_pending_project_memberships failed", claimErr);
+  }
+
+  if (!db) {
+    return (
+      <div className="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-16">
+        <p className="font-body-md text-body-md text-error" role="alert">
+          Service not configured.
+        </p>
+      </div>
+    );
+  }
+
+  // Membership is a project_members row for this person, never "the project row
+  // can be read": a member of the project's community can read the row too.
+  const isMember = await hasProjectMemberRow(db, id, user.id);
+  const access = decideAccess({ signedIn: true, isMember });
+  const result = access === "allowed" ? await getProject(id) : ({ status: "not_found" } as const);
+
+  if (access === "restricted" || result.status === "not_found") {
+    const h = await headers();
+    const host = h.get("x-forwarded-host") ?? h.get("host");
+    const proto = h.get("x-forwarded-proto") ?? "https";
+    const projectLink = host ? `${proto}://${host}${returnPath}` : returnPath;
+    return <RestrictedAccess returnPath={returnPath} projectLink={projectLink} email={user.email} />;
+  }
   if (result.status === "error") {
     return (
       <div className="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop py-16">
@@ -96,30 +144,95 @@ export default async function ProjectDetailPage({
   // also for a community_id that no longer resolves.
   const community = project.community_id ? await getCommunityById(project.community_id) : null;
 
-  // The wiki pages are needed by Overview and Wiki.
-  const pagesResult = tab === "overview" || tab === "wiki" ? await listProjectPages(project.id) : null;
+  // The wiki pages are needed by the Wiki tab.
+  const pagesResult = tab === "wiki" ? await listProjectPages(project.id) : null;
   const pages = pagesResult?.status === "ok" ? pagesResult.pages : [];
 
   let content: React.ReactNode = null;
+  const today = todayIso();
+  // People who can own an item: members with an account, named when we can.
+  const owners = project.members
+    .filter((m): m is typeof m & { user_id: string } => !!m.user_id)
+    .map((m) => ({ user_id: m.user_id, label: m.name || m.email }));
+
+  // The ColaboFest project home follows projects.program. Registration things
+  // (Proposal tab, submission, deadline, the registration checklist note) stay on
+  // projects.challenge_key.
+  const isColabofest = project.program === COLABOFEST_PROGRAM;
+  const needsAdminFlag = tab === "team" || tab === "announcements" || tab === "discussions";
+  const isSiteAdmin = needsAdminFlag && db ? await viewerIsSiteAdmin(db) : false;
 
   if (tab === "overview") {
+    const [helpPosts, upd, thr, dismissed] = await Promise.all([
+      listOpenHelp(project.id),
+      listProjectUpdates(project.id),
+      listThreads(project.id, 10),
+      isColabofest ? isWelcomeDismissed(project.id, user.id) : Promise.resolve(true),
+    ]);
+    const me = project.members.find((m) => m.user_id === user.id);
     content = (
       <>
-        {pagesResult?.status === "error" && (
+        {(upd.status === "error" || thr.status === "error") && (
           <p className="mb-4 font-body-sm text-body-sm text-error" role="alert">
-            {pagesResult.error}
+            {upd.status === "error" ? upd.error : thr.status === "error" ? thr.error : ""}
           </p>
         )}
         <OverviewTab
           projectId={project.id}
+          isColabofest={isColabofest}
+          showWelcome={showWelcome({ isColabofest, dismissed })}
+          firstName={firstName(me?.name, user.email)}
+          today={today}
+          role={project.viewer_role}
           description={project.description}
-          chips={chips}
+          sharedFolderUrl={project.shared_folder?.url ?? null}
           checklist={project.checklist}
           members={project.members}
-          pages={pages}
+          announcements={upd.status === "ok" ? arrangeAnnouncements(upd.updates.filter((u) => u.kind === "announcement")) : []}
+          threads={thr.status === "ok" ? thr.threads : []}
+          helpPosts={helpPosts}
         />
       </>
     );
+  } else if (tab === "announcements") {
+    const upd = await listProjectUpdates(project.id);
+    content =
+      upd.status === "ok" ? (
+        <AnnouncementsTab projectId={project.id} role={project.viewer_role} isSiteAdmin={isSiteAdmin} updates={upd.updates} />
+      ) : (
+        <p className="font-body-md text-body-md text-error" role="alert">
+          {upd.error}
+        </p>
+      );
+  } else if (tab === "discussions") {
+    const threadId = typeof sp.thread === "string" ? sp.thread : null;
+    if (threadId) {
+      const one = await getThread(project.id, threadId);
+      if (one.status === "ok") {
+        content = (
+          <ThreadView projectId={project.id} thread={one.thread} replies={one.replies} role={project.viewer_role} isSiteAdmin={isSiteAdmin} />
+        );
+      } else {
+        content = (
+          <p className="font-body-md text-body-md text-secondary" role={one.status === "error" ? "alert" : undefined}>
+            {one.status === "error" ? one.error : "That discussion no longer exists."}{" "}
+            <Link href={tabHref(project.id, "discussions")} className="text-primary underline underline-offset-4">
+              All discussions
+            </Link>
+          </p>
+        );
+      }
+    } else {
+      const thr = await listThreads(project.id);
+      content =
+        thr.status === "ok" ? (
+          <DiscussionsList projectId={project.id} threads={thr.threads} startOpen={sp.new === "1"} />
+        ) : (
+          <p className="font-body-md text-body-md text-error" role="alert">
+            {thr.error}
+          </p>
+        );
+    }
   } else if (tab === "wiki") {
     const [resourcesResult, earlier] = await Promise.all([listProjectResources(project.id), listWikiNoteSummaries(project.id)]);
     const resources =
@@ -173,31 +286,49 @@ export default async function ProjectDetailPage({
       </div>
     );
   } else if (tab === "tasks") {
+    // Up to three lists: the two partner checklists (challenge projects only),
+    // then Team tasks. Each has its own Add item and progress count.
     content = (
       <div className="flex flex-col gap-4">
-        <ChecklistSection
-          projectId={project.id}
-          projectTarget={project.target}
-          projectIndication={project.indication}
-          projectModality={project.modality}
-          projectStage={project.stage}
-          items={project.checklist}
-          isColabofest={project.challenge_key === "colabofest_2026"}
-        />
+        {visibleLists(!!project.challenge_key || isColabofest).map((key) => (
+          <ChecklistSection
+            key={key}
+            listKey={key}
+            title={LIST_LABEL[key]}
+            members={owners}
+            today={today}
+            projectId={project.id}
+            projectTarget={project.target}
+            projectIndication={project.indication}
+            projectModality={project.modality}
+            projectStage={project.stage}
+            items={project.checklist.filter((i) => i.list_key === key)}
+            isColabofest={key === "team" && project.challenge_key === COLABOFEST_CHALLENGE_KEY}
+          />
+        ))}
         <hr className="border-t border-outline-variant/30 w-full mb-12" />
         <WhoCanHelpSection projectId={project.id} />
       </div>
     );
   } else if (tab === "files") {
-    content = <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />;
+    content = (
+      <>
+        <SharedFolderSection projectId={project.id} sharedFolder={project.shared_folder} />
+        <GithubLinkSection projectId={project.id} githubUrl={project.github_url} />
+      </>
+    );
   } else if (tab === "team") {
     content = (
-      <TeamSection
-        projectId={project.id}
-        members={project.members}
-        isLead={project.is_lead}
-        viewerUserId={user.id}
-      />
+      <div className="flex flex-col gap-8">
+        <TeamSection
+          projectId={project.id}
+          members={project.members}
+          isLead={project.is_lead}
+          showAffiliation={isColabofest}
+          viewerUserId={user.id}
+        />
+        {isSiteAdmin && isColabofest && <FinalistToggle projectId={project.id} finalist={project.finalist} />}
+      </div>
     );
   } else if (tab === "proposal" && project.challenge_key) {
     const deadlinePassed = !!project.deadline && new Date(project.deadline).getTime() < Date.now();
@@ -238,7 +369,9 @@ export default async function ProjectDetailPage({
           projectId={project.id}
           name={project.name}
           challengeKey={project.challenge_key}
+          program={project.program}
           memberCount={project.members.length}
+          finalist={project.finalist}
           active={tab}
         />
 

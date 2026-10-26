@@ -14,6 +14,7 @@ import type { getPageView, listMyPages } from "../pages/pageView";
 import type { findSimilarPublicPage } from "../pages/similarPages";
 import type { PageVisibility } from "../pages/pageViewHelpers";
 import type { AgentContext, ToolHandler, ToolResult } from "./agentCore";
+import type { ProjectOps } from "./agentProjectOps.ts";
 import { OWNER_ALREADY, isOwnerAccount } from "../pages/pageViewHelpers.ts";
 import { pageUrl, shapeMyPages, shapePage, summarizeExplore } from "./agentShapes.ts";
 
@@ -67,6 +68,8 @@ export type AgentServices = {
   /** The raw Explore backend JSON for a query. Throws on failure. */
   exploreSearch(query: string): Promise<unknown>;
   communities: CommunityOps;
+  /** Read-only project status, read with the researcher's own client. */
+  projects: ProjectOps;
 };
 
 const fail = (status: number, code: string, message: string): ToolResult => ({ ok: false, status, code, message });
@@ -131,6 +134,34 @@ const listMyPagesTool: ToolHandler = async ({ ctx, origin }) => {
   const r = await svc.listMyPages(new Date(), c);
   if (r.status !== "ok") return fail(500, "server_error", "Couldn't load your pages.");
   return ok(shapeMyPages(r.pages, origin));
+};
+
+const listMyProjectsTool: ToolHandler = async ({ ctx }) => {
+  const c = needCtx(ctx);
+  try {
+    const projects = await svc.projects.list(c.db, c.user.id);
+    return ok({ projects });
+  } catch (e) {
+    console.error("agent list_my_projects failed", e);
+    return fail(500, "server_error", "Couldn't load your projects.");
+  }
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const getProjectStatusTool: ToolHandler = async ({ ctx, input }) => {
+  const c = needCtx(ctx);
+  const id = String(input.project_id ?? "");
+  // A malformed id is the same "not found" as an unknown one.
+  if (!UUID.test(id)) return fail(404, "not_found", "Project not found.");
+  try {
+    const status = await svc.projects.status(c.db, id);
+    if (!status) return fail(404, "not_found", "Project not found.");
+    return ok(status as unknown as Record<string, unknown>);
+  } catch (e) {
+    console.error("agent get_project_status failed", e);
+    return fail(500, "server_error", "Couldn't load that project.");
+  }
 };
 
 const getPage: ToolHandler = async ({ ctx, input, origin }) => {
@@ -382,6 +413,8 @@ const setAutoUpdate: ToolHandler = async ({ ctx, input, preview }) => {
 return {
   search,
   list_my_pages: listMyPagesTool,
+  list_my_projects: listMyProjectsTool,
+  get_project_status: getProjectStatusTool,
   get_page: getPage,
   create_page: createPage,
   add_member: addMember,

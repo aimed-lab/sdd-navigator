@@ -6,6 +6,7 @@
 //
 // Server component — no interactivity here, the whole card is a Link.
 
+import { COLABOFEST_PROGRAM } from "@/lib/projectTypes";
 import Link from "next/link";
 import type { MyProjectSummary } from "@/lib/projectTypes";
 
@@ -21,7 +22,11 @@ function daysUntil(iso: string): number {
 }
 
 export default function ProjectCard({ project }: { project: MyProjectSummary }) {
+  // Registration (challenge_key) and program (program) are different things:
+  // the submission pill is for a registration; a winning team in the program has
+  // no proposal to submit.
   const isColabofest = !!project.challenge_key;
+  const inProgram = project.program === COLABOFEST_PROGRAM;
   const days = project.deadline ? daysUntil(project.deadline) : null;
 
   return (
@@ -46,9 +51,9 @@ export default function ProjectCard({ project }: { project: MyProjectSummary }) 
       )}
 
       <div className="flex flex-wrap items-center gap-2 mt-auto pt-4 border-t border-outline-variant/30">
-        {isColabofest && (
+        {(inProgram || isColabofest) && (
           <span className="px-3 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
-            ColaboFest
+            {inProgram ? "ColaboFest 2026" : "ColaboFest"}
           </span>
         )}
 
