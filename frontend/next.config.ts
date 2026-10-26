@@ -1,7 +1,15 @@
 import type { NextConfig } from "next";
 import { TEAMS_MODE, teamsModeRedirects } from "./lib/siteMode";
 
+// Base44 preview only: allow the preview host to reach Next's dev assets/HMR.
+// Inactive unless BASE44_PREVIEW_MODE is exactly "1".
+const previewDevOrigins =
+  process.env.BASE44_PREVIEW_MODE === "1" && process.env.BASE44_PUBLIC_HOST_SUFFIX
+    ? [`3000-${process.env.BASE44_PUBLIC_HOST_SUFFIX}`]
+    : [];
+
 const nextConfig: NextConfig = {
+  ...(previewDevOrigins.length ? { allowedDevOrigins: previewDevOrigins } : {}),
   async redirects() {
     return [
       {
