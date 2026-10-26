@@ -152,12 +152,12 @@ export default function Nav() {
                     onMouseLeave={() => setMenuOpen(false)}
                   >
                     <Link
-                      href="/start"
+                      href="/teams"
                       className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
                       onClick={() => setMenuOpen(false)}
                     >
-                      <span className="material-symbols-outlined text-secondary text-base">waving_hand</span>
-                      Getting started
+                      <span className="material-symbols-outlined text-secondary text-base">group</span>
+                      My teams
                     </Link>
                     <Link
                       href="/projects"
@@ -166,14 +166,6 @@ export default function Nav() {
                     >
                       <span className="material-symbols-outlined text-secondary text-base">folder</span>
                       My projects
-                    </Link>
-                    <Link
-                      href="/teams"
-                      className="flex items-center gap-2 px-4 py-2 font-label-md text-label-md text-on-background hover:bg-surface-container-low"
-                      onClick={() => setMenuOpen(false)}
-                    >
-                      <span className="material-symbols-outlined text-secondary text-base">group</span>
-                      Your teams
                     </Link>
                     <Link
                       href="/pages"
@@ -264,14 +256,11 @@ export default function Nav() {
                   </span>
                 )}
               </Link>
-              <Link href="/start" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
-                Getting started
+              <Link href="/teams" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
+                My teams
               </Link>
               <Link href="/projects" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 My projects
-              </Link>
-              <Link href="/teams" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
-                Your teams
               </Link>
               <Link href="/pages" onClick={() => setMobileOpen(false)} className="font-label-md text-label-md text-on-background">
                 My pages

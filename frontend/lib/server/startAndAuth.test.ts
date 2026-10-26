@@ -1,13 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { postLoginPath, safeCallback } from "../safeRedirect.ts";
-import { firstName, welcomeLine, START_SIGN_IN } from "../startRules.ts";
 
 const read = (p: string) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 
-test("postLoginPath: no callback or just / goes to /start", () => {
-  for (const raw of [undefined, null, "", "/", 5]) assert.equal(postLoginPath(raw), "/start");
+test("postLoginPath: no callback or just / goes to the home page", () => {
+  for (const raw of [undefined, null, "", "/", 5]) assert.equal(postLoginPath(raw), "/");
 });
 
 test("postLoginPath: a real callback is kept exactly", () => {
@@ -18,7 +17,7 @@ test("postLoginPath: a real callback is kept exactly", () => {
 
 test("postLoginPath: an unsafe callback counts as none", () => {
   for (const raw of ["https://evil.example", "//evil.example", String.raw`/\evil`, "javascript:alert(1)"]) {
-    assert.equal(postLoginPath(raw), "/start");
+    assert.equal(postLoginPath(raw), "/");
   }
   assert.equal(safeCallback("/explore/x"), "/explore/x"); // unchanged helper
 });
@@ -28,29 +27,27 @@ test("the login page and the SSO callback both use postLoginPath", () => {
   assert.match(read("app/auth/callback/route.ts"), /postLoginPath\(url\.searchParams\.get\("next"\)\)/);
 });
 
-test("welcome line: first name, or just Welcome.", () => {
-  assert.equal(welcomeLine(firstName("Ana Maria Lopez", "x@y.org")), "Welcome, Ana.");
-  assert.equal(welcomeLine(firstName("", "x@y.org")), "Welcome.");
-  assert.equal(welcomeLine(firstName(null)), "Welcome.");
-  // the account's fallback name is the email prefix: not a name
-  assert.equal(welcomeLine(firstName("karthik2311", "karthik2311@gmail.com")), "Welcome.");
-  assert.equal(START_SIGN_IN, "/login?callbackUrl=/start");
+test("/start redirects to /collaborate and its old pieces are gone", () => {
+  assert.match(read("app/start/page.tsx"), /redirect\("\/collaborate"\)/);
+  assert.ok(!existsSync(new URL("../../components/start/StartAssistantTile.tsx", import.meta.url)));
+  assert.ok(!existsSync(new URL("../startRules.ts", import.meta.url)));
 });
 
-test("/start: signed out redirects to sign-in; tiles are the four asked for", () => {
-  const src = read("app/start/page.tsx");
-  assert.match(src, /if \(!session\) redirect\(START_SIGN_IN\)/);
-  for (const t of ["Create a team", "Your teams", "Explore research"]) assert.ok(src.includes(t), t);
-  assert.ok(read("components/start/StartAssistantTile.tsx").includes("Ask the AI assistant"));
-  assert.match(src, /href="\/teams\/new"/);
-  assert.match(src, /href="\/explore"/);
-  assert.match(src, /listMyTeamsNewest\(5\)/);
-});
-
-test("account menu: Getting started first, desktop and mobile", () => {
+test("account menu: My teams first, no Getting started, desktop and mobile", () => {
   const nav = read("components/Nav.tsx");
-  assert.equal(nav.split('href="/start"').length - 1, 2);
-  assert.ok(nav.indexOf('href="/start"') < nav.indexOf('href="/projects"'));
+  assert.ok(!nav.includes('href="/start"') && !nav.includes("Getting started"));
+  assert.equal(nav.split("My teams").length - 1, 2);
+  assert.ok(nav.indexOf('href="/teams"') < nav.indexOf('href="/projects"'));
+  assert.ok(nav.lastIndexOf('href="/teams"') < nav.lastIndexOf('href="/projects"'));
+  assert.ok(!nav.includes("Your teams"));
+});
+
+test("Collaborate: three cards, communities only, old boxes gone", () => {
+  const src = read("app/collaborate/page.tsx");
+  for (const t of ['title="Your teams"', 'title="Communities"', 'title="Service providers"']) assert.ok(src.includes(t), t);
+  assert.match(src, /listCommunities\(\)/);
+  assert.ok(src.includes("md:grid-cols-3") && src.includes("grid-cols-1"));
+  assert.ok(!src.includes("Find a service provider"));
 });
 
 // Every API route the assistant panel calls refuses with 401 before doing any work.
