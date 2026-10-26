@@ -51,7 +51,6 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
-  addCommunityResourceFileAction,
   createCommunityResourceAction,
   deleteCommunityResourceAction,
   pinCommunityResourceAction,
@@ -61,6 +60,8 @@ import {
 import type { CommunityResource, CommunityResourceFile } from "@/lib/server/communities";
 import { COMMUNITY_RESOURCE_TYPES, type CommunityResourceType } from "@/lib/communityTypes";
 import CollapsibleSection from "./CollapsibleSection";
+import { attachFileToResource, createResourceWithFile } from "./resourceUpload";
+import { checkResourceFile } from "@/lib/server/communityHome/resourceFile";
 
 // id is optional here specifically so this one type covers both
 // createCommunityResourceAction's result (carries the new row's id, needed
@@ -68,7 +69,6 @@ import CollapsibleSection from "./CollapsibleSection";
 // updateCommunityResourceAction's (no id — the resource already had one).
 type ActionResult = { ok: true; id?: string } | { ok: false; error: string };
 
-const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024;
 const RESOURCE_FILE_ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
@@ -108,10 +108,12 @@ function ResourceFilesField({
   const pick = (fileList: FileList | null) => {
     setPickError(null);
     const picked = Array.from(fileList ?? []);
-    const tooBig = picked.find((f) => f.size > MAX_RESOURCE_FILE_BYTES);
-    if (tooBig) {
-      setPickError(`"${tooBig.name}" is over 50 MB.`);
-      return;
+    for (const f of picked) {
+      const check = checkResourceFile(f);
+      if (!check.ok) {
+        setPickError(`"${f.name}": ${check.error}`);
+        return;
+      }
     }
     if (picked.length > 0) onAddPending(picked);
     if (fileRef.current) fileRef.current.value = "";
@@ -330,6 +332,7 @@ const TYPE_ORDER: CommunityResourceType[] = COMMUNITY_RESOURCE_TYPES;
  *  resource". */
 function ResourceForm({
   communityId,
+  slug,
   resourceId,
   initialTitle = "",
   initialType = "tool",
@@ -342,6 +345,7 @@ function ResourceForm({
   onSubmit,
 }: {
   communityId: string;
+  slug: string;
   /** Set only when editing a resource that already exists. Undefined for
    *  "Add resource". */
   resourceId?: string;
@@ -366,6 +370,7 @@ function ResourceForm({
   const [url, setUrl] = useState(initialUrl);
   const [description, setDescription] = useState(initialDescription);
   const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [existingFiles, setExistingFiles] = useState<CommunityResourceFile[]>(initialFiles);
@@ -392,57 +397,78 @@ function ResourceForm({
     setError(null);
 
     let id = resourceId ?? savedResourceId;
-    if (!id || resourceId) {
-      // Either this is the very first save (no row yet), or it's an edit —
-      // both call onSubmit; a retry on "Add" after the row already exists
-      // (savedResourceId set, resourceId still undefined) skips this,
-      // since the text fields were already persisted by the first call.
-      const res = await onSubmit({
-        title: title.trim(),
-        resource_type: resourceType,
-        url: url.trim(),
-        description: description.trim(),
-      });
-      if (!res.ok) {
-        setError(res.error);
+    const queue = [...pendingFiles];
+    const fields = {
+      title: title.trim(),
+      resource_type: resourceType,
+      url: url.trim(),
+      description: description.trim(),
+    };
+
+    try {
+      if (!id && queue.length > 0) {
+        // A NEW document with a file: the first file is uploaded to storage
+        // before the document exists, so a failed upload leaves nothing behind.
+        const first = queue[0];
+        const made = await createResourceWithFile({ communityId, slug, input: fields, file: first, onProgress: setProgress });
+        if (!made.ok) {
+          setError(made.error);
+          setSaving(false);
+          setProgress(null);
+          return;
+        }
+        id = made.id;
+        setSavedResourceId(id);
+        queue.shift();
+        setPendingFiles(queue);
+      } else if (!id || resourceId) {
+        // Either the first save of a document with no file, or an edit.
+        const res = await onSubmit(fields);
+        if (!res.ok) {
+          setError(res.error);
+          setSaving(false);
+          return;
+        }
+        id = resourceId ?? res.id ?? null;
+        if (!resourceId && id) setSavedResourceId(id);
+      }
+
+      if (!id) {
+        // Defensive: the create action should always return an id on success.
+        setError("Couldn't save the resource. Please try again.");
         setSaving(false);
         return;
       }
-      id = resourceId ?? res.id ?? null;
-      if (!resourceId && id) setSavedResourceId(id);
-    }
 
-    if (!id) {
-      // Defensive: createCommunityResourceAction should always return an
-      // id on success. Don't leave the admin stuck if it somehow doesn't.
-      setError("Couldn't save the resource. Please try again.");
-      setSaving(false);
-      return;
-    }
+      // Further files go onto the document that now exists.
+      const stillPending: File[] = [];
+      let uploadError: string | null = null;
+      for (const file of queue) {
+        if (uploadError) {
+          stillPending.push(file);
+          continue;
+        }
+        setProgress(0);
+        const res = await attachFileToResource({ communityId, resourceId: id, file, onProgress: setProgress });
+        if (!res.ok) {
+          uploadError = res.error;
+          stillPending.push(file);
+        }
+      }
+      setPendingFiles(stillPending);
+      setProgress(null);
 
-    const stillPending: File[] = [];
-    let uploadError: string | null = null;
-    for (const file of pendingFiles) {
       if (uploadError) {
-        stillPending.push(file);
-        continue;
+        setError(`Saved, but couldn't attach every file: ${uploadError}`);
+        setSaving(false);
+        return; // keep the form open so the remaining file(s) can be retried or removed
       }
-      const fd = new FormData();
-      fd.set("communityId", communityId);
-      fd.set("resourceId", id);
-      fd.set("file", file);
-      const res = await addCommunityResourceFileAction(fd);
-      if (!res.ok) {
-        uploadError = res.error;
-        stillPending.push(file);
-      }
-    }
-    setPendingFiles(stillPending);
-
-    if (uploadError) {
-      setError(`Saved, but couldn't attach every file — ${uploadError}`);
+    } catch (err) {
+      console.error("ResourceForm submit failed", err);
+      setError("Something went wrong. Please try again.");
       setSaving(false);
-      return; // keep the form open so the remaining file(s) can be retried or removed
+      setProgress(null);
+      return;
     }
 
     router.refresh();
@@ -500,6 +526,16 @@ function ResourceForm({
         className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
       />
 
+      {saving && progress !== null && (
+        <div role="status" aria-live="polite" className="flex flex-col gap-1">
+          <div className="h-2 rounded-full bg-[#ece9df] overflow-hidden">
+            <div className="h-full bg-primary transition-[width]" style={{ width: `${progress}%` }} />
+          </div>
+          <span className="font-body-sm text-body-sm text-secondary">
+            {progress >= 100 ? "Saving…" : `Uploading… ${progress}%`}
+          </span>
+        </div>
+      )}
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">
           {error}
@@ -649,6 +685,7 @@ function ResourceItem({
     return (
       <ResourceForm
         communityId={communityId}
+        slug={slug}
         resourceId={resource.id}
         initialTitle={resource.title}
         initialType={resource.resource_type}
@@ -926,6 +963,7 @@ export default function ResourcesSection({
         {isAdmin && adding && (
           <ResourceForm
             communityId={communityId}
+            slug={slug}
             busyLabel="Adding…"
             submitLabel="Add"
             onCancel={() => setAdding(false)}

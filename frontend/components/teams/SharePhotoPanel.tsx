@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { addCommunityResourceFileAction, createCommunityResourceAction } from "@/app/communities/actions";
+import { createResourceWithFile } from "@/components/communities/resourceUpload";
 import { FACEBOOK_URL, PHOTO_MAX_SIDE, fitWithin, linkedInUrl, photoCaption, shareRoute, xUrl } from "@/lib/server/teams/photoShare";
 
 const INPUT =
@@ -83,19 +83,13 @@ export default function SharePhotoPanel({
   // Optional: reuse the "Share a document" upload. A failure never blocks sharing.
   const saveToDocuments = async (): Promise<void> => {
     if (!addDoc || !photo) return;
-    const made = await createCommunityResourceAction(teamId, slug, {
-      title: caption.trim().slice(0, 80) || photo.name,
-      resource_type: "other",
-      url: "",
-      description: "",
+    const made = await createResourceWithFile({
+      communityId: teamId,
+      slug,
+      input: { title: caption.trim().slice(0, 80) || photo.name, resource_type: "other", url: "", description: "" },
+      file: photo,
     });
     if (!made.ok) return setNote(`Not added to shared documents: ${made.error}`);
-    const fd = new FormData();
-    fd.set("communityId", teamId);
-    fd.set("resourceId", made.id);
-    fd.set("file", photo);
-    const up = await addCommunityResourceFileAction(fd);
-    if (!up.ok) return setNote(`Not added to shared documents: ${up.error}`);
     router.refresh();
   };
 

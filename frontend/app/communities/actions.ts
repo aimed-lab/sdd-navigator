@@ -12,7 +12,10 @@ import { headers } from "next/headers";
 import { UnauthorizedError } from "@/lib/auth";
 import {
   addCommunityMemberByEmail,
-  addCommunityResourceFile,
+  attachUploadedResourceFile,
+  createCommunityResourceWithUpload,
+  prepareCommunityResourceUpload,
+  type PreparedResourceUpload,
   approveMembership,
   changeCommunityMemberRole,
   createAnnouncement,
@@ -575,39 +578,67 @@ export async function deleteCommunityResourceAction(
 
 // ── resource files ───────────────────────────────────────────────────────
 //
-// FormData (not JSON) is used here specifically because a File object can
-// only reach a Server Action that way — same reasoning as
-// app/promote/actions.ts's media actions.
+// The file itself never comes through here: the browser uploads it straight to
+// Supabase Storage (a Server Action body is limited to 1 MB by default, Vercel's
+// request body to 4.5 MB). These actions only prepare the upload (a signed URL)
+// and, once the file is in the bucket, write the rows.
 
 export type ResourceFileActionResult =
   | { ok: true; file: CommunityResourceFile }
   | { ok: false; error: string };
 
-/** Attach one file to a resource. Admin-only — see
- *  addCommunityResourceFile's own comment on the RLS gate. */
-export async function addCommunityResourceFileAction(form: FormData): Promise<ResourceFileActionResult> {
-  const communityId = form.get("communityId");
-  const resourceId = form.get("resourceId");
-  const file = form.get("file");
+function uploadFail(e: unknown, what: string): { ok: false; error: string } {
+  if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to attach a file." };
+  console.error(`${what} failed`, e);
+  return { ok: false, error: e instanceof Error && e.message ? e.message : "Couldn't attach that file. Please try again." };
+}
 
-  if (typeof communityId !== "string" || !communityId) {
-    return { ok: false, error: "Missing community." };
-  }
-  if (typeof resourceId !== "string" || !resourceId) {
-    return { ok: false, error: "Missing resource." };
-  }
-  if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "No file selected." };
-  }
-
+/** Step 1 of an upload: check the person and the file, return a signed upload
+ *  URL. `resourceId` is set when the file goes onto an existing document. */
+export async function prepareResourceUploadAction(
+  communityId: string,
+  file: { name: string; size: number; type: string },
+  resourceId?: string
+): Promise<({ ok: true } & PreparedResourceUpload) | { ok: false; error: string }> {
+  if (!communityId) return { ok: false, error: "Missing community." };
   try {
-    const attached = await addCommunityResourceFile(communityId, resourceId, file);
-    return { ok: true, file: attached };
+    return { ok: true, ...(await prepareCommunityResourceUpload(communityId, file, resourceId)) };
   } catch (e) {
-    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to attach a file." };
-    const message = e instanceof Error ? e.message : "Couldn't attach that file. Please try again.";
-    console.error("addCommunityResourceFileAction failed", e);
-    return { ok: false, error: message };
+    return uploadFail(e, "prepareResourceUploadAction");
+  }
+}
+
+/** Last step for a NEW document: the file is already in storage, so create the
+ *  document row and its file row together. Nothing is left behind on failure. */
+export async function createResourceWithUploadAction(
+  communityId: string,
+  slug: string,
+  input: { title: string; resource_type: string; url: string; description: string },
+  upload: { resourceId: string; path: string; filename: string }
+): Promise<{ ok: true; id: string; file: CommunityResourceFile } | { ok: false; error: string }> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+  try {
+    const res = await createCommunityResourceWithUpload(communityId, input, upload);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath(`/communities/${slug}`);
+    revalidatePath(`/teams/${slug}`);
+    return { ok: true, id: res.id, file: res.file };
+  } catch (e) {
+    return uploadFail(e, "createResourceWithUploadAction");
+  }
+}
+
+/** Last step for a file added to an existing document. */
+export async function attachResourceUploadAction(
+  communityId: string,
+  resourceId: string,
+  upload: { path: string; filename: string }
+): Promise<ResourceFileActionResult> {
+  if (!communityId || !resourceId) return { ok: false, error: "Missing document." };
+  try {
+    return { ok: true, file: await attachUploadedResourceFile(communityId, resourceId, upload) };
+  } catch (e) {
+    return uploadFail(e, "attachResourceUploadAction");
   }
 }
 

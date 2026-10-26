@@ -58,6 +58,13 @@ import { EXPLORE_API_URL, exploreBackendHeaders } from "./exploreBackend";
 import { MATCH_LIMIT, MATCH_MIN_COVERAGE, rankCommunities, type RankedCommunity } from "./assistant/communityMatch";
 import type { ExploreItem } from "@/types/explore";
 import { canAddResource, type CommunityKind } from "./teams/teamRules";
+import {
+  MAX_RESOURCE_FILE_BYTES,
+  RESOURCE_FILE_BUCKET,
+  checkResourceFile,
+  pathBelongsTo,
+  resourceFilePath,
+} from "./communityHome/resourceFile";
 
 export type Community = {
   id: string;
@@ -1657,7 +1664,9 @@ export type CreateCommunityResourceResult =
  *  never the caller's input, same as author_id in createAnnouncement. */
 export async function createCommunityResource(
   communityId: string,
-  input: { title: string; resource_type: string; url: string; description: string }
+  input: { title: string; resource_type: string; url: string; description: string },
+  /** An id chosen before the file was uploaded (its storage path carries it). */
+  presetId?: string
 ): Promise<CreateCommunityResourceResult> {
   const { user, db } = await requireCurrentUser();
 
@@ -1685,6 +1694,7 @@ export async function createCommunityResource(
   const { data, error } = await db
     .from("community_resources")
     .insert({
+      ...(presetId ? { id: presetId } : {}),
       community_id: communityId,
       added_by: user.id,
       title,
@@ -1841,17 +1851,8 @@ export async function deleteCommunityResource(
 // than an owner_id match — RLS enforces the identical rule underneath (see
 // the migration's own comments).
 
-export const COMMUNITY_RESOURCE_FILES_BUCKET = "community-resource-files";
+export const COMMUNITY_RESOURCE_FILES_BUCKET = RESOURCE_FILE_BUCKET;
 
-const MAX_RESOURCE_FILE_BYTES = 50 * 1024 * 1024; // 50 MB, same cap as showcase-media
-const RESOURCE_FILE_ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation", // .pptx
-]);
 
 const RESOURCE_FILE_SIGNED_URL_TTL_SECONDS = 60 * 10; // 10 minutes, matches showcase.ts's own TTL
 
@@ -1921,61 +1922,163 @@ async function listCommunityResourceFilesForCommunity(
   return byResource;
 }
 
-/** Attach one file to a resource as a community admin. Validates type/size
- *  in app code (belt-and-suspenders on top of the bucket's own
- *  allowed_mime_types/file_size_limit) and throws with a message the
- *  caller can show directly. */
-export async function addCommunityResourceFile(
-  communityId: string,
-  resourceId: string,
-  file: File
-): Promise<CommunityResourceFile> {
-  const { user, db } = await requireCurrentUser();
+// ── Direct-to-storage upload ────────────────────────────────────────────────
+//
+// The file does NOT pass through this server (Next's server-action body limit is
+// 1 MB by default and Vercel's request limit is 4.5 MB, which silently broke
+// PowerPoint uploads). Three steps instead:
+//   1. prepareCommunityResourceUpload: checks the person and the file, and hands
+//      back a signed upload URL for <community id>/<resource id>/<file name>.
+//   2. the browser PUTs the file straight to Supabase Storage.
+//   3. createCommunityResourceWithUpload (a new document) or
+//      attachUploadedResourceFile (an existing one) checks the object is really
+//      there, then writes the rows. A new document's row is created only now,
+//      after the upload succeeded, and is removed again if its file row fails,
+//      so there is never a document with no file and no link.
 
+export type PreparedResourceUpload = {
+  resourceId: string;
+  path: string;
+  /** Where the browser PUTs the file (single use). */
+  signedUrl: string;
+  contentType: string;
+};
+
+async function assertCanAttach(communityId: string): Promise<{ user: { id: string }; db: Db }> {
+  const { user, db } = await requireCurrentUser();
   const membership = await getMembership(communityId);
   const kind = await getCommunityKind(communityId);
   if (!membership.isAdmin && !(kind === "team" && membership.state === "active")) {
-    throw new Error("Only a community admin can attach a file.");
+    throw new Error(
+      kind === "team" ? "Upload not allowed: you are not on this team." : "Upload not allowed: only a community admin can attach a file."
+    );
   }
+  return { user, db };
+}
 
-  if (!file || file.size === 0) throw new Error("No file selected.");
-  if (!RESOURCE_FILE_ALLOWED_MIME.has(file.type)) throw new Error("Use PNG, JPEG, WebP, GIF, PDF or PPTX.");
-  if (file.size > MAX_RESOURCE_FILE_BYTES) throw new Error("File must be under 50 MB.");
+/** Step 1. `resourceId` is given when adding a file to an existing document;
+ *  otherwise a new id is made for the document that will be created. */
+export async function prepareCommunityResourceUpload(
+  communityId: string,
+  file: { name: string; size: number; type: string },
+  resourceId?: string
+): Promise<PreparedResourceUpload> {
+  const { db } = await assertCanAttach(communityId);
 
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const path = `${communityId}/${crypto.randomUUID()}.${ext || "bin"}`;
+  const check = checkResourceFile(file);
+  if (!check.ok) throw new Error(check.error);
 
-  const { error: uploadError } = await db.storage
+  const id = resourceId ?? crypto.randomUUID();
+  const path = resourceFilePath(communityId, id, file.name);
+  const { data, error } = await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).createSignedUploadUrl(path);
+  if (error || !data?.signedUrl) {
+    console.error("prepareCommunityResourceUpload: createSignedUploadUrl failed", error);
+    const msg = error?.message?.toLowerCase() ?? "";
+    if (msg.includes("bucket not found")) {
+      throw new Error("Upload is not set up on the server (the storage bucket is missing). Tell the site admin.");
+    }
+    if (msg.includes("row-level security") || msg.includes("unauthorized") || msg.includes("policy")) {
+      throw new Error("Upload not allowed: storage refused this upload. Tell the site admin (storage policy).");
+    }
+    throw new Error("Couldn't start the upload. Please try again.");
+  }
+  return { resourceId: id, path, signedUrl: data.signedUrl, contentType: check.mime };
+}
+
+/** Confirm the object is in the bucket and read its real size (not the
+ *  browser's claim). Throws a message the person can read. */
+async function uploadedObjectSize(db: Db, communityId: string, resourceId: string, path: string): Promise<number> {
+  const name = path.slice(`${communityId}/${resourceId}/`.length);
+  const { data, error } = await db.storage
     .from(COMMUNITY_RESOURCE_FILES_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false });
-  if (uploadError) throw uploadError;
+    .list(`${communityId}/${resourceId}`, { limit: 5, search: name });
+  const found = data?.find((o: { name: string }) => o.name === name);
+  if (error || !found) throw new Error("The upload didn't arrive. Please try again.");
+  const size = Number((found.metadata as { size?: number } | null)?.size ?? 0);
+  if (size > MAX_RESOURCE_FILE_BYTES) {
+    await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([path]);
+    throw new Error("File is too large (max 50 MB).");
+  }
+  return size;
+}
 
+async function insertResourceFileRow(
+  db: Db,
+  userId: string,
+  communityId: string,
+  resourceId: string,
+  path: string,
+  filename: string
+): Promise<CommunityResourceFile> {
+  const size = await uploadedObjectSize(db, communityId, resourceId, path);
   const { data, error } = await db
     .from("community_resource_files")
     .insert({
       resource_id: resourceId,
       community_id: communityId,
-      added_by: user.id, // from the session, never the body
-      filename: file.name.slice(0, 200),
-      size_bytes: file.size,
-      url: path, // the storage PATH — see the field comment in the migration
+      added_by: userId, // from the session, never the body
+      filename: filename.slice(0, 200),
+      size_bytes: size,
+      url: path, // the storage PATH, see the field comment in the migration
     })
     .select("id, filename, size_bytes")
     .single();
-
   if (error || !data) {
-    // Roll back the just-uploaded object rather than leaving an orphan no
-    // one can ever see or remove (it has no DB row to list it by).
+    console.error("insertResourceFileRow failed", error);
+    // No row to list the object by: remove it rather than leave an orphan.
     await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([path]);
-    throw error ?? new Error("Couldn't save the attachment. Please try again.");
+    throw new Error("The file arrived but couldn't be saved. Please try again.");
   }
-
   return {
     id: data.id as string,
     filename: data.filename as string,
     sizeBytes: data.size_bytes as number,
     url: await signCommunityResourceFilePath(db, path),
   };
+}
+
+/** Step 3, a file for a document that already exists. */
+export async function attachUploadedResourceFile(
+  communityId: string,
+  resourceId: string,
+  upload: { path: unknown; filename: string }
+): Promise<CommunityResourceFile> {
+  const { user, db } = await assertCanAttach(communityId);
+  if (!pathBelongsTo(upload.path, communityId, resourceId)) throw new Error("That upload doesn't match this document.");
+  return insertResourceFileRow(db, user.id, communityId, resourceId, upload.path, upload.filename);
+}
+
+export type CreateWithUploadResult =
+  | { status: "ok"; id: string; file: CommunityResourceFile }
+  | { status: "error"; error: string };
+
+/** Step 3, a NEW document: its row is created now, after the upload, with the id
+ *  the path already carries. If saving its file row fails, the row is deleted
+ *  again. */
+export async function createCommunityResourceWithUpload(
+  communityId: string,
+  input: { title: string; resource_type: string; url: string; description: string },
+  upload: { resourceId: string; path: unknown; filename: string }
+): Promise<CreateWithUploadResult> {
+  const { user, db } = await assertCanAttach(communityId);
+  if (!pathBelongsTo(upload.path, communityId, upload.resourceId)) {
+    return { status: "error", error: "That upload doesn't match this document." };
+  }
+
+  const made = await createCommunityResource(communityId, input, upload.resourceId);
+  if (made.status !== "ok") {
+    // The object has no row yet; do not leave it behind.
+    await db.storage.from(COMMUNITY_RESOURCE_FILES_BUCKET).remove([upload.path]);
+    return { status: "error", error: made.error };
+  }
+
+  try {
+    const file = await insertResourceFileRow(db, user.id, communityId, made.id, upload.path, upload.filename);
+    return { status: "ok", id: made.id, file };
+  } catch (e) {
+    await db.from("community_resources").delete().eq("id", made.id).eq("community_id", communityId);
+    return { status: "error", error: e instanceof Error ? e.message : "Couldn't save the document. Please try again." };
+  }
 }
 
 /** Remove one attached file as a community admin. */
