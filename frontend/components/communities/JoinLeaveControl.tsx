@@ -18,7 +18,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { joinCommunityAction, leaveCommunityAction } from "@/app/communities/actions";
 import type { Membership } from "@/lib/server/communities";
 import LeaveButton from "./LeaveButton";
@@ -41,6 +41,7 @@ export default function JoinLeaveControl({
   membership: Membership;
 }) {
   const router = useRouter();
+  const justJoined = useSearchParams().get("welcome") === "1";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const autoJoinStarted = useRef(false);
@@ -54,7 +55,7 @@ export default function JoinLeaveControl({
     setBusy(true);
     joinCommunityAction(communityId, isOpen, slug).then((res) => {
       if (res.ok) {
-        router.replace(`/communities/${slug}`);
+        router.replace(`/communities/${slug}?welcome=1`);
         router.refresh();
       } else {
         setError(res.error);
@@ -86,6 +87,9 @@ export default function JoinLeaveControl({
 
     return (
       <div className="flex items-center gap-3">
+        {justJoined && (
+          <span className="font-label-md text-label-md text-primary">Welcome, you joined!</span>
+        )}
         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
           <span className="material-symbols-outlined text-base">check_circle</span>
           {isAdmin ? "Admin" : membership.role === "lead" ? "Lead" : "Member"}
