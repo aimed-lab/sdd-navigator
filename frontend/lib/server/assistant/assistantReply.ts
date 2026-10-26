@@ -295,7 +295,6 @@ export function assistantAvailableOn(pathname: string | null | undefined): boole
   // A team page too: its "Make learning material" tile opens the assistant.
   if (pathname.startsWith("/teams/") && pathname !== "/teams/new") return true;
   // The welcome page's "Ask the AI assistant" tile opens it.
-  if (pathname === "/start") return true;
   return pathname === "/explore" || pathname.startsWith("/explore/") || pathname === "/pages" || pathname.startsWith("/pages/");
 }
 

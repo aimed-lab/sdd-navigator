@@ -28,6 +28,7 @@
 
 import Link from "next/link";
 import AddToBoardButton from "@/components/collaborate/AddToBoardButton";
+import ActionTile from "@/components/ui/ActionTile";
 import OpenCallTile from "@/components/collaborate/OpenCallTile";
 import PostCard from "@/components/collaborate/PostCard";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
@@ -37,6 +38,7 @@ import ResourceCard from "@/components/collaborate/ResourceCard";
 import { getCurrentUser } from "@/lib/auth";
 import { listCollabPosts, type BoardFilter, type CollabPost } from "@/lib/server/collab";
 import { listResources } from "@/lib/server/collaborate";
+import { listCommunities } from "@/lib/server/communities";
 import { listMyTeamsNewest } from "@/lib/server/teams/teams";
 
 export const dynamic = "force-dynamic"; // board content changes per request
@@ -103,8 +105,12 @@ export default async function CollaboratePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
-  // The Teams card: the signed-in person's own teams (session client, RLS), newest first.
-  const myTeams = await listMyTeamsNewest(5).catch(() => []);
+  // Your teams card: the signed-in person's own teams (session client, RLS), newest first.
+  // Communities card: the public list; listCommunities() returns communities only, never teams.
+  const [myTeams, communities] = await Promise.all([
+    listMyTeamsNewest(4).catch(() => []),
+    listCommunities().then((l) => l.slice(0, 5)).catch(() => []),
+  ]);
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
   const q = one(sp.q).trim();
@@ -144,69 +150,77 @@ export default async function CollaboratePage({
 
       <DeletedNotice show={wasDeleted(sp)} />
 
-      {/* Pinned open call: a static tile, not a post */}
-      <OpenCallTile />
-
-      {/* Service providers directory, and Teams next to it */}
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link
-          href="/collaborate/providers"
-          className="tile group p-6 flex items-center justify-between gap-6"
-          style={{ background: "var(--type-other-bg)" }}
-        >
-          <span className="min-w-0">
-            <span className="block font-title text-[22px] font-medium text-on-background">
-              Find a service provider
-            </span>
-            <span className="block mt-1 font-body-md text-body-md text-secondary">
-              Chemistry, biology, AI and manufacturing companies we met at BioTechX Europe 2026.
-            </span>
-          </span>
-          <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
-            Browse
-            <span className="material-symbols-outlined">arrow_forward</span>
-          </span>
-        </Link>
-
+      {/* Where to find teams, communities and service providers */}
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
         {myTeams.length > 0 ? (
-          <div className="tile p-6 flex flex-col gap-3">
-            <span className="block font-title text-[22px] font-medium text-on-background">Teams</span>
-            <ul className="flex flex-col gap-1">
+          <ActionTile icon="group" title="Your teams" tone="green">
+            <ul className="flex flex-col gap-1 min-w-0">
               {myTeams.map((t) => (
-                <li key={t.slug}>
+                <li key={t.slug} className="min-w-0">
                   <Link
                     href={`/teams/${t.slug}`}
-                    className="font-body-md text-body-md text-primary hover:underline underline-offset-4 break-words"
+                    className="font-body-md text-[14px] leading-6 text-[#166534] hover:underline underline-offset-4 break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded"
                   >
                     {t.name}
                   </Link>
                 </li>
               ))}
             </ul>
-            <span className="flex flex-wrap gap-x-5 gap-y-1 font-label-md text-label-md">
-              <Link href="/teams" className="text-primary hover:underline underline-offset-4">
+            <span className="mt-auto pt-1 flex flex-wrap gap-x-5 gap-y-1 text-[13.5px] font-semibold leading-6 text-[#166534]">
+              <Link href="/teams" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded">
                 See all
               </Link>
-              <Link href="/teams/new" className="text-primary hover:underline underline-offset-4">
+              <Link href="/teams/new" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded">
                 Create a team
               </Link>
             </span>
-          </div>
+          </ActionTile>
         ) : (
-                  <Link href="/teams" className="tile group p-6 flex items-center justify-between gap-6">
-            <span className="min-w-0">
-              <span className="block font-title text-[22px] font-medium text-on-background">Teams</span>
-              <span className="block mt-1 font-body-md text-body-md text-secondary">
-                A small private group with its own documents and wiki pages. Make one in seconds.
-              </span>
-            </span>
-            <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
-              Open
-              <span className="material-symbols-outlined">arrow_forward</span>
-            </span>
-          </Link>
+          <ActionTile
+            icon="group_add"
+            title="Your teams"
+            description="A private group for your lab, class or event, with a QR code to bring people in."
+            action="Create a team →"
+            tone="green"
+            href="/teams/new"
+          />
         )}
+
+        <ActionTile icon="diversity_3" title="Communities" tone="blue">
+          {communities.length > 0 && (
+            <ul className="flex flex-col gap-1 min-w-0">
+              {communities.map((c) => (
+                <li key={c.slug} className="min-w-0">
+                  <Link
+                    href={`/communities/${c.slug}`}
+                    className="font-body-md text-[14px] leading-6 text-[#2c4a9a] hover:underline underline-offset-4 break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4a9a] rounded"
+                  >
+                    {c.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Link
+            href="/communities"
+            className="mt-auto pt-1 text-[13.5px] font-semibold leading-6 text-[#2c4a9a] hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2c4a9a] rounded"
+          >
+            See all communities →
+          </Link>
+        </ActionTile>
+
+        <ActionTile
+          icon="storefront"
+          title="Service providers"
+          description="Chemistry, biology, AI and manufacturing companies we met at BioTechX Europe 2026."
+          action="Browse providers →"
+          tone="amber"
+          href="/collaborate/providers"
+        />
       </div>
+
+      {/* Pinned open call: a slim banner, not a post */}
+      <OpenCallTile />
 
       {/* Search (plain GET form — keeps every view linkable) */}
       <form action="/collaborate" method="get" className="mt-8 max-w-3xl">
@@ -279,17 +293,14 @@ export default async function CollaboratePage({
 
       {/* Board */}
       {posts.length === 0 ? (
-        <div className="mt-6 max-w-xl mx-auto">
-          <InvitationCard
-            heading={filtered ? "Nothing matches that yet" : "No posts yet"}
-            body={
-              filtered
-                ? "Try a broader filter, or post what you're looking for and let the community come to you."
-                : "No posts yet. Post what you need or offer, and the community can reply."
-            }
-            href={newPostHref}
-          />
-        </div>
+        <p className="mt-6 font-body-md text-body-md text-secondary">
+          {filtered
+            ? "Nothing matches that yet. Try a broader filter, or post what you are looking for."
+            : "No posts yet. Post what you need or offer and others can reply."}{" "}
+          <Link href={newPostHref} className="text-primary hover:underline underline-offset-4">
+            Create a post
+          </Link>
+        </p>
       ) : (
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {posts.map((post) => (

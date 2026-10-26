@@ -52,7 +52,7 @@ const MAX_TEXT = 500;
 export function parseAssistantRequest(raw: unknown): AssistantRequest | null {
   if (typeof raw !== "object" || raw === null) return null;
   const r = raw as Record<string, unknown>;
-  // "open" just opens the panel (the /start tile): no text needed.
+  // "open" just opens the panel (no text needed.
   if (r.mode === "open") return { text: "", mode: "open" };
   const text = typeof r.text === "string" ? r.text.trim().slice(0, MAX_TEXT) : "";
   if (!text) return null;
