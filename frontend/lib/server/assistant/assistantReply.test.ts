@@ -109,7 +109,7 @@ test("greeting text is exactly the agreed sentence", () => {
   assert.equal(GREETING, "Hi, I'm your SmartDrugDiscovery assistant. I can help you:");
 });
 
-test("starters: the five chips, in order, all live (Communities is a real option now)", () => {
+test("starters: the six chips, in order, all live (Communities is a real option now)", () => {
   assert.deepEqual(
     STARTERS.map((s) => s.label),
     [
@@ -117,6 +117,7 @@ test("starters: the five chips, in order, all live (Communities is a real option
       "Create a wiki page for my research",
       "Show my pages",
       "Create a team",
+      "Status of my projects",
       "Find or create a community",
     ]
   );

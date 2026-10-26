@@ -28,6 +28,8 @@ import {
   type AuthOutcome,
   type SSORedirectOutcome,
 } from "@/lib/auth";
+import { postLoginPath } from "@/lib/safeRedirect";
+
 const CONFIG_ERROR = "Sign-in is not configured on this server.";
 
 /** SSO — the only reachable sign-in path. Starts the SPARC Keycloak redirect
@@ -44,6 +46,22 @@ export async function ssoLoginAction(callbackUrl: string): Promise<SSORedirectOu
   } catch (e) {
     if (e instanceof ServerConfigError) return { ok: false, error: CONFIG_ERROR };
     console.error("ssoLoginAction failed", e);
+    return { ok: false, error: "Couldn't start sign-in. Please try again." };
+  }
+}
+
+/** "Sign in with a different email": end the current session, then start SSO
+ *  again with a forced login form, returning to `callbackUrl` (the same page). */
+export async function switchAccountAction(callbackUrl: string): Promise<SSORedirectOutcome> {
+  const origin = await requestOrigin();
+  if (!origin) return { ok: false, error: "Couldn't determine this site's URL." };
+  const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(postLoginPath(callbackUrl))}`;
+  try {
+    await signOut();
+    return await signInWithSSO(redirectTo, { forceLogin: true });
+  } catch (e) {
+    if (e instanceof ServerConfigError) return { ok: false, error: CONFIG_ERROR };
+    console.error("switchAccountAction failed", e);
     return { ok: false, error: "Couldn't start sign-in. Please try again." };
   }
 }

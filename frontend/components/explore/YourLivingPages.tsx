@@ -45,7 +45,7 @@ export default function YourLivingPages() {
       <div className="flex items-end justify-between gap-3 mb-4">
         <SectionHeading title="Your wiki" className="" />
         <Link href="/pages" className="font-label-md text-label-md text-primary hover:underline underline-offset-4 shrink-0 pb-1">
-          All pages →
+          All wiki pages →
         </Link>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

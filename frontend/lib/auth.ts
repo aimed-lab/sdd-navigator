@@ -180,7 +180,10 @@ export async function requireCurrentUser(): Promise<{ user: AuthUser; db: Db }> 
  *  app's own /auth/callback route (with `?next=` already appended) — Keycloak
  *  and Supabase both need to land back on our origin before the final
  *  destination redirect happens. */
-export async function signInWithSSO(redirectTo: string): Promise<SSORedirectOutcome> {
+export async function signInWithSSO(
+  redirectTo: string,
+  opts: { forceLogin?: boolean } = {}
+): Promise<SSORedirectOutcome> {
   const supabase = await getSessionClient();
   if (!supabase) throw new ServerConfigError();
 
@@ -191,7 +194,13 @@ export async function signInWithSSO(redirectTo: string): Promise<SSORedirectOutc
     provider: "custom:sdd" as unknown as Parameters<
       typeof supabase.auth.signInWithOAuth
     >[0]["provider"],
-    options: { redirectTo, skipBrowserRedirect: true },
+    // forceLogin asks Keycloak to show its login form even when it still has a
+    // session, which is what "sign in with a different email" needs.
+    options: {
+      redirectTo,
+      skipBrowserRedirect: true,
+      ...(opts.forceLogin ? { queryParams: { prompt: "login" } } : {}),
+    },
   });
 
   if (error || !data?.url) {

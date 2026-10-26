@@ -281,6 +281,13 @@ export const STARTERS: Starter[] = [
     text: "Create a team",
   },
   {
+    id: "projects",
+    label: "Status of my projects",
+    hint: "checklists, overdue items, help requests and latest updates",
+    kind: "send",
+    text: "What's the status of my projects?",
+  },
+  {
     id: "communities",
     label: "Find or create a community",
     hint: "see what exists first, then join or start one",

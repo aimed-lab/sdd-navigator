@@ -20,6 +20,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { listMyProjects } from "@/lib/server/projects";
 import ProjectCard from "@/components/projects/ProjectCard";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
+import { hasProgramAccess } from "@/lib/server/projectWorkspace/program";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -34,7 +35,7 @@ export default async function ProjectsPage({
   const user = await getCurrentUser();
   if (!user) redirect("/login?callbackUrl=%2Fprojects");
 
-  const result = await listMyProjects();
+  const [result, showProgram] = await Promise.all([listMyProjects(), hasProgramAccess()]);
 
   return (
     <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 md:py-20 flex flex-col gap-12">
@@ -57,6 +58,25 @@ export default async function ProjectsPage({
       </section>
 
       <DeletedNotice show={wasDeleted(sp)} />
+
+      {showProgram && (
+        <Link
+          href="/programs/colabofest-2026"
+          className="tile group -mt-4 p-5 flex items-center justify-between gap-6"
+          style={{ background: "var(--type-other-bg)" }}
+        >
+          <span className="min-w-0">
+            <span className="block font-title text-[20px] font-medium text-on-background">ColaboFest 2026 projects</span>
+            <span className="block mt-1 font-body-md text-body-md text-secondary">
+              See how every winner project you lead or manage is doing.
+            </span>
+          </span>
+          <span className="shrink-0 flex items-center gap-2 font-label-md text-label-md text-primary">
+            Open
+            <span className="material-symbols-outlined">arrow_forward</span>
+          </span>
+        </Link>
+      )}
 
       {result.status === "error" && (
         <p className="font-body-sm text-body-sm text-error" role="alert">

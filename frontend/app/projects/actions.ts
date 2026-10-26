@@ -55,7 +55,7 @@ export async function createProjectAction(input: {
 
   const challenge_key = input.colabofest
     ? COLABOFEST_CHALLENGE_KEY
-    : input.challenge === "colabofest2026"
+    : input.challenge === COLABOFEST_CHALLENGE_KEY
       ? COLABOFEST_CHALLENGE_KEY
       : null;
 
@@ -63,7 +63,7 @@ export async function createProjectAction(input: {
   // team's choice — set it HERE, server-side, regardless of anything the
   // client sent. The create form hides the field entirely for this entry
   // point, but that's a courtesy: even a hand-crafted request claiming
-  // colabofest=true (or challenge=colabofest2026) with its own `deadline`
+  // colabofest=true (or challenge=colabofest_2026) with its own `deadline`
   // gets overridden below, never passed through.
   const isColabofest = challenge_key === COLABOFEST_CHALLENGE_KEY;
   const deadline = isColabofest ? COLABOFEST_DEADLINE : input.deadline || null;

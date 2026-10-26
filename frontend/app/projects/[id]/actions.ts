@@ -15,6 +15,10 @@ import {
   moveChecklistItem,
   promoteProjectMember,
   removeProjectMember,
+  setChecklistAssignee,
+  setChecklistDueDate,
+  setGithubUrl,
+  setMemberRole,
   setSharedFolder,
   stepDownFromLead,
   submitProposal,
@@ -26,17 +30,33 @@ import {
   type SharedFolder,
 } from "@/lib/server/projects";
 import { createProjectPage } from "@/lib/server/pages/projectPages";
+import {
+  deleteProjectUpdate,
+  editAnnouncement,
+  postProjectUpdate,
+  setAnnouncementPinned,
+  setHelpResolved,
+} from "@/lib/server/projectWorkspace/updates";
+import { addReply, createThread, deleteReply, deleteThread } from "@/lib/server/projectWorkspace/discussions";
+import { dismissWelcome } from "@/lib/server/projectWorkspace/welcome";
+import { setFinalist, setMemberAffiliation } from "@/lib/server/projectWorkspace/colabofestOps";
+import { requireCurrentUser } from "@/lib/auth";
+import type { ListKey } from "@/lib/server/projectWorkspace/status";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
 /** Add a member by email. lib/server/projects.ts is the real gate (RLS +
  *  an explicit lead check) — this action just translates its result. */
-export async function addMemberAction(projectId: string, email: string): Promise<ActionResult> {
+export async function addMemberAction(
+  projectId: string,
+  email: string,
+  role: "member" | "manager" = "member"
+): Promise<ActionResult> {
   if (!projectId) return { ok: false, error: "Missing project." };
   if (!email?.trim()) return { ok: false, error: "An email address is required." };
 
   try {
-    const result = await addProjectMember(projectId, email);
+    const result = await addProjectMember(projectId, email, role === "manager" ? "manager" : "member");
     if (result.status !== "ok") return { ok: false, error: result.error };
     revalidatePath(`/projects/${projectId}`);
     return { ok: true };
@@ -178,12 +198,13 @@ export type AddChecklistItemActionResult =
 
 export async function addChecklistItemAction(
   projectId: string,
-  label: string
+  label: string,
+  listKey: ListKey = "team"
 ): Promise<AddChecklistItemActionResult> {
   if (!projectId) return { ok: false, error: "Missing project." };
 
   try {
-    const result = await addChecklistItem(projectId, label);
+    const result = await addChecklistItem(projectId, label, listKey);
     if (result.status !== "ok") return { ok: false, error: result.error };
     revalidatePath(`/projects/${projectId}`);
     return { ok: true, item: result.item, classificationFailed: result.classificationFailed };
@@ -338,4 +359,195 @@ export async function createProjectWikiPageAction(
     console.error("createProjectWikiPageAction failed", e);
     return { ok: false, error: "Couldn't create the wiki page. Please try again." };
   }
+}
+
+// ── owners and due dates ─────────────────────────────────────────────────────
+
+export async function setChecklistAssigneeAction(projectId: string, itemId: string, assigneeId: string | null): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+  try {
+    const r = await setChecklistAssignee(projectId, itemId, assigneeId || null);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to change the owner." };
+    console.error("setChecklistAssigneeAction failed", e);
+    return { ok: false, error: "Couldn't change the owner. Please try again." };
+  }
+}
+
+export async function setChecklistDueDateAction(projectId: string, itemId: string, due: string): Promise<ActionResult> {
+  if (!projectId || !itemId) return { ok: false, error: "Missing item." };
+  try {
+    const r = await setChecklistDueDate(projectId, itemId, due || null);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to change the due date." };
+    console.error("setChecklistDueDateAction failed", e);
+    return { ok: false, error: "Couldn't change the due date. Please try again." };
+  }
+}
+
+// ── GitHub link and roles ────────────────────────────────────────────────────
+
+export async function setGithubUrlAction(projectId: string, url: string): Promise<{ ok: true; github_url: string | null } | { ok: false; error: string }> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const r = await setGithubUrl(projectId, url);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, github_url: r.github_url };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to save the link." };
+    console.error("setGithubUrlAction failed", e);
+    return { ok: false, error: "Couldn't save the link. Please try again." };
+  }
+}
+
+export async function setMemberRoleAction(projectId: string, memberId: string, role: "member" | "manager"): Promise<ActionResult> {
+  if (!projectId || !memberId) return { ok: false, error: "Missing member." };
+  try {
+    const r = await setMemberRole(projectId, memberId, role);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to change roles." };
+    console.error("setMemberRoleAction failed", e);
+    return { ok: false, error: "Couldn't change that role. Please try again." };
+  }
+}
+
+// ── updates ──────────────────────────────────────────────────────────────────
+
+export async function postUpdateAction(projectId: string, kind: string, body: string): Promise<ActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const r = await postProjectUpdate(projectId, kind, body);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to post." };
+    console.error("postUpdateAction failed", e);
+    return { ok: false, error: "Couldn't post that. Please try again." };
+  }
+}
+
+export async function deleteUpdateAction(projectId: string, updateId: string): Promise<ActionResult> {
+  if (!projectId || !updateId) return { ok: false, error: "Missing post." };
+  try {
+    const r = await deleteProjectUpdate(projectId, updateId);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to delete." };
+    console.error("deleteUpdateAction failed", e);
+    return { ok: false, error: "Couldn't delete that post. Please try again." };
+  }
+}
+
+export async function resolveHelpAction(projectId: string, updateId: string, resolved: boolean): Promise<ActionResult> {
+  if (!projectId || !updateId) return { ok: false, error: "Missing post." };
+  try {
+    const r = await setHelpResolved(projectId, updateId, resolved);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to do that." };
+    console.error("resolveHelpAction failed", e);
+    return { ok: false, error: "Couldn't update that post. Please try again." };
+  }
+}
+
+// ── announcements (edit, pin), discussions, welcome, finalist, affiliation ───
+
+type Written = { status: string; error?: string };
+
+/** Run a write, turn its result into an ActionResult, refresh the project page. */
+async function run(projectId: string, what: string, fn: () => Promise<Written>): Promise<ActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const r = await fn();
+    if (r.status !== "ok") return { ok: false, error: r.error ?? "Something went wrong." };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to do that." };
+    console.error(`${what} failed`, e);
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
+}
+
+export async function editAnnouncementAction(projectId: string, updateId: string, body: string): Promise<ActionResult> {
+  if (!updateId) return { ok: false, error: "Missing post." };
+  return run(projectId, "editAnnouncementAction", () => editAnnouncement(projectId, updateId, body));
+}
+
+export async function pinAnnouncementAction(projectId: string, updateId: string, pinned: boolean): Promise<ActionResult> {
+  if (!updateId) return { ok: false, error: "Missing post." };
+  return run(projectId, "pinAnnouncementAction", () => setAnnouncementPinned(projectId, updateId, pinned === true));
+}
+
+export async function createThreadAction(
+  projectId: string,
+  title: string,
+  body: string
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const r = await createThread(projectId, title, body);
+    if (r.status !== "ok") return { ok: false, error: r.error };
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true, id: r.id ?? "" };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to start a discussion." };
+    console.error("createThreadAction failed", e);
+    return { ok: false, error: "Couldn't start the discussion. Please try again." };
+  }
+}
+
+export async function replyAction(projectId: string, threadId: string, body: string): Promise<ActionResult> {
+  if (!threadId) return { ok: false, error: "Missing discussion." };
+  return run(projectId, "replyAction", () => addReply(projectId, threadId, body));
+}
+
+export async function deleteThreadAction(projectId: string, threadId: string): Promise<ActionResult> {
+  if (!threadId) return { ok: false, error: "Missing discussion." };
+  return run(projectId, "deleteThreadAction", () => deleteThread(projectId, threadId));
+}
+
+export async function deleteReplyAction(projectId: string, replyId: string): Promise<ActionResult> {
+  if (!replyId) return { ok: false, error: "Missing reply." };
+  return run(projectId, "deleteReplyAction", () => deleteReply(projectId, replyId));
+}
+
+/** Hide the Welcome card for the signed-in person on this project. */
+export async function dismissWelcomeAction(projectId: string): Promise<ActionResult> {
+  if (!projectId) return { ok: false, error: "Missing project." };
+  try {
+    const { user } = await requireCurrentUser();
+    const r = await dismissWelcome(projectId, user.id);
+    if (!r.ok) return r;
+    revalidatePath(`/projects/${projectId}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to do that." };
+    console.error("dismissWelcomeAction failed", e);
+    return { ok: false, error: "Couldn't hide that. Please try again." };
+  }
+}
+
+export async function setFinalistAction(projectId: string, finalist: boolean): Promise<ActionResult> {
+  return run(projectId, "setFinalistAction", () => setFinalist(projectId, finalist === true));
+}
+
+export async function setAffiliationAction(projectId: string, memberId: string, affiliation: string | null): Promise<ActionResult> {
+  if (!memberId) return { ok: false, error: "Missing member." };
+  return run(projectId, "setAffiliationAction", () => setMemberAffiliation(projectId, memberId, affiliation));
 }

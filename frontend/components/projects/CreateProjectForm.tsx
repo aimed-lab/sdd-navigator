@@ -31,7 +31,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createProjectAction } from "@/app/projects/actions";
-import { MODALITIES, MODALITY_LABEL, PROJECT_STAGES, PROJECT_STAGE_LABEL } from "@/lib/projectTypes";
+import { COLABOFEST_CHALLENGE_KEY, MODALITIES, MODALITY_LABEL, PROJECT_STAGES, PROJECT_STAGE_LABEL } from "@/lib/projectTypes";
 
 const UNSET = "" as const;
 
@@ -316,7 +316,7 @@ export default function CreateProjectForm({
                   className={`${inputClass} appearance-none cursor-pointer`}
                 >
                   <option value={UNSET}>None</option>
-                  <option value="colabofest2026">ColaboFest 2026</option>
+                  <option value={COLABOFEST_CHALLENGE_KEY}>ColaboFest 2026</option>
                 </select>
                 <p className="font-body-sm text-body-sm text-secondary mt-1">
                   Linking a challenge applies specific formatting and evaluation

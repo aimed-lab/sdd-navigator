@@ -3,23 +3,27 @@
 // nesting of a project's wiki pages. No I/O, no next/* imports, so
 // `npm test` covers it and client components may import it.
 
-export const TAB_KEYS = ["overview", "wiki", "tasks", "files", "team", "proposal"] as const;
+export const TAB_KEYS = ["overview", "announcements", "discussions", "tasks", "files", "wiki", "team", "proposal"] as const;
 export type TabKey = (typeof TAB_KEYS)[number];
 
 export const TAB_LABEL: Record<TabKey, string> = {
   overview: "Overview",
-  wiki: "Wiki",
+  announcements: "Announcements",
+  discussions: "Discussions",
   tasks: "Tasks & checklists",
   files: "Files",
+  wiki: "Wiki",
   team: "Team",
   proposal: "Proposal",
 };
 
 export const TAB_ICON: Record<TabKey, string> = {
   overview: "dashboard",
-  wiki: "menu_book",
+  announcements: "campaign",
+  discussions: "forum",
   tasks: "checklist",
   files: "folder_shared",
+  wiki: "menu_book",
   team: "group",
   proposal: "description",
 };
@@ -32,7 +36,9 @@ export function visibleTabs(isChallenge: boolean): TabKey[] {
 /** The tab named by ?tab=, or Overview when it is missing, unknown, or not
  *  available for this project (Proposal on an ordinary project). */
 export function parseTab(raw: string | string[] | undefined, isChallenge: boolean): TabKey {
-  const v = Array.isArray(raw) ? raw[0] : raw;
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  // The Updates tab was renamed Announcements; old links keep working.
+  const v = first === "updates" ? "announcements" : first;
   const hit = visibleTabs(isChallenge).find((t) => t === v);
   return hit ?? "overview";
 }

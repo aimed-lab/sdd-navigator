@@ -18,16 +18,22 @@ export default function ProjectSidebar({
   projectId,
   name,
   challengeKey,
+  program = null,
   memberCount,
+  finalist = false,
   active,
 }: {
   projectId: string;
   name: string;
   challengeKey: string | null;
+  /** projects.program: gives the chip its label (the Proposal tab stays on challengeKey). */
+  program?: string | null;
   memberCount: number;
+  /** A ColaboFest finalist: shows the "★ Finalist" badge. */
+  finalist?: boolean;
   active: TabKey;
 }) {
-  const label = projectLabel(challengeKey);
+  const label = projectLabel(program ?? challengeKey);
   const tabs = visibleTabs(!!challengeKey);
 
   return (
@@ -40,6 +46,11 @@ export default function ProjectSidebar({
             </span>
           )}
           <h1 className="font-title text-[26px] leading-tight font-medium text-on-background break-words">{name}</h1>
+          {finalist && (
+            <span className="inline-block mt-2 px-3 py-1 rounded-full bg-[#fef3c7] text-[#92400e] font-label-sm text-label-sm">
+              ★ Finalist
+            </span>
+          )}
           <p className="mt-1 font-body-sm text-body-sm text-secondary">{teamSizeLabel(memberCount)}</p>
         </div>
 
