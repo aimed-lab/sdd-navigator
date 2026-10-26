@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { listMyTeamsNewest } from "@/lib/server/teams/teams";
 import { teamPath } from "@/lib/server/teams/teamRules";
+import JoinQrScanner from "./JoinQrScanner";
 
 export default async function TeamsHome() {
   const user = await getCurrentUser();
@@ -26,13 +27,7 @@ export default async function TeamsHome() {
           <span className="material-symbols-outlined">add</span>
           Create a team
         </Link>
-        <div className="rounded-2xl border border-[#e8e4da] bg-white px-6 py-4 text-center flex flex-col items-center justify-center gap-1">
-          <span className="font-label-lg text-[18px] text-on-background inline-flex items-center gap-2">
-            <span className="material-symbols-outlined">qr_code_scanner</span>
-            Join with a QR code
-          </span>
-          <span className="font-body-sm text-body-sm text-secondary">Scan the QR code your organiser shared</span>
-        </div>
+        <JoinQrScanner />
       </div>
 
       {teams.length > 0 && (
