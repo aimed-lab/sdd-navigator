@@ -20,6 +20,9 @@ import {
   filterPagesByTitle,
   isKind,
   joinView,
+  joinResultMessage,
+  joinErrorMessage,
+  teamReturnPath,
   makePagePrompt,
   normalizeSettings,
   pageLabel,
@@ -228,7 +231,7 @@ test("signed out, the sign-in link comes back to /teams/new with the typed name"
 
 test("join flow: signed in sees one button, signed out can use an email; members and pending get no button", () => {
   assert.equal(joinView("none"), "join_button");
-  assert.equal(joinView("signed_out"), "email_or_sign_in");
+  assert.equal(joinView("signed_out"), "sign_in_button");
   assert.equal(joinView("active"), "member");
   assert.equal(joinView("pending"), "pending");
 });
@@ -286,4 +289,26 @@ test("teamSlugFromPath: a team page only", () => {
   assert.equal(teamSlugFromPath("/teams/new"), null);
   assert.equal(teamSlugFromPath("/teams"), null);
   assert.equal(teamSlugFromPath("/explore/x"), null);
+});
+
+test("join results: joined and already a member are ok; every other answer says why", () => {
+  assert.deepEqual(joinResultMessage("joined"), { ok: true });
+  assert.deepEqual(joinResultMessage("already_member"), { ok: true });
+  for (const code of ["sign_in", "not_found", "failed", null, "weird"]) {
+    const r = joinResultMessage(code);
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.ok(r.error.length > 20, String(code));
+      assert.ok(!r.error.includes("Couldn't join the team."), String(code));
+    }
+  }
+});
+
+test("join error from the database carries its code", () => {
+  assert.match(joinErrorMessage({ code: "23505", message: "dup" }), /code 23505/);
+  assert.ok(joinErrorMessage(null).length > 20);
+});
+
+test("sign-in comes back to the same team page, which joins them", () => {
+  assert.equal(teamReturnPath("alpha-lab"), "/teams/alpha-lab?join=signin");
 });

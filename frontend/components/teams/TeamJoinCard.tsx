@@ -1,54 +1,36 @@
 "use client";
 
 // What someone sees when they open a team they are not on (a QR scan or a
-// shared link): the team's name, its description and ONE button. Signed in:
-// "Join this team", instant. Signed out: join with just an email (the existing
-// email join), or sign in. Nothing else about the team is shown.
+// shared link): the team's name, its description and ONE button, "Join this
+// team". Signed in: joins right away. Signed out: goes straight to SSO sign-in
+// and comes back to this same team page (?join=signin), where the page joins
+// them on the server. Nothing else about the team is shown.
 
-import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { joinTeamAction, joinTeamByEmailAction } from "@/app/teams/actions";
-import { joinView } from "@/lib/server/teams/teamRules";
+import { joinTeamAction } from "@/app/teams/actions";
+import { ssoLoginAction } from "@/app/auth/actions";
+import { joinView, teamReturnPath } from "@/lib/server/teams/teamRules";
 import type { MembershipState } from "@/lib/server/communities";
 
 export default function TeamJoinCard({
-  teamId,
   slug,
   name,
   description,
   state,
-  autoOpen,
-  autoJoin,
+  initialError,
 }: {
-  teamId: string;
   slug: string;
   name: string;
   description: string | null;
   state: MembershipState;
-  /** Arrived by QR / join link (?join=1): open the email box straight away. */
-  autoOpen: boolean;
-  /** Came back from signing in on this team's join link (?join=signin): join now. */
-  autoJoin: boolean;
+  /** Why the automatic join after sign-in did not work, if it did not. */
+  initialError?: string | null;
 }) {
   const router = useRouter();
   const view = joinView(state);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [emailOpen, setEmailOpen] = useState(autoOpen);
-  const [email, setEmail] = useState("");
-  const [done, setDone] = useState<string | null>(null);
-
-  const signIn = `/login?callbackUrl=${encodeURIComponent(`/teams/${slug}?join=signin`)}`;
-
-  const tried = useRef(false);
-  useEffect(() => {
-    if (autoJoin && state === "none" && !tried.current) {
-      tried.current = true;
-      void join();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoJoin, state]);
+  const [error, setError] = useState<string | null>(initialError ?? null);
 
   const join = async () => {
     if (busy) return;
@@ -62,15 +44,18 @@ export default function TeamJoinCard({
     }
   };
 
-  const joinByEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Signed out: start SSO with this team's page as the place to come back to.
+  const signIn = async () => {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const res = await joinTeamByEmailAction(slug, email);
-    setBusy(false);
-    if (res.ok) setDone(res.message);
-    else setError(res.error);
+    const res = await ssoLoginAction(teamReturnPath(slug));
+    if (!res.ok) {
+      setError(res.error);
+      setBusy(false);
+      return;
+    }
+    window.location.assign(res.url);
   };
 
   return (
@@ -85,66 +70,19 @@ export default function TeamJoinCard({
             <p className="font-body-md text-body-md text-secondary">Your request is waiting. A team lead will let you in.</p>
           )}
 
-          {view === "join_button" && (
+          {(view === "join_button" || view === "sign_in_button") && (
             <button
               type="button"
-              onClick={join}
+              onClick={view === "join_button" ? join : signIn}
               disabled={busy}
-              className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md disabled:opacity-50"
+              className="btn-primary px-5 py-3 rounded-lg font-label-md text-label-md disabled:opacity-50"
             >
-              {busy ? "Joining…" : "Join this team"}
+              {busy ? (view === "join_button" ? "Joining…" : "Opening sign-in…") : "Join this team"}
             </button>
           )}
 
-          {view === "email_or_sign_in" && !done && (
-            <>
-              {!emailOpen ? (
-                <button
-                  type="button"
-                  onClick={() => setEmailOpen(true)}
-                  className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md"
-                >
-                  Join this team
-                </button>
-              ) : (
-                <form onSubmit={joinByEmail} className="flex flex-col gap-2">
-                  <label htmlFor="team-join-email" className="font-label-md text-label-md">
-                    Join with your email
-                  </label>
-                  <input
-                    id="team-join-email"
-                    type="email"
-                    required
-                    autoFocus={autoOpen}
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
-                    className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2.5 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy || !email.trim()}
-                    className="btn-primary px-5 py-2.5 rounded-lg font-label-md text-label-md disabled:opacity-50"
-                  >
-                    {busy ? "Joining…" : "Join this team"}
-                  </button>
-                  <p className="font-body-sm text-body-sm text-secondary">No password, no account needed.</p>
-                </form>
-              )}
-              <Link href={signIn} className="font-label-sm text-label-sm text-secondary hover:text-primary">
-                Have an account? Sign in
-              </Link>
-            </>
-          )}
-
-          {done && (
-            <p role="status" className="rounded-lg bg-primary/10 text-primary px-3 py-2.5 font-body-sm text-body-sm">
-              {done}{" "}
-              <Link href={signIn} className="underline underline-offset-4">
-                Sign in
-              </Link>
-            </p>
+          {view === "sign_in_button" && (
+            <p className="font-body-sm text-body-sm text-secondary">New here? Sign in or create an account in one step.</p>
           )}
 
           {error && (

@@ -21,6 +21,8 @@ import {
 } from "@/lib/server/communities";
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
 import {
+  joinErrorMessage,
+  joinResultMessage,
   LINK_MESSAGE,
   canCuratePage,
   canLinkTeam,
@@ -144,11 +146,10 @@ export async function joinTeam(slug: string): Promise<SimpleResult> {
   const { data, error } = await db.rpc("join_team", { p_slug: slug });
   if (error) {
     console.error("joinTeam failed", error);
-    return { status: "error", error: "Couldn't join the team. Please try again." };
+    return { status: "error", error: joinErrorMessage(error) };
   }
-  if (data === "joined" || data === "already_member") return { status: "ok" };
-  if (data === "not_found") return { status: "error", error: "That team link doesn't work any more." };
-  return { status: "error", error: "Couldn't join the team. Please try again." };
+  const res = joinResultMessage(data);
+  return res.ok ? { status: "ok" } : { status: "error", error: res.error };
 }
 
 // ── create a team ───────────────────────────────────────────────────────────

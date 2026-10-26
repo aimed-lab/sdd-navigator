@@ -19,9 +19,6 @@ import {
   updateTeamDetails,
   type PageChoice,
 } from "@/lib/server/teams/teams";
-import { joinTeamByEmail } from "@/lib/server/communityJoin";
-import { headers } from "next/headers";
-import { EMAIL_JOINED_NOTE } from "@/lib/server/teams/teamRules";
 
 export type TeamActionResult = { ok: true } | { ok: false; error: string };
 
@@ -92,25 +89,6 @@ export async function joinTeamAction(slug: string): Promise<TeamActionResult> {
   } catch (e) {
     if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in to join this team." };
     return fail(e, "joinTeamAction");
-  }
-}
-
-/** A signed-out visitor joins with just an email (the same flow communities
- *  use; the database function checks the team is open, which a team always is). */
-export async function joinTeamByEmailAction(
-  slug: string,
-  email: string
-): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  try {
-    // The slug goes straight to join_team_by_email, which resolves it to the
-    // team's id inside the database and only for a team. No id is used here.
-    const h = await headers();
-    const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
-    const res = await joinTeamByEmail(slug, email, ip);
-    return res.ok ? { ok: true, message: EMAIL_JOINED_NOTE } : { ok: false, error: res.error };
-  } catch (e) {
-    console.error("joinTeamByEmailAction failed", e);
-    return { ok: false, error: "Couldn't add you just now. Please try again." };
   }
 }
 

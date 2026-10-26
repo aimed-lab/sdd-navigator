@@ -816,7 +816,7 @@ export async function joinByEmailAction(
     const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
 
     // The id comes from the slug, read on the server; only a community may use
-    // this path (a team uses joinTeamByEmail with its slug).
+    // this path (a team is joined only when signed in, with joinTeamAction).
     const res = await joinOpenCommunityByEmail(community.id, email, ip, community.kind);
     return res.ok ? { ok: true, message: res.message } : { ok: false, error: res.error };
   } catch (e) {

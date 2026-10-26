@@ -212,7 +212,7 @@ export function createTeamCallback(name: string): string {
 
 // ── joining ─────────────────────────────────────────────────────────────────
 
-export type JoinView = "member" | "pending" | "join_button" | "email_or_sign_in";
+export type JoinView = "member" | "pending" | "join_button" | "sign_in_button";
 
 /** What a team page's header offers this visitor. Teams are always open, so
  *  there is no "request to join". */
@@ -220,18 +220,45 @@ export function joinView(state: "signed_out" | "none" | "pending" | "active"): J
   if (state === "active") return "member";
   if (state === "pending") return "pending";
   if (state === "none") return "join_button";
-  return "email_or_sign_in";
+  return "sign_in_button";
 }
 
-/** The sentence under the email form after a signed-out join. They have no
- *  account yet, so they can't open the team until they sign in with that email. */
-export const EMAIL_JOINED_NOTE =
-  "You are on the team. Sign in with this email to open it and see what the team has shared.";
+/** What to tell the person for each answer join_team gives back. Never blank:
+ *  every case says what happened and what to do next. */
+export function joinResultMessage(code: unknown): { ok: true } | { ok: false; error: string } {
+  switch (code) {
+    case "joined":
+    case "already_member":
+      return { ok: true };
+    case "sign_in":
+      return { ok: false, error: "Your sign-in has expired. Sign in again to join this team." };
+    case "not_found":
+      return { ok: false, error: "That team link doesn't work any more. Ask the team lead for a new QR code." };
+    case "failed":
+      return {
+        ok: false,
+        error: "We could not add you to this team. Try again, or ask a team lead to add your email address.",
+      };
+    default:
+      return { ok: false, error: "Joining gave an unexpected answer. Please try again in a moment." };
+  }
+}
+
+/** The message for a database error while joining, with its code so it can be reported. */
+export function joinErrorMessage(err: { code?: string; message?: string } | null | undefined): string {
+  const code = err?.code ? ` (code ${err.code})` : "";
+  return `Joining did not work: the server returned an error${code}. Try again, and if it keeps happening tell the team lead.`;
+}
 
 // ── links and labels ────────────────────────────────────────────────────────
 
 export function teamPath(slug: string): string {
   return `/teams/${slug}`;
+}
+
+/** Where sign-in brings someone back to: this team page, which then joins them. */
+export function teamReturnPath(slug: string): string {
+  return `/teams/${slug}?join=signin`;
 }
 
 export function teamJoinUrl(origin: string, slug: string): string {

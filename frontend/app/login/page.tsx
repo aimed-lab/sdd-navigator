@@ -88,7 +88,7 @@ function LoginForm() {
               Redirecting…
             </>
           ) : (
-            "Sign in with SmartDrugDiscovery"
+            "Sign in or create an account"
           )}
         </button>
       </div>

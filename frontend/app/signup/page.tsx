@@ -3,7 +3,7 @@
 // SSO handles registration: there is no separate signup form or step
 // anymore. This route exists only because components/Nav.tsx and old links
 // still point at /signup — it forwards straight to /login, which renders
-// the single "Sign in with SmartDrugDiscovery" button that both signs in an
+// the single "Sign in or create an account" button that both signs in an
 // existing SSO account and provisions a new one on first login (see
 // handle_new_user in database/schema.sql). callbackUrl is preserved so the
 // redirect still lands wherever the caller intended.

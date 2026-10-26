@@ -20,7 +20,7 @@ import {
   listCommunityResources,
   listMemberRoster,
 } from "@/lib/server/communities";
-import { getTeamJoinInfo, listCommunitiesToLink, listTeamCommunities, listTeamPages } from "@/lib/server/teams/teams";
+import { getTeamJoinInfo, joinTeam, listCommunitiesToLink, listTeamCommunities, listTeamPages } from "@/lib/server/teams/teams";
 import { PageShell } from "@/components/PageHeader";
 import TeamHeader from "@/components/teams/TeamHeader";
 import TeamJoinCard from "@/components/teams/TeamJoinCard";
@@ -55,10 +55,21 @@ export default async function TeamPage({
 
   // Link anyone added by email before they had an account, then read their row.
   await claimPendingCommunityMemberships();
-  const [user, membership] = await Promise.all([
+  const [user, firstMembership] = await Promise.all([
     getCurrentUser(),
     team ? getMembership(team.id) : Promise.resolve(null),
   ]);
+
+  // Back from SSO sign-in on this team's link (?join=signin): join them now,
+  // here on the server, so they land on the full team page. If it fails, show
+  // the reason on the join card.
+  let joinError: string | null = null;
+  if (query.join === "signin" && user && firstMembership?.state !== "active") {
+    const joined = await joinTeam(slug);
+    if (joined.status === "ok") redirect(`/teams/${slug}`);
+    joinError = joined.error;
+  }
+  const membership = firstMembership;
 
   // Not on the team: name, description, one button. A visitor gets these from
   // get_team_join_info (the only thing a team link reveals); an unknown slug 404s.
@@ -70,13 +81,11 @@ export default async function TeamPage({
     return (
       <PageShell narrow>
         <TeamJoinCard
-          teamId={info.id}
           slug={slug}
           name={info.name}
           description={info.description}
           state={membership?.state ?? (user ? "none" : "signed_out")}
-          autoOpen={query.join === "1"}
-          autoJoin={query.join === "signin"}
+          initialError={joinError}
         />
       </PageShell>
     );
