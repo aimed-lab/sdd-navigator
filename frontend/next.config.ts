@@ -9,7 +9,13 @@ const previewDevOrigins =
     : [];
 
 const nextConfig: NextConfig = {
-  ...(previewDevOrigins.length ? { allowedDevOrigins: previewDevOrigins } : {}),
+  // Same origin list also lets server actions run behind the preview proxy.
+  ...(previewDevOrigins.length
+    ? {
+        allowedDevOrigins: previewDevOrigins,
+        experimental: { serverActions: { allowedOrigins: previewDevOrigins } },
+      }
+    : {}),
   async redirects() {
     return [
       {

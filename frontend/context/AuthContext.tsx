@@ -19,6 +19,8 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getClientSession, onAuthStateChange } from "@/lib/authClient";
 import { logoutAction } from "@/app/auth/actions";
+import { demoAuthEnabledAction } from "@/app/auth/demoActions";
+import { DEMO_USER, demoSession, endDemoSession, isDemoSession } from "@/lib/demoAuth";
 
 type AuthContextValue = {
   user: User | null;
@@ -35,7 +37,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [isDemo, setIsDemo] = useState(false);
+
   useEffect(() => {
+    // Sandbox-only demo session: honoured only when the server confirms the
+    // Base44 preview flag, so a stale localStorage key does nothing elsewhere.
+    if (isDemoSession()) {
+      demoAuthEnabledAction().then((enabled) => {
+        if (!enabled) return endDemoSession();
+        setIsDemo(true);
+        setSession(demoSession());
+        setUser(DEMO_USER);
+        setLoading(false);
+      });
+      return;
+    }
+
     getClientSession().then((next) => {
       setSession(next);
       setUser(next?.user ?? null);
@@ -63,6 +80,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // every server component re-renders signed-out rather than trusting that each
   // one happened to be dynamic.
   const signOut = async () => {
+    if (isDemo) {
+      endDemoSession();
+      window.location.assign("/login");
+      return;
+    }
     await logoutAction();
     window.location.assign("/");
   };
