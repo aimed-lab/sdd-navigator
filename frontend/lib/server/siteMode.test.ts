@@ -24,11 +24,9 @@ test("normal mode: no redirects, original nav, footer and title", () => {
   assert.equal(siteTitle("Your teams", false), "Your teams · SmartDrugDiscovery");
 });
 
-test("teams mode nav is Teams and My pages only", () => {
-  assert.deepEqual(navPillars(true), [
-    { label: "Teams", href: "/" },
-    { label: "My pages", href: "/pages" },
-  ]);
+test("teams mode nav is Teams only; the profile menu has no extra links (My teams, Settings, Sign out)", () => {
+  assert.deepEqual(navPillars(true), [{ label: "Teams", href: "/" }]);
+  assert.deepEqual(accountLinks(true), []);
   const all = [...navPillars(true), ...accountLinks(true), ...footerLinks(true)].map((l) => l.href);
   for (const h of all) assert.ok(!TEAMS_MODE_BLOCKED.some((b) => h === b || h.startsWith(b + "/")), h);
 });

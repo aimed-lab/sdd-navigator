@@ -17,6 +17,7 @@ import {
   getCommunityById,
   getCommunityBySlug,
   getMembership,
+  leaveCommunity,
   type Community,
 } from "@/lib/server/communities";
 import { getAnonServerClient } from "@/lib/server/supabaseServer";
@@ -24,6 +25,9 @@ import {
   joinErrorMessage,
   joinResultMessage,
   LEADS_ONLY_PAGES,
+  leaveBlockedReason,
+  pageBackLink,
+  type PageBackLink,
   LINK_MESSAGE,
   canCurateTeamPages,
   canCuratePage,
@@ -535,4 +539,59 @@ export async function listRecentPageUpdateCounts(pageIds: string[], days = 7): P
   const out: Record<string, number> = {};
   for (const r of data as { page_id: string }[]) out[r.page_id] = (out[r.page_id] ?? 0) + 1;
   return out;
+}
+
+/** Leave a team: removes only the caller's own community_members row (the same
+ *  leaveCommunity the communities use; "Community members: self or admin delete" lets
+ *  anyone delete their own row). A LEAD can leave only when another lead remains
+ *  (checked here; the database trigger enforce_community_admin_guard is the backstop). */
+export async function leaveTeam(teamId: string): Promise<SimpleResult> {
+  const { user, db } = await requireCurrentUser();
+  const { data: team } = await db.from("communities").select("kind").eq("id", teamId).maybeSingle();
+  if (!team || (team as { kind?: string }).kind !== "team") return { status: "error", error: "That team doesn't exist." };
+
+  const membership = await getMembership(teamId);
+  if (membership.state !== "active") return { status: "error", error: "You are not on this team." };
+
+  if (membership.isAdmin) {
+    // A lead can read every row of their team, so this counts the other active leads.
+    const { count, error } = await db
+      .from("community_members")
+      .select("id", { count: "exact", head: true })
+      .eq("community_id", teamId)
+      .eq("status", "active")
+      .eq("role", "admin")
+      .neq("user_id", user.id);
+    if (error) {
+      console.error("leaveTeam: counting leads failed", error);
+      return { status: "error", error: "Couldn't check the team's leads. Please try again." };
+    }
+    const blocked = leaveBlockedReason({ isLead: true, otherLeads: count ?? 0 });
+    if (blocked) return { status: "error", error: blocked };
+  }
+
+  const res = await leaveCommunity(teamId);
+  return res.status === "ok" ? { status: "ok" } : { status: "error", error: res.error };
+}
+
+/** The back link for a wiki page, teams site only: the team named by ?from= (when the
+ *  viewer is on it and the page is on it), else the one team the viewer is on that has
+ *  this page, else "My teams". Null when signed out. team_pages rows are visible only
+ *  for the viewer's own teams, so a forged ?from= can name nothing else. */
+export async function getPageBackLink(pageId: string, fromSlug: string | null): Promise<PageBackLink | null> {
+  noStore();
+  const session = await getSession();
+  if (!session) return null;
+  const { data } = await session.db
+    .from("team_pages")
+    .select("communities(slug, name, kind)")
+    .eq("page_id", pageId);
+  type T = { slug: string; name: string; kind: string };
+  const teams = ((data ?? []) as { communities: T | T[] | null }[])
+    .map((r) => one(r.communities))
+    .filter((c): c is T => !!c && c.kind === "team");
+  const named = fromSlug ? teams.find((t) => t.slug === fromSlug) : undefined;
+  if (named) return pageBackLink(named);
+  if (teams.length === 1) return pageBackLink(teams[0]);
+  return pageBackLink(null);
 }

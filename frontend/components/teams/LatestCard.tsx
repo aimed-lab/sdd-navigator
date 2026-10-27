@@ -5,6 +5,7 @@
 
 import Link from "next/link";
 import { shortDate } from "@/lib/server/communityHome/communityHome";
+import { teamPageHref } from "@/lib/server/teams/teamRules";
 import { viewHref, type LatestItem } from "@/lib/server/teams/teamUi";
 import { SECTION_ICON, SoftIcon } from "./TeamIcons";
 
@@ -29,7 +30,7 @@ export default function LatestCard({
       <ul>
         {items.map((it) => {
           const pageId = it.key.startsWith("p:") ? it.key.slice(2) : null;
-          const href = pageId && pageSlugs[pageId] ? `/pages/${pageSlugs[pageId]}` : viewHref(slug, it.kind === "learn" ? "learn" : it.kind);
+          const href = pageId && pageSlugs[pageId] ? teamPageHref(pageSlugs[pageId], slug) : viewHref(slug, it.kind === "learn" ? "learn" : it.kind);
           return (
             <li key={it.key} className="border-t border-[#e8e4da] first:border-t-0">
               <Link href={href} className="flex items-center gap-2.5 py-2 text-[13px] leading-[18px] text-[#1d1d1b] hover:text-[#0f6b33]">

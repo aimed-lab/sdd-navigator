@@ -1,5 +1,6 @@
 // Your teams — /teams. The teams you are on, and a button to start one.
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { listMyTeams } from "@/lib/server/teams/teams";
@@ -7,6 +8,7 @@ import { plural, roleLabel, teamPath } from "@/lib/server/teams/teamRules";
 import PageHeader, { PageShell } from "@/components/PageHeader";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
 import { siteTitle } from "@/lib/siteMode";
+import FlashToast from "@/components/teams/FlashToast";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -24,6 +26,9 @@ export default async function TeamsPage({
   return (
     <PageShell className="flex flex-col gap-10">
       <DeletedNotice show={wasDeleted(sp)} />
+      <Suspense fallback={null}>
+        <FlashToast />
+      </Suspense>
       <PageHeader
         title="Your teams"
         subtitle="A team is a small private group with its own documents, wiki pages and people."

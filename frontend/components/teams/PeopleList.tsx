@@ -8,13 +8,18 @@ import ConnectButton from "@/components/communities/ConnectButton";
 import { initials } from "@/lib/server/communityHome/communityHome";
 import { roleLabel } from "@/lib/server/teams/teamRules";
 import type { MemberRosterEntry } from "@/lib/server/communities";
+import LeaveTeamButton from "./LeaveTeamButton";
 
 export default function PeopleList({
   teamId,
   roster,
   viewerUserId,
   isLead,
+  slug,
+  teamName,
 }: {
+  slug: string;
+  teamName: string;
   teamId: string;
   roster: MemberRosterEntry[];
   viewerUserId: string;
@@ -53,6 +58,7 @@ export default function PeopleList({
           Just you so far. Share the QR code at the top{isLead ? ", or invite people by email" : ""}.
         </p>
       )}
+      <LeaveTeamButton teamId={teamId} slug={slug} teamName={teamName} />
     </>
   );
 }

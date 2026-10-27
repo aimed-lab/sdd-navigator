@@ -304,6 +304,36 @@ export function pageEditAllowed(args: { canEdit: boolean; isOwner: boolean; team
   return args.teams.some((t) => t.isLead);
 }
 
+/** Leaving a team: a lead can leave only when another lead remains. Returns the
+ *  message to show, or null when leaving is allowed. */
+export const MAKE_LEAD_FIRST = "Make someone else a lead first.";
+
+export function leaveBlockedReason(args: { isLead: boolean; otherLeads: number }): string | null {
+  return args.isLead && args.otherLeads < 1 ? MAKE_LEAD_FIRST : null;
+}
+
+export type PageBackLink = { href: string; label: string };
+
+/** The back link on a wiki page in the teams site: "Back to <team>" (that team's
+ *  Learn view) when the page is reached from a team, else "My teams". */
+export function pageBackLink(team: { slug: string; name: string } | null): PageBackLink {
+  return team
+    ? { href: `/teams/${team.slug}?view=learn`, label: `Back to ${team.name}` }
+    : { href: "/teams", label: "My teams" };
+}
+
+/** A wiki page link from a team: the team is passed along (?from=<slug>) so the page
+ *  can send the reader back to it. */
+export function teamPageHref(pageSlug: string, teamSlug: string): string {
+  return `/pages/${pageSlug}?from=${teamSlug}`;
+}
+
+/** ?from= on a wiki page: a team slug, else null. */
+export function parseFromSlug(raw: string | string[] | undefined | null): string | null {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return typeof v === "string" && /^[a-z0-9-]{1,200}$/.test(v) ? v : null;
+}
+
 /** The text the "Make learning material" tile puts in the assistant. */
 export function makePagePrompt(teamName: string): string {
   return `Make a wiki page for my team ${teamName.replace(/\s+/g, " ").trim().slice(0, 80)} about: `;

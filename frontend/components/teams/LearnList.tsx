@@ -12,7 +12,7 @@ import { removeTeamPageAction } from "@/app/teams/actions";
 import MoreMenu, { type MoreMenuItem } from "@/components/MoreMenu";
 import { openAssistant } from "@/lib/server/assistant/assistantBridge";
 import { shortDate } from "@/lib/server/communityHome/communityHome";
-import { makePagePrompt } from "@/lib/server/teams/teamRules";
+import { makePagePrompt, teamPageHref } from "@/lib/server/teams/teamRules";
 import { isStartHere, learnLine, startHereFirst } from "@/lib/server/teams/teamUi";
 import type { TeamPage } from "@/lib/server/teams/teams";
 import { Empty, Err, useDo } from "./TeamShelves";
@@ -113,7 +113,7 @@ export default function LearnList({
               >
                 {start ? <Star size={18} strokeWidth={1.75} /> : n}
               </span>
-              <Link href={`/pages/${p.slug}`} className="min-w-0 flex-1 focus-visible:outline-none focus-visible:underline">
+              <Link href={teamPageHref(p.slug, slug)} className="min-w-0 flex-1 focus-visible:outline-none focus-visible:underline">
                 <b className="block text-[14px] leading-5 font-bold break-words">{p.title}</b>
                 {line && (
                   <small

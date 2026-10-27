@@ -74,6 +74,7 @@ import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/ex
 import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
+import { TEAMS_MODE } from "@/lib/siteMode";
 import { ASSISTANT_EVENT, getAssistantGate, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
 import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
@@ -878,7 +879,7 @@ export default function AssistantChat() {
 
   return (
     <>
-      {!open && (
+      {!open && !TEAMS_MODE && (
         <button
           type="button"
           onClick={() => {

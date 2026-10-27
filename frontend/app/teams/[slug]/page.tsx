@@ -35,6 +35,7 @@ import {
 } from "@/lib/server/teams/teams";
 import { parseOpen, parseOpenShape, type TileKey } from "@/lib/server/teams/teamPreview";
 import { downloadHref } from "@/lib/server/communityHome/communityHome";
+import { teamPageHref } from "@/lib/server/teams/teamRules";
 import { latestItems, parseView, splitResources, type TeamView } from "@/lib/server/teams/teamUi";
 import type { TeamPanel } from "@/components/teams/TeamPanelContext";
 import { PageShell } from "@/components/PageHeader";
@@ -145,7 +146,7 @@ export default async function TeamPage({
   });
   if (target?.kind === "page") {
     const p = pages.find((x) => x.pageId.toLowerCase() === target.id);
-    if (p) redirect(`/pages/${p.slug}`);
+    if (p) redirect(teamPageHref(p.slug, team.slug));
   }
   if (target?.kind === "doc") {
     const r = resources.find((x) => x.id.toLowerCase() === target.id);
@@ -231,7 +232,7 @@ export default async function TeamPage({
               />
             )}
             {view === "people" && (
-              <PeopleList teamId={team.id} roster={roster} viewerUserId={user?.id ?? ""} isLead={isLead} />
+              <PeopleList teamId={team.id} slug={team.slug} teamName={team.name} roster={roster} viewerUserId={user?.id ?? ""} isLead={isLead} />
             )}
           </section>
         ) : (

@@ -41,10 +41,7 @@ export type NavLink = { label: string; href: string };
 /** The centre links of the top menu. */
 export function navPillars(teams: boolean): NavLink[] {
   return teams
-    ? [
-        { label: "Teams", href: "/" },
-        { label: "My pages", href: "/pages" },
-      ]
+    ? [{ label: "Teams", href: "/" }]
     : [
         { label: "Explore", href: "/explore" },
         { label: "Collaborate", href: "/collaborate" },
@@ -52,10 +49,11 @@ export function navPillars(teams: boolean): NavLink[] {
       ];
 }
 
-/** Account-menu links shown between "My teams" and "Settings". */
+/** Account-menu links shown between "My teams" and "Settings". In teams mode the
+ *  menu is My teams, Settings, Sign out: no "My pages". */
 export function accountLinks(teams: boolean): NavLink[] {
   return teams
-    ? [{ label: "My pages", href: "/pages" }]
+    ? []
     : [
         { label: "My projects", href: "/projects" },
         { label: "My pages", href: "/pages" },

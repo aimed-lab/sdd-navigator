@@ -18,13 +18,24 @@ import PageSources from "@/components/pages/PageSources";
 import TeamPanel from "@/components/pages/TeamPanel";
 import VisibilityBadge from "@/components/pages/VisibilityBadge";
 import WhatsNew from "@/components/pages/WhatsNew";
+import TeamBackLink from "@/components/pages/TeamBackLink";
 import { getPageView } from "@/lib/server/pages/pageView";
+import { getPageBackLink } from "@/lib/server/teams/teams";
+import { parseFromSlug } from "@/lib/server/teams/teamRules";
+import { TEAMS_MODE } from "@/lib/siteMode";
 import { VISIBILITY_INFO, creationLine, formatDay, initialSourceCount } from "@/lib/server/pages/pageViewHelpers";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
-export default async function LivingPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function LivingPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ from?: string }>;
+}) {
   const { slug } = await params;
+  const { from } = await searchParams;
   const result = await getPageView(slug);
   if (result.status === "not_found") notFound();
   if (result.status === "error") {
@@ -42,9 +53,14 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
   const updated = formatDay(page.last_refreshed_at);
   const showTeam = viewer.isOwner || (page.visibility === "team" && members.length > 0);
   const empty = notes.length === 0 && evidence.length === 0;
+  // The teams site only: a way back to the team the page was opened from (?from=<team slug>),
+  // else the one team the viewer is on that has this page, else "My teams".
+  const backLink = TEAMS_MODE ? await getPageBackLink(page.id, parseFromSlug(from)) : null;
 
   return (
-    <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop py-16 flex flex-col gap-14">
+    <>
+    {backLink && <TeamBackLink link={backLink} />}
+    <div className={`max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop ${backLink ? "pt-8 pb-16" : "py-16"} flex flex-col gap-14`}>
       <header className="max-w-3xl">
         {crumbs && (
           <nav aria-label="Breadcrumb" className="mb-4 font-label-md text-label-md text-secondary">
@@ -150,5 +166,6 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         </>
       )}
     </div>
+    </>
   );
 }

@@ -11,6 +11,7 @@ import {
   addPageToTeam,
   createTeam,
   joinTeam,
+  leaveTeam,
   linkTeamToCommunity,
   listMyTeams,
   removePageFromTeam,
@@ -131,6 +132,22 @@ export async function removeTeamPageAction(teamId: string, slug: string, pageId:
     return { ok: true };
   } catch (e) {
     return fail(e, "removeTeamPageAction");
+  }
+}
+
+/** Leave a team: the caller's own membership only. A lead can leave only when another
+ *  lead remains (checked in leaveTeam, not just in the UI). */
+export async function leaveTeamAction(teamId: string, slug: string): Promise<TeamActionResult> {
+  if (!teamId) return { ok: false, error: "Missing team." };
+  try {
+    const res = await leaveTeam(teamId);
+    if (res.status !== "ok") return { ok: false, error: res.error };
+    revalidatePath("/teams");
+    revalidatePath(`/teams/${slug}`);
+    revalidatePath("/");
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "leaveTeamAction");
   }
 }
 

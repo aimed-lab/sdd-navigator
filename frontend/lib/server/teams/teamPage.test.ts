@@ -162,3 +162,83 @@ test("wiki page opened from Learn: members get no edit or add-section controls",
   assert.match(view, /pageEditAllowed\(\{ canEdit, isOwner, teams \}\)/);
   assert.match(view, /is_community_admin/);
 });
+
+// ── simple teams site: leave, nav, assistant button, preview, back link ───────
+
+import { MAKE_LEAD_FIRST, leaveBlockedReason, pageBackLink, parseFromSlug, teamPageHref } from "./teamRules.ts";
+import { accountLinks, navPillars } from "../../siteMode.ts";
+
+test("leave a team: a lead can leave only when another lead remains", () => {
+  assert.equal(leaveBlockedReason({ isLead: false, otherLeads: 0 }), null);
+  assert.equal(leaveBlockedReason({ isLead: true, otherLeads: 1 }), null);
+  assert.equal(leaveBlockedReason({ isLead: true, otherLeads: 0 }), "Make someone else a lead first.");
+  assert.equal(MAKE_LEAD_FIRST, "Make someone else a lead first.");
+});
+
+test("leave a team: enforced in the server, only the caller's own row, with the confirm text", () => {
+  const t = src("lib/server/teams/teams.ts");
+  const leave = t.slice(t.indexOf("export async function leaveTeam"), t.indexOf("export async function getPageBackLink"));
+  assert.match(leave, /membership\.state !== "active"/);
+  assert.match(leave, /\.neq\("user_id", user\.id\)/);
+  assert.match(leave, /leaveBlockedReason\(\{ isLead: true, otherLeads: count \?\? 0 \}\)/);
+  assert.ok(leave.indexOf("leaveBlockedReason") < leave.indexOf("leaveCommunity(teamId)"), "checked before deleting");
+  // leaveCommunity deletes only the caller's own community_members row
+  const c = src("lib/server/communities.ts");
+  const lc = c.slice(c.indexOf("export async function leaveCommunity"));
+  assert.match(lc.slice(0, 600), /\.delete\(\)[\s\S]*\.eq\("community_id", communityId\)[\s\S]*\.eq\("user_id", user\.id\)/);
+  assert.match(src("app/teams/actions.ts"), /export async function leaveTeamAction/);
+  const ui = src("components/teams/LeaveTeamButton.tsx");
+  assert.match(ui, /Leave \{teamName\}\? You can join again with the QR code or link\./);
+  assert.match(ui, /router\.push\("\/teams\?left=1"\)/);
+  assert.match(src("components/teams/FlashToast.tsx"), /You left the team\./);
+  assert.match(src("components/teams/PeopleList.tsx"), /<LeaveTeamButton/);
+});
+
+test("the database already lets a member delete their own team row (no migration needed)", () => {
+  const sql = readFileSync(new URL("../../../../database/migrations/2026-08-30_community_admin_membership.sql", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.match(sql, /CREATE POLICY "Community members: self or admin delete"[\s\S]*USING \(user_id = auth\.uid\(\) OR public\.is_community_admin/);
+});
+
+test("teams mode: no My pages in the top bar or the profile menu; connect site unchanged", () => {
+  assert.deepEqual(navPillars(true).map((l) => l.label), ["Teams"]);
+  assert.deepEqual(accountLinks(true), []);
+  assert.deepEqual(navPillars(false).map((l) => l.href), ["/explore", "/collaborate", "/promote"]);
+  assert.deepEqual(accountLinks(false).map((l) => l.href), ["/projects", "/pages", "/saved"]);
+});
+
+test("teams mode: no floating Ask AI assistant button, Feedback untouched", () => {
+  const chat = src("components/explore/AssistantChat.tsx");
+  assert.match(chat, /\{!open && !TEAMS_MODE && \(\s*<button/);
+  assert.match(chat, /aria-label="Ask AI assistant"/);
+});
+
+test("non-member preview: the members' layout, six tiles, 'Join this team to open this'", () => {
+  const p = src("components/teams/TeamPreview.tsx");
+  assert.doesNotMatch(p, /Team wiki pages|Shared documents|PagesCard|DocumentsCard|>\s*lock\s*</);
+  assert.match(p, /grid-cols-3 md:grid-cols-6/);
+  for (const t of ["Slides", "Learn", "Photos", "People", "Ask AI", "Share"]) assert.ok(p.includes(`name: "${t}"`), t);
+  assert.match(p, /small: "ask about the talk"/);
+  assert.match(p, /photos: tileCount\("photos", photos\)|small: tileCount\("photos", photos\)/);
+  assert.match(p, /Join this team to open this/);
+});
+
+test("wiki page back link: team from ?from=, else My teams; every team link passes the team", () => {
+  assert.deepEqual(pageBackLink({ slug: "intro-1", name: "Intro to AI in Medicine" }), { href: "/teams/intro-1?view=learn", label: "Back to Intro to AI in Medicine" });
+  assert.deepEqual(pageBackLink(null), { href: "/teams", label: "My teams" });
+  assert.equal(teamPageHref("how-agents-work", "intro-1"), "/pages/how-agents-work?from=intro-1");
+  assert.equal(parseFromSlug("intro-1"), "intro-1");
+  for (const bad of ["", "A B", "../x", "x".repeat(201), undefined]) assert.equal(parseFromSlug(bad as string | undefined), null);
+  assert.match(src("components/teams/LearnList.tsx"), /teamPageHref\(p\.slug, slug\)/);
+  assert.match(src("components/teams/LatestCard.tsx"), /teamPageHref\(pageSlugs\[pageId\], slug\)/);
+  assert.match(src("app/teams/[slug]/page.tsx"), /redirect\(teamPageHref\(p\.slug, team\.slug\)\)/);
+  const page = src("app/pages/[slug]/page.tsx");
+  assert.match(page, /TEAMS_MODE \? await getPageBackLink\(page\.id, parseFromSlug\(from\)\) : null/);
+  assert.match(page, /\{backLink && <TeamBackLink link=\{backLink\} \/>\}/);
+  const view = src("components/pages/TeamBackLink.tsx");
+  assert.match(view, /sticky top-16/);
+  assert.match(view, /#0f6b33/);
+  // one team in common, or the forged ?from= cannot name a team the viewer is not on
+  const t = src("lib/server/teams/teams.ts");
+  assert.match(t, /teams\.length === 1/);
+  assert.match(t, /teams\.find\(\(t\) => t\.slug === fromSlug\)/);
+});
