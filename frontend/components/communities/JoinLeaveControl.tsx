@@ -17,8 +17,8 @@
 // use.
 
 import Link from "next/link";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { joinCommunityAction, leaveCommunityAction } from "@/app/communities/actions";
 import type { Membership } from "@/lib/server/communities";
 import LeaveButton from "./LeaveButton";
@@ -41,8 +41,28 @@ export default function JoinLeaveControl({
   membership: Membership;
 }) {
   const router = useRouter();
+  const justJoined = useSearchParams().get("welcome") === "1";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const autoJoinStarted = useRef(false);
+
+  // Arrived by the join QR code/link (?join=1) while signed in and not yet a
+  // member: join (or request to join) immediately, then drop ?join=1 so a
+  // later Leave doesn't re-trigger it.
+  useEffect(() => {
+    if (!autoOpenJoin || membership.state !== "none" || autoJoinStarted.current) return;
+    autoJoinStarted.current = true;
+    setBusy(true);
+    joinCommunityAction(communityId, isOpen, slug).then((res) => {
+      if (res.ok) {
+        router.replace(`/communities/${slug}?welcome=1`);
+        router.refresh();
+      } else {
+        setError(res.error);
+        setBusy(false);
+      }
+    });
+  }, [autoOpenJoin, membership.state, communityId, isOpen, slug, router]);
 
   if (membership.state === "signed_out" && isOpen) {
     // An open community: a visitor can join with just an email, no account.
@@ -67,6 +87,9 @@ export default function JoinLeaveControl({
 
     return (
       <div className="flex items-center gap-3">
+        {justJoined && (
+          <span className="font-label-md text-label-md text-primary">Welcome, you joined!</span>
+        )}
         <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
           <span className="material-symbols-outlined text-base">check_circle</span>
           {isAdmin ? "Admin" : membership.role === "lead" ? "Lead" : "Member"}
