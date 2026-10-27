@@ -163,17 +163,32 @@ test("welcome: the first name, and the dates come from the one config file", () 
   assert.equal(firstName("Priya Raman", "p@x.org"), "Priya");
   assert.equal(firstName(null, "sam.lee@x.org"), "sam.lee");
   assert.equal(firstName("  ", null), "there");
-  assert.deepEqual(COLABOFEST_STAGES.map((s) => s.shown), ["Oct 26", "Dec 15", "Apr 1", "May"]);
-  assert.deepEqual(COLABOFEST_STAGES.map((s) => s.label), ["Kickoff", "Computational results", "Experimental results", "Showcase"]);
+  assert.deepEqual(COLABOFEST_STAGES.map((s) => s.shown), ["Oct 26", "Nov 11", "Nov 13", "Dec 15", "Apr 1", "May"]);
+  assert.deepEqual(COLABOFEST_STAGES.map((s) => s.label), [
+    "Kickoff",
+    "Finalist agreement due",
+    "Finalist presentations and awards",
+    "Computational results",
+    "Experimental results",
+    "Showcase",
+  ]);
+  // date order
+  const froms = COLABOFEST_STAGES.map((s) => s.from);
+  assert.deepEqual([...froms].sort(), [...froms]);
   assert.equal(currentStageIndex("2026-10-26"), 0);
-  assert.equal(currentStageIndex("2026-11-30"), 0);
-  assert.equal(currentStageIndex("2026-12-15"), 1);
-  assert.equal(currentStageIndex("2027-04-02"), 2);
-  assert.equal(currentStageIndex("2027-05-20"), 3);
+  assert.equal(currentStageIndex("2026-11-10"), 0);
+  assert.equal(currentStageIndex("2026-11-11"), 1);
+  assert.equal(currentStageIndex("2026-11-12"), 1);
+  assert.equal(currentStageIndex("2026-11-13"), 2);
+  assert.equal(currentStageIndex("2026-12-15"), 3);
+  assert.equal(currentStageIndex("2027-04-02"), 4);
+  assert.equal(currentStageIndex("2027-05-20"), 5);
   assert.equal(currentStageIndex("2026-09-01"), 0);
   // placeholders are marked, and no other file hard-codes them
-  assert.match(src("lib/colabofestConfig.ts"), /TODO-confirm/);
-  assert.doesNotMatch(src("components/projects/workspace/WelcomeCard.tsx"), /Dec 15|Apr 1|Oct 26/);
+  assert.doesNotMatch(src("lib/colabofestConfig.ts"), /TODO-confirm/);
+  assert.doesNotMatch(src("components/projects/workspace/WelcomeCard.tsx"), /Dec 15|Apr 1|Oct 26|Nov 1[13]/);
+  // six points: the line scrolls on a phone and is one row of six from md up
+  assert.match(src("components/projects/workspace/WelcomeCard.tsx"), /flex md:grid md:grid-cols-6 .*overflow-x-auto md:overflow-visible/);
 });
 
 // ── access: signed out / not a member / member ────────────────────────────────

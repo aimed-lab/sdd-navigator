@@ -4,7 +4,7 @@
 // presses "Dismiss" (stored per person and project in the database). The dates
 // and labels come from lib/colabofestConfig.ts.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { dismissWelcomeAction } from "@/app/projects/[id]/actions";
 import { COLABOFEST_SHOWCASE_NAME, COLABOFEST_STAGES, currentStageIndex } from "@/lib/colabofestConfig";
@@ -20,6 +20,14 @@ export default function WelcomeCard({ projectId, firstName, today }: { projectId
   const [hidden, setHidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = currentStageIndex(today);
+  // Six points do not fit across a phone: the line scrolls sideways there, starting at
+  // the current stage. (From md up all six sit in one row.)
+  const line = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const ol = line.current;
+    const li = ol?.children[current] as HTMLElement | undefined;
+    if (ol && li) ol.scrollLeft = Math.max(0, li.offsetLeft - (ol.clientWidth - li.clientWidth) / 2);
+  }, [current]);
   if (hidden) return null;
 
   const dismiss = async () => {
@@ -64,11 +72,11 @@ export default function WelcomeCard({ projectId, firstName, today }: { projectId
         ))}
       </ol>
 
-      <ol className="grid grid-cols-4 gap-1 pt-1" aria-label="Program dates">
+      <ol ref={line} className="flex md:grid md:grid-cols-6 gap-1 pt-1 overflow-x-auto md:overflow-visible pb-1" aria-label="Program dates">
         {COLABOFEST_STAGES.map((st, i) => {
           const on = i === current;
           return (
-            <li key={st.key} className="flex flex-col items-center text-center gap-1" aria-current={on ? "step" : undefined}>
+            <li key={st.key} className="flex flex-col items-center text-center gap-1 shrink-0 w-[112px] md:w-auto" aria-current={on ? "step" : undefined}>
               <span className={"w-3 h-3 rounded-full " + (on ? "bg-primary ring-4 ring-primary/20" : i < current ? "bg-primary/50" : "bg-outline-variant")} />
               <span className={"font-label-sm text-label-sm leading-tight " + (on ? "text-primary font-semibold" : "text-secondary")}>{st.label}</span>
               <span className={"font-body-sm text-body-sm " + (on ? "text-primary" : "text-secondary")}>{st.shown}</span>
