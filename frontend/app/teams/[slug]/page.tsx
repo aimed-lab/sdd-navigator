@@ -1,7 +1,9 @@
-// A team's page — /teams/[slug]. Simple and calm: a green hero (label, name,
-// one line, avatars, QR), "What do you want to do?" with four tiles, then cards:
-// Team wiki pages and Shared documents (left), People and Team news (right). Nothing public: no
-// Explore feed, no tabs.
+// A team's page — /teams/[slug]. The team home: the green hero, six tiles (Slides,
+// Learn, Photos, People, Ask AI, Share) and "Latest in this team". A tile that is a
+// section switches the page to that section with ?view=slides|learn|photos|people
+// (so back, forward and shared links work): the content renders directly under the
+// tiles, and on a phone the hero shrinks to a slim bar. Team settings is last,
+// collapsed, for leads. Nothing public: no Explore feed.
 //
 // Someone who is not on the team (a QR scan, a shared link) sees a preview:
 // the same layout with titles only, nothing that opens, and a sign-in or join
@@ -23,9 +25,17 @@ import {
   listCommunityResources,
   listMemberRoster,
 } from "@/lib/server/communities";
-import { getTeamPreview, joinTeam, listCommunitiesToLink, listTeamCommunities, listTeamPages } from "@/lib/server/teams/teams";
+import {
+  getTeamPreview,
+  joinTeam,
+  listCommunitiesToLink,
+  listRecentPageUpdateCounts,
+  listTeamCommunities,
+  listTeamPages,
+} from "@/lib/server/teams/teams";
 import { parseOpen, parseOpenShape, type TileKey } from "@/lib/server/teams/teamPreview";
 import { downloadHref } from "@/lib/server/communityHome/communityHome";
+import { latestItems, parseView, splitResources, type TeamView } from "@/lib/server/teams/teamUi";
 import type { TeamPanel } from "@/components/teams/TeamPanelContext";
 import { PageShell } from "@/components/PageHeader";
 import TeamHeader from "@/components/teams/TeamHeader";
@@ -34,7 +44,13 @@ import { siteTitle } from "@/lib/siteMode";
 import TeamTiles from "@/components/teams/TeamTiles";
 import { TeamPanelProvider } from "@/components/teams/TeamPanelContext";
 import TeamSettings from "@/components/teams/TeamSettings";
-import { DocumentsShelf, NewsList, PagesShelf, PeopleShelf } from "@/components/teams/TeamShelves";
+import { NewsList } from "@/components/teams/TeamShelves";
+import DocumentCards from "@/components/teams/DocumentCards";
+import PhotosGallery from "@/components/teams/PhotosGallery";
+import LearnList from "@/components/teams/LearnList";
+import PeopleList from "@/components/teams/PeopleList";
+import LatestCard from "@/components/teams/LatestCard";
+import SectionHeader from "@/components/teams/SectionHeader";
 
 export const dynamic = "force-dynamic"; // depends on the session
 
@@ -49,7 +65,7 @@ export default async function TeamPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ join?: string; open?: string; created?: string; skipped?: string; settings?: string }>;
+  searchParams: Promise<{ join?: string; open?: string; created?: string; skipped?: string; settings?: string; view?: string }>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
@@ -107,6 +123,19 @@ export default async function TeamPage({
   );
   const skipped = Number(query.skipped) || 0;
 
+  // Images are Photos; everything else is Slides & documents. A pinned
+  // document comes first.
+  const { documents: unpinned, photos } = splitResources(resources);
+  const documents = [...unpinned].sort(
+    (a, b) =>
+      Number(b.id === pinnedId) - Number(a.id === pinnedId) || (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0)
+  );
+  // New research per page in the last 7 days, for the "N new" pill and the Learn rows.
+  const newCounts = await listRecentPageUpdateCounts(pages.map((p) => p.pageId));
+  const newLearn = Object.values(newCounts).reduce((n, c) => n + c, 0);
+  const latest = latestItems({ resources, pages }, 3);
+  const pageSlugs = Object.fromEntries(pages.map((p) => [p.pageId, p.slug]));
+
   // Something they clicked before joining (?open=<kind>:<id>), only if it
   // belongs to this team: a page goes to the page, a document to its file or
   // link, a tile opens its panel.
@@ -124,13 +153,17 @@ export default async function TeamPage({
     const href = first ? downloadHref(first.url, first.filename) : r?.url;
     if (href) redirect(href);
   }
+  // A tile clicked before joining: the add dialog of its section (on that section), the
+  // Share dialog, or the assistant.
   const TILE_PANEL: Partial<Record<TileKey, TeamPanel>> = { document: "document", pages: "pages", share: "share" };
+  const TILE_VIEW: Partial<Record<TileKey, TeamView>> = { document: "slides", pages: "learn" };
   const initialPanel: TeamPanel = target?.kind === "tile" ? (TILE_PANEL[target.id] ?? null) : null;
   const autoOpenLearn = target?.kind === "tile" && target.id === "learn";
+  const view: TeamView | null = parseView(query.view) ?? (target?.kind === "tile" ? (TILE_VIEW[target.id] ?? null) : null);
 
   return (
     <PageShell className="flex flex-col gap-6 !max-w-[1120px]">
-      <div>
+      <div className={view ? "hidden md:block" : ""}>
         <Link
           href="/teams"
           className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
@@ -153,6 +186,7 @@ export default async function TeamPage({
           memberCount={roster.length}
           memberNames={roster.map((m) => m.display_name)}
           isLead={isLead}
+          compact={!!view}
         />
 
         <TeamTiles
@@ -161,27 +195,49 @@ export default async function TeamPage({
           name={team.name}
           description={team.description}
           isLead={isLead}
+          view={view}
+          counts={{ slides: documents.length, learn: pages.length, photos: photos.length, people: roster.length }}
+          newLearn={newLearn}
           autoOpenLearn={autoOpenLearn}
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
-            <PagesShelf teamId={team.id} teamName={team.name} slug={team.slug} pages={pages} names={names} />
-            <DocumentsShelf
-              teamId={team.id}
-              slug={team.slug}
-              resources={resources}
-              pinnedId={pinnedId}
-              viewerId={user?.id ?? ""}
-              isLead={isLead}
-              names={names}
-            />
-          </div>
-          <div className="flex flex-col gap-6 min-w-0">
-            <PeopleShelf teamId={team.id} roster={roster} viewerUserId={user?.id ?? ""} isLead={isLead} />
+        {view ? (
+          <section aria-label={view} className="flex flex-col">
+            <SectionHeader slug={team.slug} view={view} isLead={isLead} />
+            {view === "slides" && (
+              <DocumentCards
+                teamId={team.id}
+                slug={team.slug}
+                documents={documents}
+                pinnedId={pinnedId}
+                viewerId={user?.id ?? ""}
+                isLead={isLead}
+                names={names}
+              />
+            )}
+            {view === "learn" && (
+              <LearnList teamId={team.id} teamName={team.name} slug={team.slug} pages={pages} newCounts={newCounts} />
+            )}
+            {view === "photos" && (
+              <PhotosGallery
+                teamId={team.id}
+                slug={team.slug}
+                photos={photos}
+                viewerId={user?.id ?? ""}
+                isLead={isLead}
+                names={names}
+              />
+            )}
+            {view === "people" && (
+              <PeopleList teamId={team.id} roster={roster} viewerUserId={user?.id ?? ""} isLead={isLead} />
+            )}
+          </section>
+        ) : (
+          <>
+            <LatestCard slug={team.slug} items={latest} pageSlugs={pageSlugs} />
             <NewsList teamId={team.id} slug={team.slug} items={announcements} isLead={isLead} />
-          </div>
-        </div>
+          </>
+        )}
       </TeamPanelProvider>
 
       {isLead && (

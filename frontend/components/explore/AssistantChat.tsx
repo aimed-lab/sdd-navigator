@@ -1271,7 +1271,7 @@ export default function AssistantChat() {
                   {shownTeam && teamAdded === true
                     ? `Your page is ready and added to ${shownTeam.name}.`
                     : shownTeam && teamAdded === false
-                      ? `Your page is ready, but it could not be added to ${shownTeam.name}. Add it from Curate wiki pages on the team page.`
+                      ? `Your page is ready, but it could not be added to ${shownTeam.name}. Add it from Add wiki pages on the team page.`
                       : "Your page is ready."}
                 </p>
                 {shownTeam && teamAdded === true && (

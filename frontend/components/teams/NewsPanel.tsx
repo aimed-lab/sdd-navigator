@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAnnouncementAction } from "@/app/communities/actions";
+import { useTeamPanel } from "./TeamPanelContext";
 
 const INPUT =
   "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
@@ -27,6 +28,7 @@ export default function NewsPanel({
   section?: "news" | "promote" | "both";
 }) {
   const router = useRouter();
+  const { done } = useTeamPanel();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -42,7 +44,7 @@ export default function NewsPanel({
     setBusy(false);
     if (!res.ok) return setError(res.error);
     router.refresh();
-    onClose();
+    done("News posted", "team-news");
   };
 
   return (

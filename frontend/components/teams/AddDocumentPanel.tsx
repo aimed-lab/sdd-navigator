@@ -12,7 +12,10 @@ import { useRouter } from "next/navigation";
 import { createCommunityResourceAction } from "@/app/communities/actions";
 import { createResourceWithFile } from "@/components/communities/resourceUpload";
 import { checkResourceFile } from "@/lib/server/communityHome/resourceFile";
+import { addedMessage, fileKind } from "@/lib/server/teams/teamUi";
+import { useTeamPanel } from "./TeamPanelContext";
 
+const PHOTO_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif";
 const ACCEPT =
   "image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation,.pdf,.pptx,.png,.jpg,.jpeg,.webp,.gif";
 
@@ -23,12 +26,16 @@ export default function AddDocumentPanel({
   teamId,
   slug,
   onClose,
+  mode = "document",
 }: {
   teamId: string;
   slug: string;
   onClose: () => void;
+  /** "photo": a picture for the team's Photos (images only, no link). */
+  mode?: "document" | "photo";
 }) {
   const router = useRouter();
+  const { done } = useTeamPanel();
   const fileRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -57,7 +64,7 @@ export default function AddDocumentPanel({
     e.preventDefault();
     if (busy) return;
     if (!title.trim()) return setError("Give it a title.");
-    if (!url.trim() && !file) return setError("Add a link or choose a file.");
+    if (!url.trim() && !file) return setError(mode === "photo" ? "Choose a photo." : "Add a link or choose a file.");
     setBusy(true);
     setError(null);
     setProgress(null);
@@ -79,7 +86,8 @@ export default function AddDocumentPanel({
         return;
       }
       router.refresh();
-      onClose();
+      // Close the sheet, say what happened, and scroll to the new card.
+      done(addedMessage(fileKind({ files: file ? [{ filename: file.name }] : [], url })), res.id);
     } catch (err) {
       console.error("AddDocumentPanel submit failed", err);
       setError("Something went wrong. Nothing was saved. Please try again.");
@@ -94,18 +102,20 @@ export default function AddDocumentPanel({
         type="text"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        placeholder="Title"
-        aria-label="Title"
+        placeholder={mode === "photo" ? "Caption" : "Title"}
+        aria-label={mode === "photo" ? "Caption" : "Title"}
         className={INPUT}
       />
-      <input
-        type="url"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="Link (https://…), if it lives online"
-        aria-label="Link"
-        className={INPUT}
-      />
+      {mode === "document" && (
+        <input
+          type="url"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Link (https://…), if it lives online"
+          aria-label="Link"
+          className={INPUT}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="button"
@@ -114,11 +124,11 @@ export default function AddDocumentPanel({
           className="btn-outline px-4 py-2 rounded-lg font-label-md text-label-md inline-flex items-center gap-1.5 disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-[18px]">attach_file</span>
-          {file ? "Choose a different file" : "Choose a file"}
+          {mode === "photo" ? (file ? "Choose a different photo" : "Choose a photo") : file ? "Choose a different file" : "Choose a file"}
         </button>
-        <input ref={fileRef} type="file" accept={ACCEPT} onChange={(e) => pick(e.target.files)} className="sr-only" />
+        <input ref={fileRef} type="file" accept={mode === "photo" ? PHOTO_ACCEPT : ACCEPT} onChange={(e) => pick(e.target.files)} className="sr-only" />
         <span className="font-body-sm text-body-sm text-secondary">
-          {file ? file.name : "PDF, PowerPoint or image, up to 50 MB."}
+          {file ? file.name : mode === "photo" ? "JPEG, PNG, WebP or GIF, up to 50 MB." : "PDF, PowerPoint or image, up to 50 MB."}
         </span>
       </div>
       {busy && file && (

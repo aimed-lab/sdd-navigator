@@ -1,38 +1,45 @@
 "use client";
 
-// "What do you want to do?": four action cards. Three open a panel right under
-// the row (one at a time); "Make learning material" opens the assistant with
-// the team attached.
+// The six tiles under the hero: Slides, Learn, Photos, People, Ask AI, Share. Three
+// across on a phone, six in one row on a desktop. The first four are links that
+// switch the page to that section (?view=...); the selected one gets a green
+// border and soft green background. Ask AI opens the assistant with the team
+// attached; Share opens the existing Share & promote flow in a dialog. On a phone,
+// inside a section, the tiles are hidden (the section has its own switch pills).
+// This file also holds the add dialogs, which the "+ Add ..." buttons open.
 
 import { useEffect } from "react";
+import Link from "next/link";
 import { openAssistant, setPageTeam } from "@/lib/server/assistant/assistantBridge";
 import { makePagePrompt } from "@/lib/server/teams/teamRules";
-import ActionTile, { type Tone } from "@/components/ui/ActionTile";
+import { tileCount, viewHref, type TeamView } from "@/lib/server/teams/teamUi";
+import Sheet from "@/components/ui/Sheet";
 import AddDocumentPanel from "./AddDocumentPanel";
 import CuratePagesPanel from "./CuratePagesPanel";
-import PanelFrame from "./PanelFrame";
 import SharePromotePanel from "./SharePromotePanel";
+import { SECTION_ICON, SoftIcon, type SectionKey } from "./TeamIcons";
 import { useTeamPanel } from "./TeamPanelContext";
 
-export const TILES: {
-  key: "document" | "pages" | "learn" | "share";
-  icon: string;
-  title: string;
-  blurb: string;
-  action: string;
-  tone: Tone;
-}[] = [
-  { key: "document", icon: "upload_file", title: "Share a document", blurb: "Upload a file or add a link.", action: "Upload or add a link →", tone: "blue" },
-  { key: "pages", icon: "menu_book", title: "Curate wiki pages", blurb: "Add your pages or public ones.", action: "Add pages →", tone: "amber" },
-  { key: "learn", icon: "auto_awesome", title: "Make learning material", blurb: "The assistant writes a wiki page for the team.", action: "Ask the AI →", tone: "green" },
-  { key: "share", icon: "campaign", title: "Share & promote", blurb: "Post a photo to LinkedIn, X or Facebook, or share team news.", action: "Share →", tone: "purple" },
-];
+type Counts = { slides: number; learn: number; photos: number; people: number };
 
-const PANEL_TITLE = {
-  document: "Share a document with the team",
-  pages: "Add wiki pages to the team",
-  share: "Share & promote",
-} as const;
+const TILE =
+  "group relative text-center w-full min-w-0 flex flex-col items-center rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 md:pt-[18px] md:pb-3.5 " +
+  "transition-colors hover:border-[#0f6b33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f6b33] focus-visible:ring-offset-2";
+
+function TileBody({ k, name, small, on, pill }: { k: SectionKey; name: string; small: string; on: boolean; pill?: string }) {
+  return (
+    <>
+      {pill && (
+        <span className="absolute top-2.5 right-2.5 rounded-full bg-[#0f6b33] px-1.5 py-0.5 text-[10px] font-bold leading-[14px] text-white">
+          {pill}
+        </span>
+      )}
+      <SoftIcon icon={SECTION_ICON[k]} on={on} className="mb-[9px]" />
+      <span className="block text-[14px] leading-[18px] font-bold text-[#1d1d1b]">{name}</span>
+      <span className="block mt-0.5 text-[11.5px] leading-4 text-[#6b6a64]">{small}</span>
+    </>
+  );
+}
 
 export default function TeamTiles({
   teamId,
@@ -40,6 +47,9 @@ export default function TeamTiles({
   name,
   description,
   isLead,
+  view,
+  counts,
+  newLearn,
   autoOpenLearn = false,
 }: {
   teamId: string;
@@ -47,10 +57,15 @@ export default function TeamTiles({
   name: string;
   description: string | null;
   isLead: boolean;
+  /** The section being shown, or null on the team home. */
+  view: TeamView | null;
+  counts: Counts;
+  /** Pages that collected new research in the last 7 days. */
+  newLearn: number;
   /** Arrived after clicking "Make learning material" before joining: open the assistant. */
   autoOpenLearn?: boolean;
 }) {
-  const { panel, toggle, close } = useTeamPanel();
+  const { panel, open, close } = useTeamPanel();
 
   // Tell the assistant which team this page is, so a message typed by hand
   // still makes a page for this team and stays on the page.
@@ -59,66 +74,70 @@ export default function TeamTiles({
     return () => setPageTeam(null);
   }, [teamId, name, slug]);
 
+  const ask = () => openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug } });
+
   useEffect(() => {
     if (!autoOpenLearn) return;
     // The assistant panel mounts a moment after the page; give it time to listen.
-    const t = window.setTimeout(
-      () => openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug } }),
-      700
-    );
+    const t = window.setTimeout(ask, 700);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenLearn]);
 
-  const pick = (key: (typeof TILES)[number]["key"]) => {
-    if (key === "learn") {
-      close();
-      openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug } });
-      return;
-    }
-    toggle(key);
-  };
+  const sections: { k: "slides" | "learn" | "photos" | "people"; name: string; small: string; pill?: string }[] = [
+    { k: "slides", name: "Slides", small: tileCount("slides", counts.slides) },
+    { k: "learn", name: "Learn", small: tileCount("learn", counts.learn), pill: newLearn > 0 ? `${newLearn} new` : undefined },
+    { k: "photos", name: "Photos", small: tileCount("photos", counts.photos) },
+    { k: "people", name: "People", small: tileCount("people", counts.people) },
+  ];
 
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="team-do">
-      <h2 id="team-do" className="font-headline-sm text-[22px] leading-8 text-on-background scroll-mt-24">
-        What do you want to do?
-      </h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {TILES.map((t) => (
-          // The share tile comes first on a phone (2 columns); on desktop it keeps its place in the row.
-          <div key={t.key} className={t.key === "share" ? "flex order-first lg:order-none" : "flex"}>
-            <ActionTile
-              icon={t.icon}
-              title={t.title}
-              description={t.blurb}
-              action={t.action}
-              tone={t.tone}
-              featured={t.key === "learn"}
-              badge={t.key === "learn" ? "AI" : undefined}
-              active={t.key !== "learn" && panel === t.key}
-              expanded={t.key === "learn" ? undefined : panel === t.key}
-              onClick={() => pick(t.key)}
-            />
-          </div>
-        ))}
-      </div>
+    <>
+      <nav aria-label="Team sections" className={`${view ? "hidden md:grid" : "grid"} grid-cols-3 md:grid-cols-6 gap-2.5`}>
+        {sections.map((t) => {
+          const on = view === t.k;
+          return (
+            <Link
+              key={t.k}
+              // Tapping the selected tile again goes back to the team home.
+              href={viewHref(slug, on ? null : t.k)}
+              scroll={false}
+              aria-current={on ? "page" : undefined}
+              className={TILE}
+              style={on ? { borderColor: "#0f6b33", borderWidth: 2, background: "#e9f5ec" } : undefined}
+            >
+              <TileBody k={t.k} name={t.name} small={t.small} pill={t.pill} on={on} />
+            </Link>
+          );
+        })}
+        <button type="button" onClick={ask} className={TILE}>
+          <TileBody k="ask" name="Ask AI" small="make a page" on={false} />
+        </button>
+        <button type="button" onClick={() => open("share")} aria-haspopup="dialog" className={TILE}>
+          <TileBody k="share" name="Share" small="post a photo" on={false} />
+        </button>
+      </nav>
 
       {panel === "document" && (
-        <PanelFrame title={PANEL_TITLE.document} onClose={close}>
+        <Sheet title="Add a file" onClose={close}>
           <AddDocumentPanel teamId={teamId} slug={slug} onClose={close} />
-        </PanelFrame>
+        </Sheet>
+      )}
+      {panel === "photo" && (
+        <Sheet title="Add a photo" onClose={close}>
+          <AddDocumentPanel teamId={teamId} slug={slug} onClose={close} mode="photo" />
+        </Sheet>
       )}
       {panel === "pages" && (
-        <PanelFrame title={PANEL_TITLE.pages} onClose={close}>
+        <Sheet title="Add a page" onClose={close}>
           <CuratePagesPanel teamId={teamId} slug={slug} onClose={close} />
-        </PanelFrame>
+        </Sheet>
       )}
       {panel === "share" && (
-        <PanelFrame title={PANEL_TITLE.share} onClose={close}>
+        <Sheet title="Share & promote" onClose={close}>
           <SharePromotePanel teamId={teamId} slug={slug} name={name} description={description} isLead={isLead} onClose={close} />
-        </PanelFrame>
+        </Sheet>
       )}
-    </section>
+    </>
   );
 }

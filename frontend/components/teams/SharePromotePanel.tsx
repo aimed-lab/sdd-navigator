@@ -43,7 +43,7 @@ export default function SharePromotePanel({
             onClick={() => setChoice(c.key)}
             className={`px-4 py-2 rounded-lg font-label-md text-label-md inline-flex items-center gap-1.5 border transition-colors ${
               choice === c.key
-                ? "bg-[#f3e8ff] border-[#7e22ce] text-[#7e22ce]"
+                ? "bg-[#e9f5ec] border-[#0f6b33] text-[#0f6b33]"
                 : "bg-white border-[#e8e4da] text-secondary hover:text-on-background"
             }`}
           >

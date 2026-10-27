@@ -9,6 +9,7 @@ import { initials } from "@/lib/server/communityHome/communityHome";
 import { plural } from "@/lib/server/teams/teamRules";
 import { avatarOverflow } from "@/lib/server/teams/teamUi";
 import TeamDescription from "./TeamDescription";
+import HeroPhoneActions from "./HeroPhoneActions";
 import TeamQrCard from "./TeamQrCard";
 
 export default function TeamHeader({
@@ -16,18 +17,31 @@ export default function TeamHeader({
   memberCount,
   memberNames,
   isLead,
+  compact = false,
 }: {
   team: { id: string; slug: string; name: string; description: string | null };
   memberCount: number;
   memberNames: string[];
   isLead: boolean;
+  /** Inside a section: on a phone the hero shrinks to a slim bar with the team name only. */
+  compact?: boolean;
 }) {
   const shown = memberNames.slice(0, 6);
   const more = avatarOverflow(memberCount);
 
   return (
+    <>
+      {compact && (
+        <div
+          className="md:hidden rounded-[20px] text-white px-4 py-3.5"
+          style={{ background: "linear-gradient(135deg, #0b3d22, #0f6b33 60%, #1f8a4a)" }}
+        >
+          <span className="block text-[11px] font-bold tracking-[0.1em] text-white/80">TEAM · PRIVATE</span>
+          <span className="block mt-1 font-headline-lg text-[20px] leading-6 text-white break-words">{team.name}</span>
+        </div>
+      )}
     <header
-      className="relative rounded-[20px] text-white overflow-hidden"
+      className={`relative rounded-[20px] text-white overflow-hidden ${compact ? "hidden md:block" : ""}`}
       style={{ background: "linear-gradient(135deg, #0b3d22, #0f6b33 60%, #1f8a4a)" }}
     >
       <div className="flex flex-col lg:flex-row lg:items-center gap-6 p-5 sm:p-7">
@@ -66,10 +80,14 @@ export default function TeamHeader({
             )}
             <span className="text-[14px] leading-5 text-white/90">{plural(memberCount, "member")}</span>
           </div>
+          <HeroPhoneActions slug={team.slug} name={team.name} />
         </div>
 
-        <TeamQrCard slug={team.slug} name={team.name} />
+        <div className="hidden md:block">
+          <TeamQrCard slug={team.slug} name={team.name} />
+        </div>
       </div>
     </header>
+    </>
   );
 }

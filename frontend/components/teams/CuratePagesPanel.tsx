@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addTeamPageAction, searchTeamPagesAction } from "@/app/teams/actions";
 import type { PageChoice } from "@/lib/server/teams/teams";
+import { useTeamPanel } from "./TeamPanelContext";
 
 export default function CuratePagesPanel({
   teamId,
@@ -19,6 +20,7 @@ export default function CuratePagesPanel({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const { done } = useTeamPanel();
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<PageChoice[] | null>(null);
   const [added, setAdded] = useState<Record<string, PageChoice>>({});
@@ -49,6 +51,8 @@ export default function CuratePagesPanel({
     if (!res.ok) return setError(res.error);
     setAdded((a) => ({ ...a, [p.id]: { ...p, note: res.switchedToTeam ? "This page is now visible to your team." : null } }));
     router.refresh();
+    // Close the sheet, say what happened, and scroll to the page on the team.
+    done(`"${p.title}" added`, p.id);
   };
 
   const visible = (rows ?? []).filter((p) => !added[p.id]);

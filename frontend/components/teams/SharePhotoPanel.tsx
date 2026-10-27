@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createResourceWithFile } from "@/components/communities/resourceUpload";
+import { useTeamPanel } from "./TeamPanelContext";
 import { FACEBOOK_URL, PHOTO_MAX_SIDE, fitWithin, linkedInUrl, photoCaption, shareRoute, xUrl } from "@/lib/server/teams/photoShare";
 
 const INPUT =
@@ -43,6 +44,7 @@ export default function SharePhotoPanel({
   description: string | null;
 }) {
   const router = useRouter();
+  const { notify } = useTeamPanel();
   const fileRef = useRef<HTMLInputElement>(null);
   const [photo, setPhoto] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
@@ -91,6 +93,8 @@ export default function SharePhotoPanel({
     });
     if (!made.ok) return setNote(`Not added to shared documents: ${made.error}`);
     router.refresh();
+    // The sheet stays open: the next step is posting the photo.
+    notify("Photo added to Photos");
   };
 
   const share = async () => {
@@ -156,7 +160,7 @@ export default function SharePhotoPanel({
 
       <label className="flex items-start gap-2 font-body-sm text-body-sm text-on-background">
         <input type="checkbox" checked={addDoc} onChange={(e) => setAddDoc(e.target.checked)} className="mt-1" />
-        Also add this photo to the team&apos;s shared documents
+        Also add this photo to the team&apos;s Photos (members can see it)
       </label>
 
       {photo && route === "native" && (

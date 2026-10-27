@@ -254,10 +254,19 @@ export type TeamPage = {
   how: CuratedHow;
   addedBy: string | null;
   createdAt: string;
+  /** When the page last collected new research (pages.last_refreshed_at), or null. */
+  lastRefreshedAt: string | null;
   canRemove: boolean;
 };
 
-type PageEmbed = { id: string; slug: string; title: string; visibility: string; owner_id: string | null };
+type PageEmbed = {
+  id: string;
+  slug: string;
+  title: string;
+  visibility: string;
+  owner_id: string | null;
+  last_refreshed_at: string | null;
+};
 
 /** The team's shelf of wiki pages, newest first. Members only (RLS): a
  *  non-member gets an empty list. */
@@ -269,7 +278,7 @@ export async function listTeamPages(teamId: string): Promise<TeamPage[]> {
 
   const { data, error } = await db
     .from("team_pages")
-    .select("page_id, how, added_by, created_at, pages(id, slug, title, visibility, owner_id)")
+    .select("page_id, how, added_by, created_at, pages(id, slug, title, visibility, owner_id, last_refreshed_at)")
     .eq("team_id", teamId)
     .order("created_at", { ascending: false });
   if (error || !data) return [];
@@ -292,6 +301,7 @@ export async function listTeamPages(teamId: string): Promise<TeamPage[]> {
       how: r.how === "made" ? "made" : "curated",
       addedBy: r.added_by,
       createdAt: r.created_at,
+      lastRefreshedAt: page.last_refreshed_at ?? null,
       canRemove: r.added_by === user.id || membership.isAdmin,
     });
   }
@@ -497,4 +507,25 @@ export async function listLinkedTeams(communityId: string): Promise<LinkedTeam[]
     name: r.name,
     member_count: Number(r.member_count) || 0,
   }));
+}
+
+/** How many new items each of these pages collected in the last `days` days
+ *  (page_updates rows, which only a refresh writes), for the "N new" pill and
+ *  "2 new papers" lines. One query. Best effort: any error is "nothing new". */
+export async function listRecentPageUpdateCounts(pageIds: string[], days = 7): Promise<Record<string, number>> {
+  noStore();
+  if (pageIds.length === 0) return {};
+  const session = await getSession();
+  if (!session) return {};
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await session.db
+    .from("page_updates")
+    .select("page_id")
+    .in("page_id", pageIds)
+    .gte("created_at", since)
+    .limit(1000);
+  if (error || !data) return {};
+  const out: Record<string, number> = {};
+  for (const r of data as { page_id: string }[]) out[r.page_id] = (out[r.page_id] ?? 0) + 1;
+  return out;
 }

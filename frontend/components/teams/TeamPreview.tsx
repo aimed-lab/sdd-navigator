@@ -9,12 +9,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { joinTeamAction } from "@/app/teams/actions";
 import { ssoLoginAction } from "@/app/auth/actions";
-import ActionTile from "@/components/ui/ActionTile";
 import { setAssistantGate } from "@/lib/server/assistant/assistantBridge";
 import { plural, teamReturnPath } from "@/lib/server/teams/teamRules";
 import { openParam, type PreviewItem, type TeamPreview } from "@/lib/server/teams/teamPreview";
-import { FILE_KIND_STYLE } from "@/lib/server/teams/teamUi";
-import { TILES } from "./TeamTiles";
+import { tileCount } from "@/lib/server/teams/teamUi";
+import { SECTION_ICON, SoftIcon, type SectionKey } from "./TeamIcons";
 
 type Viewer = "signed_out" | "none";
 
@@ -93,30 +92,32 @@ function Hero({ team, initialError }: { team: TeamPreview; initialError: string 
   );
 }
 
-function Tiles() {
+const PREVIEW_TILE =
+  "relative text-center w-full min-w-0 flex flex-col items-center rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 " +
+  "transition-colors hover:border-[#0f6b33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f6b33] focus-visible:ring-offset-2";
+
+/** The six tiles, as members see them. Each asks the visitor to sign in or join and
+ *  remembers the section they clicked (?open=tile:<key>). */
+function Tiles({ slides, pages, people }: { slides: number; pages: number; people: number }) {
   const { ask } = useGate();
+  const tiles: { k: SectionKey; name: string; small: string; open?: string }[] = [
+    { k: "slides", name: "Slides", small: tileCount("slides", slides), open: openParam("tile", "document") },
+    { k: "learn", name: "Learn", small: tileCount("learn", pages), open: openParam("tile", "pages") },
+    { k: "photos", name: "Photos", small: "", open: openParam("tile", "share") },
+    { k: "people", name: "People", small: tileCount("people", people) },
+    { k: "ask", name: "Ask AI", small: "make a page", open: openParam("tile", "learn") },
+    { k: "share", name: "Share", small: "post a photo", open: openParam("tile", "share") },
+  ];
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="team-do">
-      <h2 id="team-do" className="font-headline-sm text-[22px] leading-8 text-on-background scroll-mt-24">
-        What do you want to do?
-      </h2>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {TILES.map((t) => (
-          <div key={t.key} className={t.key === "share" ? "flex order-first lg:order-none" : "flex"}>
-            <ActionTile
-              icon={t.icon}
-              title={t.title}
-              description={t.blurb}
-              action={t.action}
-              tone={t.tone}
-              featured={t.key === "learn"}
-              badge={t.key === "learn" ? "AI" : undefined}
-              onClick={() => ask(openParam("tile", t.key))}
-            />
-          </div>
-        ))}
-      </div>
-    </section>
+    <div className="grid grid-cols-3 md:grid-cols-6 gap-2.5">
+      {tiles.map((t) => (
+        <button key={t.k} type="button" onClick={() => ask(t.open)} className={PREVIEW_TILE}>
+          <SoftIcon icon={SECTION_ICON[t.k]} className="mb-[9px]" />
+          <span className="block text-[14px] leading-[18px] font-bold text-[#1d1d1b]">{t.name}</span>
+          {t.small && <span className="block mt-0.5 text-[11.5px] leading-4 text-[#6b6a64]">{t.small}</span>}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -131,9 +132,7 @@ function PagesCard({ pages }: { pages: PreviewItem[] }) {
           {pages.map((p) => (
             <li key={p.id}>
               <button type="button" className={ROW_BTN} onClick={() => ask(openParam("page", p.id))}>
-                <span className="w-9 h-9 shrink-0 rounded-lg bg-[#fef3c7] text-[#b45309] flex items-center justify-center" aria-hidden>
-                  <span className="material-symbols-outlined text-[20px]">description</span>
-                </span>
+                <SoftIcon icon={SECTION_ICON.learn} size={36} iconSize={18} />
                 <span className="min-w-0 flex-1 font-label-lg text-[15px] leading-6 font-semibold text-on-background break-words">
                   {p.title}
                 </span>
@@ -158,18 +157,10 @@ function DocumentsCard({ documents }: { documents: PreviewItem[] }) {
       ) : (
         <ul>
           {documents.map((d) => {
-            const style = FILE_KIND_STYLE[d.kind === "page" ? "link" : d.kind];
             return (
               <li key={d.id}>
                 <button type="button" className={ROW_BTN} onClick={() => ask(openParam("doc", d.id))}>
-                  <span
-                    className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center"
-                    style={{ background: style.bg, color: style.fg }}
-                    title={style.label}
-                    aria-hidden
-                  >
-                    <span className="material-symbols-outlined text-[20px]">{style.icon}</span>
-                  </span>
+                  <SoftIcon icon={d.kind === "image" ? SECTION_ICON.photos : SECTION_ICON.slides} size={36} iconSize={18} />
                   <span className="min-w-0 flex-1 font-label-lg text-[15px] leading-6 font-semibold text-on-background break-words">
                     {d.title}
                   </span>
@@ -311,7 +302,7 @@ export default function TeamPreviewView({
     <GateCtx.Provider value={{ ask, viewer, busy, error, go }}>
       <div className="flex flex-col gap-6">
         <Hero team={team} initialError={initialError} />
-        <Tiles />
+        <Tiles slides={team.documents.length} pages={team.pages.length} people={team.member_count} />
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
           <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
             <PagesCard pages={team.pages} />
