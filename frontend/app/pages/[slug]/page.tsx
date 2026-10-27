@@ -11,7 +11,7 @@
 import { AskAssistantButton } from "@/components/pages/NewWikiPageButton";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { pageCrumbs } from "@/lib/server/pages/pageEditCore";
+import { pageCrumbs, pageIntro } from "@/lib/server/pages/pageEditCore";
 import PageControls from "@/components/pages/PageControls";
 import PageNotes from "@/components/pages/PageNotes";
 import PageSources from "@/components/pages/PageSources";
@@ -71,14 +71,16 @@ export default async function LivingPage({ params }: { params: Promise<{ slug: s
         </div>
         <h1 className="mt-3 font-display-lg text-[40px] leading-tight text-on-background">{page.title}</h1>
         <p className="mt-3 font-body-lg text-body-lg text-on-background/80">
-          This page updates itself with new research. Edit it, share it, or ask the assistant to add to it.
+          {pageIntro(viewer.canEdit)}
         </p>
         {!project && (
           <p className="mt-2 font-body-sm text-body-sm text-secondary">{VISIBILITY_INFO[page.visibility].line}</p>
         )}
-        <div className="mt-5">
-          <AskAssistantButton title={page.title} />
-        </div>
+        {viewer.canEdit && (
+          <div className="mt-5">
+            <AskAssistantButton title={page.title} />
+          </div>
+        )}
       </header>
 
       {project && (viewer.isOwner ? (

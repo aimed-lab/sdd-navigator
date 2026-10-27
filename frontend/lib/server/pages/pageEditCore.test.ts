@@ -6,6 +6,7 @@ import {
   editedByLabel,
   nextPosition,
   pageCrumbs,
+  pageIntro,
   pageDateLine,
   parseNoteInput,
   sectionSlug,
@@ -93,4 +94,15 @@ test("a refreshed page shows 'Updated <date>'; with no dates at all it falls bac
   assert.equal(pageDateLine("2026-10-25T01:00:00Z", "2026-10-22T08:15:00Z", now), "Updated Oct 25");
   assert.equal(pageDateLine(null, null, now), "Not updated yet");
   assert.equal(pageDateLine(null, "garbage", now), "Not updated yet");
+});
+
+test("a reader who cannot edit sees the short intro, the assistant button and edited tags stay hidden", async () => {
+  assert.equal(pageIntro(false), "This page updates itself with new research.");
+  assert.equal(pageIntro(true), "This page updates itself with new research. Edit it, share it, or ask the assistant to add to it.");
+  const { readFileSync } = await import("node:fs");
+  const src = (rel: string) => readFileSync(new URL(`../../../${rel}`, import.meta.url), "utf8").split(String.fromCharCode(13)).join("");
+  const page = src("app/pages/[slug]/page.tsx");
+  assert.match(page, /\{pageIntro\(viewer\.canEdit\)\}/);
+  assert.match(page, /\{viewer\.canEdit && \(\s*<div className="mt-5">\s*<AskAssistantButton/);
+  assert.match(src("components/pages/PageNotes.tsx"), /canEdit\s*\? editedByLabel\(/);
 });

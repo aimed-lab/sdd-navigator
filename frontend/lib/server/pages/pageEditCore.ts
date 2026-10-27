@@ -49,6 +49,14 @@ export function nextPosition(positions: number[]): number {
   return positions.length === 0 ? 0 : Math.max(...positions) + 1;
 }
 
+/** The line under a wiki page's title. Someone who cannot edit the page is not told
+ *  to edit it, share it or ask the assistant to add to it. */
+export function pageIntro(canEdit: boolean): string {
+  return canEdit
+    ? "This page updates itself with new research. Edit it, share it, or ask the assistant to add to it."
+    : "This page updates itself with new research.";
+}
+
 /** "Edited by you" / "Edited by <name>" / "Edited by a person", or null when the
  *  section was never edited by a person. */
 export function editedByLabel(a: { isHumanEdited: boolean; editedByViewer: boolean; name: string | null }): string | null {

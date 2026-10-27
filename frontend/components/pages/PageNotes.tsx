@@ -52,11 +52,16 @@ export default function PageNotes({
               noteSlug={note.slug}
               title={note.title}
               body={note.body}
-              editedLabel={editedByLabel({
-                isHumanEdited: note.is_human_edited,
-                editedByViewer: note.editedByViewer,
-                name: note.editedByName,
-              })}
+              // "Edited by ..." is for people who can edit the page; readers do not see it.
+              editedLabel={
+                canEdit
+                  ? editedByLabel({
+                      isHumanEdited: note.is_human_edited,
+                      editedByViewer: note.editedByViewer,
+                      name: note.editedByName,
+                    })
+                  : null
+              }
               canEdit={canEdit}
               isOwner={isOwner}
             >
