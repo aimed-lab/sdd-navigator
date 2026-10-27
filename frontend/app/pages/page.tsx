@@ -3,6 +3,7 @@
 // (same shape as /projects). Read through the visitor's own session, so RLS
 // decides what is listed.
 
+import { ASSISTANT_ENABLED } from "@/lib/siteMode";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import DeletedNotice, { wasDeleted } from "@/components/DeletedNotice";
@@ -52,7 +53,9 @@ export default async function MyPagesPage({
       {result.status === "ok" && result.pages.length === 0 && (
         <div className="glass-panel rounded-2xl p-10 text-center max-w-2xl flex flex-col items-center gap-5">
           <p className="font-body-md text-body-md text-secondary">
-            No wiki pages yet. Ask the assistant &ldquo;make me a page on &lt;your topic&gt;&rdquo; or click New wiki page.
+            {ASSISTANT_ENABLED
+              ? <>No wiki pages yet. Ask the assistant &ldquo;make me a page on &lt;your topic&gt;&rdquo; or click New wiki page.</>
+              : "No wiki pages yet."}
           </p>
           <NewWikiPageButton />
         </div>

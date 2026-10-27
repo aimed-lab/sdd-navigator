@@ -74,7 +74,7 @@ import { TeamDraftCard, TeamListCard, type TeamListState } from "@/components/ex
 import { detectTeamIntent, teamDraftReply, teamListReply, type TeamIntent } from "@/lib/server/assistant/teamIntent";
 import { listMyTeamsAction } from "@/app/teams/actions";
 import { createCommunityAction, joinCommunityAction } from "@/app/communities/actions";
-import { TEAMS_MODE } from "@/lib/siteMode";
+import { ASSISTANT_ENABLED, TEAMS_MODE } from "@/lib/siteMode";
 import { ASSISTANT_EVENT, getAssistantGate, getPageTeam, parseAssistantRequest, type AssistantRequest, type AssistantTeam } from "@/lib/server/assistant/assistantBridge";
 import { canCreateCommunityAction } from "@/app/communities/actions";
 import { TEAM_VISIBLE_NOTE, teamSlugFromPath, teamTopicFromMessage } from "@/lib/server/teams/teamRules";
@@ -875,7 +875,8 @@ export default function AssistantChat() {
 
   const busy = typing || phase.kind === "checking" || phase.kind === "collecting";
 
-  if (!available) return null;
+  // Not reachable from the teams site for now (assistantEnabled in lib/siteMode.ts).
+  if (!available || !ASSISTANT_ENABLED) return null;
 
   return (
     <>

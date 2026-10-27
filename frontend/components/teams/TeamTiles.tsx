@@ -11,6 +11,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { openAssistant, setPageTeam } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_ENABLED } from "@/lib/siteMode";
 import { makePagePrompt } from "@/lib/server/teams/teamRules";
 import { tileCount, viewHref, type TeamView } from "@/lib/server/teams/teamUi";
 import Sheet from "@/components/ui/Sheet";
@@ -23,7 +24,7 @@ import { useTeamPanel } from "./TeamPanelContext";
 type Counts = { slides: number; learn: number; photos: number; people: number };
 
 const TILE =
-  "group relative text-center w-full min-w-0 flex flex-col items-center rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 md:pt-[18px] md:pb-3.5 " +
+  "group relative text-center min-w-0 flex flex-col items-center basis-[calc((100%-20px)/3)] md:basis-[calc((100%-40px)/5)] grow-0 shrink-0 rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 md:pt-[18px] md:pb-3.5 " +
   "transition-colors hover:border-[#0f6b33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f6b33] focus-visible:ring-offset-2";
 
 function TileBody({ k, name, small, on, pill }: { k: SectionKey; name: string; small: string; on: boolean; pill?: string }) {
@@ -71,6 +72,7 @@ export default function TeamTiles({
   // still makes a page for this team and stays on the page.
   useEffect(() => {
     // canCurate: only a lead can have the assistant make or add a wiki page for the team.
+    if (!ASSISTANT_ENABLED) return;
     setPageTeam({ id: teamId, name, slug, canCurate: isLead });
     return () => setPageTeam(null);
   }, [teamId, name, slug, isLead]);
@@ -84,7 +86,7 @@ export default function TeamTiles({
       : openAssistant({ text: "", mode: "open" });
 
   useEffect(() => {
-    if (!autoOpenLearn) return;
+    if (!autoOpenLearn || !ASSISTANT_ENABLED) return;
     // The assistant panel mounts a moment after the page; give it time to listen.
     const t = window.setTimeout(ask, 700);
     return () => window.clearTimeout(t);
@@ -100,7 +102,8 @@ export default function TeamTiles({
 
   return (
     <>
-      <nav aria-label="Team sections" className={`${view ? "hidden md:grid" : "grid"} grid-cols-3 md:grid-cols-6 gap-2.5`}>
+      {/* Five tiles: one row on a desktop; on a phone 3, then the rest centred. */}
+      <nav aria-label="Team sections" className={`${view ? "hidden md:flex" : "flex"} flex-wrap justify-center gap-2.5`}>
         {sections.map((t) => {
           const on = view === t.k;
           return (
@@ -117,9 +120,11 @@ export default function TeamTiles({
             </Link>
           );
         })}
-        <button type="button" onClick={ask} className={TILE}>
-          <TileBody k="ask" name="Ask AI" small={isLead ? "make a page" : "ask about the talk"} on={false} />
-        </button>
+        {ASSISTANT_ENABLED && (
+          <button type="button" onClick={ask} className={TILE}>
+            <TileBody k="ask" name="Ask AI" small={isLead ? "make a page" : "ask about the talk"} on={false} />
+          </button>
+        )}
         <button type="button" onClick={() => open("share")} aria-haspopup="dialog" className={TILE}>
           <TileBody k="share" name="Share" small="post a photo" on={false} />
         </button>

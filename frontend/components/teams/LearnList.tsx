@@ -11,6 +11,7 @@ import { BookOpen, ChevronRight, Plus, Sparkles, Star } from "lucide-react";
 import { removeTeamPageAction } from "@/app/teams/actions";
 import MoreMenu, { type MoreMenuItem } from "@/components/MoreMenu";
 import { openAssistant } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_ENABLED } from "@/lib/siteMode";
 import { shortDate } from "@/lib/server/communityHome/communityHome";
 import { makePagePrompt, teamPageHref } from "@/lib/server/teams/teamRules";
 import { isStartHere, learnLine, startHereFirst } from "@/lib/server/teams/teamUi";
@@ -44,9 +45,9 @@ export default function LearnList({
       <>
         <Empty
           icon={<BookOpen size={22} strokeWidth={1.75} aria-hidden />}
-          text={isLead ? "No learning pages yet. Ask the AI to write one, or add a page you already have." : "No learning pages yet. Your team leads add them here."}
+          text={isLead ? (ASSISTANT_ENABLED ? "No learning pages yet. Ask the AI to write one, or add a page you already have." : "No learning pages yet. Add a page you already have.") : "No learning pages yet. Your team leads add them here."}
         >
-          {isLead && (
+          {isLead && ASSISTANT_ENABLED && (
           <button
             type="button"
             onClick={() => openAssistant({ text: makePagePrompt(teamName), mode: "fill", team: { id: teamId, name: teamName, slug } })}

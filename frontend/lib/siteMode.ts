@@ -13,6 +13,15 @@ export const TEAMS_MODE = isTeamsMode(process.env.NEXT_PUBLIC_SITE_MODE);
 
 export const TEAMS_BRAND = "SmartDrugDiscovery Teams";
 
+/** Whether the AI assistant can be reached from this site. Off on the teams site for
+ *  now (no tile, no button, no floating launcher; the assistant code stays in place).
+ *  To bring it back, return true here. The normal site is unchanged. */
+export function assistantEnabled(teams: boolean): boolean {
+  return !teams;
+}
+
+export const ASSISTANT_ENABLED = assistantEnabled(TEAMS_MODE);
+
 /** Drug-discovery routes that do not exist in teams mode. Each also covers its
  *  sub-paths (/explore/<topic>, /collaborate/providers/<slug>, ...). */
 export const TEAMS_MODE_BLOCKED = [

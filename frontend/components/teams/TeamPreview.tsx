@@ -13,6 +13,7 @@ import { setAssistantGate } from "@/lib/server/assistant/assistantBridge";
 import { plural, teamReturnPath } from "@/lib/server/teams/teamRules";
 import { openParam, type PreviewItem, type TeamPreview } from "@/lib/server/teams/teamPreview";
 import { tileCount } from "@/lib/server/teams/teamUi";
+import { ASSISTANT_ENABLED } from "@/lib/siteMode";
 import { SECTION_ICON, SoftIcon, type SectionKey } from "./TeamIcons";
 
 type Viewer = "signed_out" | "none";
@@ -73,7 +74,7 @@ function Hero({ team, initialError }: { team: TeamPreview; initialError: string 
 }
 
 const PREVIEW_TILE =
-  "relative text-center w-full min-w-0 flex flex-col items-center rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 " +
+  "relative text-center min-w-0 flex flex-col items-center basis-[calc((100%-20px)/3)] md:basis-[calc((100%-40px)/5)] grow-0 shrink-0 rounded-2xl border border-[#e8e4da] bg-white px-1.5 pt-4 pb-3.5 " +
   "transition-colors hover:border-[#0f6b33] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f6b33] focus-visible:ring-offset-2";
 
 /** The six tiles, as members see them. Each asks the visitor to sign in or join and
@@ -86,11 +87,12 @@ function Tiles({ slides, pages, photos, people }: { slides: number; pages: numbe
     { k: "photos", name: "Photos", small: tileCount("photos", photos), open: openParam("tile", "share") },
     { k: "people", name: "People", small: tileCount("people", people) },
     // Only team leads make pages; a visitor is never one, so it is the question box.
-    { k: "ask", name: "Ask AI", small: "ask about the talk", open: openParam("tile", "learn") },
+    // Off on the teams site for now (assistantEnabled in lib/siteMode.ts).
+    ...(ASSISTANT_ENABLED ? [{ k: "ask" as const, name: "Ask AI", small: "ask about the talk", open: openParam("tile", "learn") }] : []),
     { k: "share", name: "Share", small: "post a photo", open: openParam("tile", "share") },
   ];
   return (
-    <div className="grid grid-cols-3 md:grid-cols-6 gap-2.5">
+    <div className="flex flex-wrap justify-center gap-2.5">
       {tiles.map((t) => (
         <button key={t.k} type="button" onClick={() => ask(t.open)} className={PREVIEW_TILE}>
           <SoftIcon icon={SECTION_ICON[t.k]} className="mb-[9px]" />
@@ -219,6 +221,7 @@ export default function TeamPreviewView({
 
   // The floating "Ask AI assistant" button asks too, instead of opening.
   useEffect(() => {
+    if (!ASSISTANT_ENABLED) return;
     setAssistantGate(() => ask(openParam("tile", "learn")));
     return () => setAssistantGate(null);
   }, [ask]);

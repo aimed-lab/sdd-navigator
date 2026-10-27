@@ -5,8 +5,11 @@
 // choice and confirm step follow; nothing is created here.
 
 import { START_LIVING_PAGE_MESSAGE, openAssistant } from "@/lib/server/assistant/assistantBridge";
+import { ASSISTANT_ENABLED } from "@/lib/siteMode";
 
 export default function NewWikiPageButton({ primary = true }: { primary?: boolean }) {
+  // Not reachable from the teams site for now (assistantEnabled in lib/siteMode.ts).
+  if (!ASSISTANT_ENABLED) return null;
   return (
     <button
       type="button"
@@ -24,6 +27,7 @@ export default function NewWikiPageButton({ primary = true }: { primary?: boolea
 
 /** The wiki page's one main button: opens the assistant with a question about this page's topic ready to finish. */
 export function AskAssistantButton({ title }: { title: string }) {
+  if (!ASSISTANT_ENABLED) return null;
   return (
     <button
       type="button"

@@ -20,12 +20,11 @@ test("team page: hero, tiles, then the section or the latest list; settings last
   assert.equal(existsSync(new URL("../../../components/teams/SectionNav.tsx", import.meta.url)), false);
 });
 
-test("tiles: six of them, sections are links with ?view=, the dialogs are the add forms", () => {
+test("tiles: sections are links with ?view=, the dialogs are the add forms (Ask AI only where the assistant is on)", () => {
   const tiles = src("components/teams/TeamTiles.tsx");
-  for (const t of ["Slides", "Learn", "Photos", "People", "Ask AI", "Share"]) assert.ok(tiles.includes(`"${t}"`), t);
-  assert.match(tiles, /grid-cols-3 md:grid-cols-6/);
+  for (const t of ["Slides", "Learn", "Photos", "People", "Share"]) assert.ok(tiles.includes(`"${t}"`), t);
   assert.match(tiles, /viewHref\(slug, on \? null : t\.k\)/);
-  assert.match(tiles, /view \? "hidden md:grid" : "grid"/);
+  assert.match(tiles, /view \? "hidden md:flex" : "flex"/);
   assert.match(tiles, /<Sheet title="Add a file"/);
   assert.match(tiles, /<Sheet title="Add a page"/);
   assert.match(tiles, /<Sheet title="Add a photo"/);
@@ -212,12 +211,10 @@ test("teams mode: no floating Ask AI assistant button, Feedback untouched", () =
   assert.match(chat, /aria-label="Ask AI assistant"/);
 });
 
-test("non-member preview: the members' layout, six tiles, 'Join this team to open this'", () => {
+test("non-member preview: the members' layout and tiles, 'Join this team to open this'", () => {
   const p = src("components/teams/TeamPreview.tsx");
   assert.doesNotMatch(p, /Team wiki pages|Shared documents|PagesCard|DocumentsCard|>\s*lock\s*</);
-  assert.match(p, /grid-cols-3 md:grid-cols-6/);
-  for (const t of ["Slides", "Learn", "Photos", "People", "Ask AI", "Share"]) assert.ok(p.includes(`name: "${t}"`), t);
-  assert.match(p, /small: "ask about the talk"/);
+  for (const t of ["Slides", "Learn", "Photos", "People", "Share"]) assert.ok(p.includes(`name: "${t}"`), t);
   assert.match(p, /photos: tileCount\("photos", photos\)|small: tileCount\("photos", photos\)/);
   assert.match(p, /Join this team to open this/);
 });
@@ -241,4 +238,33 @@ test("wiki page back link: team from ?from=, else My teams; every team link pass
   const t = src("lib/server/teams/teams.ts");
   assert.match(t, /teams\.length === 1/);
   assert.match(t, /teams\.find\(\(t\) => t\.slug === fromSlug\)/);
+});
+
+// ── the assistant is not reachable from the teams site (for now) ──────────────
+
+import { assistantEnabled } from "../../siteMode.ts";
+
+test("assistant: off on the teams site, on in the normal site", () => {
+  assert.equal(assistantEnabled(true), false);
+  assert.equal(assistantEnabled(false), true);
+});
+
+test("teams site: no Ask AI tile, five tiles (3 + 2 centred on a phone), no other entry point", () => {
+  const tiles = src("components/teams/TeamTiles.tsx");
+  assert.match(tiles, /\{ASSISTANT_ENABLED && \(\s*<button type="button" onClick=\{ask\}/);
+  assert.match(tiles, /flex-wrap justify-center/);
+  assert.match(tiles, /basis-\[calc\(\(100%-20px\)\/3\)\] md:basis-\[calc\(\(100%-40px\)\/5\)\]/);
+  assert.match(tiles, /if \(!ASSISTANT_ENABLED\) return;/);
+  const preview = src("components/teams/TeamPreview.tsx");
+  assert.match(preview, /ASSISTANT_ENABLED \? \[\{ k: "ask"/);
+  assert.match(preview, /basis-\[calc\(\(100%-20px\)\/3\)\] md:basis-\[calc\(\(100%-40px\)\/5\)\]/);
+  assert.match(src("components/teams/LearnList.tsx"), /isLead && ASSISTANT_ENABLED && \(/);
+  // the panel, the floating launcher and the wiki-page buttons all stand down
+  const chat = src("components/explore/AssistantChat.tsx");
+  assert.match(chat, /if \(!available \|\| !ASSISTANT_ENABLED\) return null;/);
+  assert.match(chat, /\{!open && !TEAMS_MODE && \(/);
+  const btn = src("components/pages/NewWikiPageButton.tsx");
+  assert.equal((btn.match(/if \(!ASSISTANT_ENABLED\) return null;/g) ?? []).length, 2);
+  // the assistant code itself is still in place
+  assert.match(src("lib/server/assistant/assistantBridge.ts"), /export function openAssistant/);
 });
