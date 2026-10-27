@@ -16,7 +16,7 @@ export const COLABOFEST_STAGES = [
 ] as const;
 
 /** Where "Still can't get in?" sends the email. TODO-confirm. */
-export const COLABOFEST_CONTACT_EMAIL = "colabofest@smartdrugdiscovery.org";
+export const COLABOFEST_CONTACT_EMAIL = "smartdrugdiscovery@gmail.com";
 
 /** The name of the program as shown in the Welcome card. */
 export const COLABOFEST_SHOWCASE_NAME = "May showcase";
