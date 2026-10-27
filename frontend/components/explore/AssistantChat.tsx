@@ -283,6 +283,9 @@ function Picker({ onPick, busy }: { onPick: (v: Visibility) => void; busy: boole
   );
 }
 
+const MEMBER_NO_PAGES =
+  "Only team leads add learning pages to a team. I can still help you find and understand research for this team's topic.";
+
 export default function AssistantChat() {
   const pathname = usePathname();
   const router = useRouter();
@@ -544,17 +547,19 @@ export default function AssistantChat() {
 
       // The reply never carries the page-type question or the three options as
       // text, whatever the backend sent; the picker carries that choice.
-      const reply = stripChoiceText(parsed.reply) || "Here is what I found.";
+      // A member on a team page: the assistant answers, but never offers to make or add a wiki page.
+      const memberOnTeam = activeTeam()?.canCurate === false;
+      const reply = memberOnTeam && parsed.action ? MEMBER_NO_PAGES : stripChoiceText(parsed.reply) || "Here is what I found.";
       const index = next.length;
       setMessages([...next, { role: "assistant", content: reply }]);
-      setAction(parsed.action ?? null);
+      setAction(memberOnTeam ? null : (parsed.action ?? null));
       // The picker straight away only when they said what they work on or asked
       // for a page. Backend `choices` and a failed search never decide it.
-      setPickerAt(!parsed.community && !communityTurn && shouldShowPicker(content, !!parsed.action) ? index : null);
+      setPickerAt(!memberOnTeam && !parsed.community && !communityTurn && shouldShowPicker(content, !!parsed.action) ? index : null);
 
       // A public page is checked against existing public pages right away,
       // before the confirm card appears.
-      if (parsed.action && needsEarlyDuplicateCheck(parsed.action)) void checkEarly(parsed.action);
+      if (!memberOnTeam && parsed.action && needsEarlyDuplicateCheck(parsed.action)) void checkEarly(parsed.action);
 
       if (parsed.community?.type === "find_communities") {
         void showMatches(index, parsed.community.query);
@@ -977,7 +982,7 @@ export default function AssistantChat() {
               <div className="flex flex-col gap-3">
                 <p className="font-title text-[22px] leading-snug text-on-background">{GREETING}</p>
                 <div className="flex flex-col gap-2" role="group" aria-label="Starters">
-                  {STARTERS.map((st) =>
+                  {STARTERS.filter((st) => !(shownTeam?.canCurate === false && st.id === "create")).map((st) =>
                     st.kind === "soon" ? (
                       <button
                         key={st.id}

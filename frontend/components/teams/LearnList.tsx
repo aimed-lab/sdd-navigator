@@ -24,6 +24,7 @@ export default function LearnList({
   slug,
   pages,
   newCounts,
+  isLead,
 }: {
   teamId: string;
   teamName: string;
@@ -32,6 +33,8 @@ export default function LearnList({
   pages: TeamPage[];
   /** New items per page in the last 7 days. */
   newCounts: Record<string, number>;
+  /** Learning pages are curated by leads: members see the list and open pages, nothing else. */
+  isLead: boolean;
 }) {
   const { busy, error, run } = useDo();
   const panel = useTeamPanel();
@@ -39,7 +42,11 @@ export default function LearnList({
   if (pages.length === 0) {
     return (
       <>
-        <Empty icon={<BookOpen size={22} strokeWidth={1.75} aria-hidden />} text="No learning pages yet. Ask the AI to write one, or add a page you already have.">
+        <Empty
+          icon={<BookOpen size={22} strokeWidth={1.75} aria-hidden />}
+          text={isLead ? "No learning pages yet. Ask the AI to write one, or add a page you already have." : "No learning pages yet. Your team leads add them here."}
+        >
+          {isLead && (
           <button
             type="button"
             onClick={() => openAssistant({ text: makePagePrompt(teamName), mode: "fill", team: { id: teamId, name: teamName, slug } })}
@@ -48,6 +55,8 @@ export default function LearnList({
             <Sparkles size={18} strokeWidth={1.75} aria-hidden />
             Ask the AI
           </button>
+          )}
+          {isLead && (
           <button
             type="button"
             onClick={() => panel.open("pages")}
@@ -56,6 +65,7 @@ export default function LearnList({
             <Plus size={18} strokeWidth={1.75} aria-hidden />
             Add a page
           </button>
+          )}
         </Empty>
         <Err text={error} />
       </>
@@ -73,7 +83,7 @@ export default function LearnList({
           if (!start) n += 1;
           const line = learnLine(newCounts[p.pageId] ?? 0, p.lastRefreshedAt ? shortDate(p.lastRefreshedAt) : "");
           const fresh = (newCounts[p.pageId] ?? 0) > 0;
-          const items: MoreMenuItem[] = p.canRemove
+          const items: MoreMenuItem[] = isLead && p.canRemove
             ? [
                 {
                   label: "Remove from team",
@@ -113,7 +123,7 @@ export default function LearnList({
                   </small>
                 )}
               </Link>
-              <MoreMenu items={items} iconOnly className="shrink-0" />
+              {items.length > 0 && <MoreMenu items={items} iconOnly className="shrink-0" />}
               <ChevronRight size={18} strokeWidth={1.75} className={start ? "text-white" : "text-[#6b6a64]"} aria-hidden />
             </li>
           );

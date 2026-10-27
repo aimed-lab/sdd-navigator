@@ -284,6 +284,26 @@ export function teamHeaderLine(memberCount: number): string {
 
 // ── the assistant ───────────────────────────────────────────────────────────
 
+/** Learning pages are curated by team leads; members only read them. */
+export const LEADS_ONLY_PAGES = "Only team leads can add or remove learning pages.";
+
+export function canCurateTeamPages(isLead: boolean): boolean {
+  return isLead;
+}
+
+/** May the viewer edit a wiki page that may be on teams? `canEdit` is the
+ *  database's own answer (owner, page editor, project member). A page curated
+ *  into a team the viewer is on is edited only by its owner or a lead of that
+ *  team: a team member who is merely an editor sees no edit or add-section
+ *  controls. `teams` are the viewer's team_pages rows for the page (the database
+ *  returns only rows of teams they are on); none means the page is not on one of
+ *  their teams and nothing changes. */
+export function pageEditAllowed(args: { canEdit: boolean; isOwner: boolean; teams: { isLead: boolean }[] }): boolean {
+  if (!args.canEdit) return false;
+  if (args.isOwner || args.teams.length === 0) return true;
+  return args.teams.some((t) => t.isLead);
+}
+
 /** The text the "Make learning material" tile puts in the assistant. */
 export function makePagePrompt(teamName: string): string {
   return `Make a wiki page for my team ${teamName.replace(/\s+/g, " ").trim().slice(0, 80)} about: `;

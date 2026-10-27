@@ -70,11 +70,18 @@ export default function TeamTiles({
   // Tell the assistant which team this page is, so a message typed by hand
   // still makes a page for this team and stays on the page.
   useEffect(() => {
-    setPageTeam({ id: teamId, name, slug });
+    // canCurate: only a lead can have the assistant make or add a wiki page for the team.
+    setPageTeam({ id: teamId, name, slug, canCurate: isLead });
     return () => setPageTeam(null);
-  }, [teamId, name, slug]);
+  }, [teamId, name, slug, isLead]);
 
-  const ask = () => openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug } });
+  // A lead: "make a page" (the assistant drafts a wiki page for the team). A member:
+  // the assistant opens as a question box about the team's material; the team page
+  // already told it which team this is, and it never offers to make or add a page.
+  const ask = () =>
+    isLead
+      ? openAssistant({ text: makePagePrompt(name), mode: "fill", team: { id: teamId, name, slug, canCurate: true } })
+      : openAssistant({ text: "", mode: "open" });
 
   useEffect(() => {
     if (!autoOpenLearn) return;
@@ -111,7 +118,7 @@ export default function TeamTiles({
           );
         })}
         <button type="button" onClick={ask} className={TILE}>
-          <TileBody k="ask" name="Ask AI" small="make a page" on={false} />
+          <TileBody k="ask" name="Ask AI" small={isLead ? "make a page" : "ask about the talk"} on={false} />
         </button>
         <button type="button" onClick={() => open("share")} aria-haspopup="dialog" className={TILE}>
           <TileBody k="share" name="Share" small="post a photo" on={false} />
@@ -128,7 +135,7 @@ export default function TeamTiles({
           <AddDocumentPanel teamId={teamId} slug={slug} onClose={close} mode="photo" />
         </Sheet>
       )}
-      {panel === "pages" && (
+      {panel === "pages" && isLead && (
         <Sheet title="Add a page" onClose={close}>
           <CuratePagesPanel teamId={teamId} slug={slug} onClose={close} />
         </Sheet>

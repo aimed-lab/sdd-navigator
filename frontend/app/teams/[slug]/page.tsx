@@ -157,7 +157,9 @@ export default async function TeamPage({
   // Share dialog, or the assistant.
   const TILE_PANEL: Partial<Record<TileKey, TeamPanel>> = { document: "document", pages: "pages", share: "share" };
   const TILE_VIEW: Partial<Record<TileKey, TeamView>> = { document: "slides", pages: "learn" };
-  const initialPanel: TeamPanel = target?.kind === "tile" ? (TILE_PANEL[target.id] ?? null) : null;
+  const wanted: TeamPanel = target?.kind === "tile" ? (TILE_PANEL[target.id] ?? null) : null;
+  // Adding learning pages is for leads.
+  const initialPanel: TeamPanel = wanted === "pages" && !isLead ? null : wanted;
   const autoOpenLearn = target?.kind === "tile" && target.id === "learn";
   const view: TeamView | null = parseView(query.view) ?? (target?.kind === "tile" ? (TILE_VIEW[target.id] ?? null) : null);
 
@@ -216,7 +218,7 @@ export default async function TeamPage({
               />
             )}
             {view === "learn" && (
-              <LearnList teamId={team.id} teamName={team.name} slug={team.slug} pages={pages} newCounts={newCounts} />
+              <LearnList teamId={team.id} teamName={team.name} slug={team.slug} pages={pages} newCounts={newCounts} isLead={isLead} />
             )}
             {view === "photos" && (
               <PhotosGallery

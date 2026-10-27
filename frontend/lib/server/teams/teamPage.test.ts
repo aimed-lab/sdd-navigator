@@ -99,3 +99,66 @@ test("permissions are unchanged: pin for leads, remove for leads and the adder",
 test("the teams home (/) is untouched this round", () => {
   assert.match(src("components/teams/TeamsHome.tsx"), /listMyTeamsNewest/);
 });
+
+// ── learning pages are curated by leads ───────────────────────────────────────
+
+import { LEADS_ONLY_PAGES, canCurateTeamPages, pageEditAllowed } from "./teamRules.ts";
+
+test("only leads curate learning pages (rule and message)", () => {
+  assert.equal(canCurateTeamPages(true), true);
+  assert.equal(canCurateTeamPages(false), false);
+  assert.match(LEADS_ONLY_PAGES, /Only team leads/);
+});
+
+test("server: adding, removing and searching team pages check the lead first", () => {
+  const t = src("lib/server/teams/teams.ts");
+  const add = t.slice(t.indexOf("export async function addPageToTeam"));
+  assert.ok(add.indexOf("canCurateTeamPages(membership.isAdmin)") > 0);
+  assert.ok(add.indexOf("canCurateTeamPages(membership.isAdmin)") < add.indexOf('.from("team_pages")'), "before the insert");
+  const rm = t.slice(t.indexOf("export async function removePageFromTeam"));
+  assert.ok(rm.indexOf("canCurateTeamPages(") > 0 && rm.indexOf("canCurateTeamPages(") < rm.indexOf('.from("team_pages")'), "before the delete");
+  const search = t.slice(t.indexOf("export async function searchPagesForTeam"), t.indexOf("export async function addPageToTeam"));
+  assert.match(search, /canCurateTeamPages\(/);
+  // the per-page remove flag is the lead flag only
+  assert.match(t, /canRemove: membership\.isAdmin,/);
+  // the database says the same (a migration file)
+  const sql = readFileSync(new URL("../../../../database/migrations/2026-10-31_team_pages_leads_only.sql", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  assert.match(sql, /CREATE POLICY "Team pages: lead insert"[\s\S]*is_community_admin\(team_id, auth\.uid\(\)\)/);
+  assert.match(sql, /CREATE POLICY "Team pages: lead delete"[\s\S]*USING \(public\.is_community_admin/);
+});
+
+test("Learn UI: members see the list and open pages, nothing else", () => {
+  const learn = src("components/teams/LearnList.tsx");
+  assert.match(learn, /isLead && p\.canRemove/);
+  assert.match(learn, /\{isLead && \(\s*<button/);
+  assert.match(src("components/teams/SectionHeader.tsx"), /view === "learn" && !isLead \? null : meta\.add/);
+  const page = src("app/teams/[slug]/page.tsx");
+  assert.match(page, /isLead=\{isLead\}/);
+  assert.match(page, /wanted === "pages" && !isLead \? null : wanted/);
+  assert.match(src("components/teams/TeamTiles.tsx"), /panel === "pages" && isLead/);
+});
+
+test("Ask AI: a member gets a question box and the 'ask about the talk' line; no page offers", () => {
+  const tiles = src("components/teams/TeamTiles.tsx");
+  assert.match(tiles, /small=\{isLead \? "make a page" : "ask about the talk"\}/);
+  assert.match(tiles, /: openAssistant\(\{ text: "", mode: "open" \}\)/);
+  assert.match(tiles, /canCurate: isLead/);
+  const chat = src("components/explore/AssistantChat.tsx");
+  assert.match(chat, /const memberOnTeam = activeTeam\(\)\?\.canCurate === false;/);
+  assert.match(chat, /setAction\(memberOnTeam \? null/);
+  assert.match(chat, /!memberOnTeam && !parsed\.community/);
+  assert.match(chat, /shownTeam\?\.canCurate === false && st\.id === "create"/);
+  assert.match(src("lib/server/assistant/assistantBridge.ts"), /canCurate\?: boolean/);
+});
+
+test("wiki page opened from Learn: members get no edit or add-section controls", () => {
+  const ok = (canEdit: boolean, isOwner: boolean, teams: { isLead: boolean }[]) => pageEditAllowed({ canEdit, isOwner, teams });
+  assert.equal(ok(true, true, [{ isLead: false }]), true, "the owner keeps them");
+  assert.equal(ok(true, false, [{ isLead: true }]), true, "a lead of the team keeps them");
+  assert.equal(ok(true, false, [{ isLead: false }]), false, "a member who is merely an editor loses them");
+  assert.equal(ok(true, false, []), true, "a page that is not on the viewer's teams is unchanged");
+  assert.equal(ok(false, false, [{ isLead: true }]), false, "the database's no stays no");
+  const view = src("lib/server/pages/pageView.ts");
+  assert.match(view, /pageEditAllowed\(\{ canEdit, isOwner, teams \}\)/);
+  assert.match(view, /is_community_admin/);
+});

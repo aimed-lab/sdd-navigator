@@ -10,6 +10,7 @@
 
 import { getDb, getCurrentUser } from "@/lib/auth";
 import type { ActingContext } from "@/lib/server/pages/actingContext";
+import { pageEditAllowed } from "@/lib/server/teams/teamRules";
 import {
   citationNumber,
   isVisibility,
@@ -157,6 +158,19 @@ export async function getPageView(slug: string, ctx?: ActingContext): Promise<Pa
     if (user) {
       const { data: can } = await db.rpc("can_edit_page", { p_page_id: pageId, p_uid: user.id });
       canEdit = can === true;
+    }
+    // A page curated into a team the viewer is on: only its owner or a lead of that
+    // team edits it. A member who is merely an editor sees no edit or add-section
+    // controls. (team_pages rows are visible only for the viewer's own teams.)
+    if (canEdit && !isOwner && user) {
+      const { data: onTeams } = await db.from("team_pages").select("team_id").eq("page_id", pageId);
+      const teams = await Promise.all(
+        ((onTeams ?? []) as { team_id: string }[]).map(async (t) => {
+          const { data: lead } = await db.rpc("is_community_admin", { p_community_id: t.team_id, p_uid: user.id });
+          return { isLead: lead === true };
+        })
+      );
+      canEdit = pageEditAllowed({ canEdit, isOwner, teams });
     }
 
     // The project (name only) and parent page, each only when the viewer can

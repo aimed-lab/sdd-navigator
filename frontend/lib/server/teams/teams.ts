@@ -23,7 +23,9 @@ import { getAnonServerClient } from "@/lib/server/supabaseServer";
 import {
   joinErrorMessage,
   joinResultMessage,
+  LEADS_ONLY_PAGES,
   LINK_MESSAGE,
+  canCurateTeamPages,
   canCuratePage,
   canLinkTeam,
   canUnlinkTeam,
@@ -302,7 +304,7 @@ export async function listTeamPages(teamId: string): Promise<TeamPage[]> {
       addedBy: r.added_by,
       createdAt: r.created_at,
       lastRefreshedAt: page.last_refreshed_at ?? null,
-      canRemove: r.added_by === user.id || membership.isAdmin,
+      canRemove: membership.isAdmin,
     });
   }
   return out;
@@ -329,6 +331,8 @@ function likePattern(q: string): string {
  *  decides what is visible; can_curate_page decides what can be added. */
 export async function searchPagesForTeam(teamId: string, query: string): Promise<PageChoice[]> {
   const { db, user } = await requireCurrentUser();
+  // Only a lead curates the team's learning pages, so only a lead searches for them.
+  if (!canCurateTeamPages((await getMembership(teamId)).isAdmin)) return [];
   const q = query.trim().slice(0, 80);
 
   const { data: already } = await db.from("team_pages").select("page_id").eq("team_id", teamId);
@@ -357,11 +361,13 @@ export async function searchPagesForTeam(teamId: string, query: string): Promise
   return out;
 }
 
-/** Add a page to the team. Any team member, for a page they can read (the
- *  insert policy checks both). The page itself is not changed. */
+/** Add a page to the team. A team LEAD only (learning pages are curated by leads;
+ *  members read them), for a page they can read (the insert policy checks that).
+ *  The page itself is not changed. */
 export async function addPageToTeam(teamId: string, pageId: string, how: CuratedHow = "curated"): Promise<CurateResult> {
   const { user, db } = await requireCurrentUser();
   const membership = await getMembership(teamId);
+  if (!canCurateTeamPages(membership.isAdmin)) return { status: "error", error: LEADS_ONLY_PAGES };
 
   // Can this person read the page? Their own session answers: RLS returns the
   // row only when can_read_page() says yes.
@@ -389,9 +395,10 @@ export async function addPageToTeam(teamId: string, pageId: string, how: Curated
   return { status: "ok", switchedToTeam: visibilityAfterCurate(visibility, isOwner) !== visibility };
 }
 
-/** Take a page off the team: whoever added it, or a team lead. */
+/** Take a page off the team: a team lead only. */
 export async function removePageFromTeam(teamId: string, pageId: string): Promise<SimpleResult> {
   const { db } = await requireCurrentUser();
+  if (!canCurateTeamPages((await getMembership(teamId)).isAdmin)) return { status: "error", error: LEADS_ONLY_PAGES };
   const { data, error } = await db
     .from("team_pages")
     .delete()
@@ -403,7 +410,7 @@ export async function removePageFromTeam(teamId: string, pageId: string): Promis
     return { status: "error", error: "Couldn't remove that page. Please try again." };
   }
   if (!data || data.length === 0) {
-    return { status: "error", error: "Only the person who added this page, or a team lead, can remove it." };
+    return { status: "error", error: LEADS_ONLY_PAGES };
   }
   return { status: "ok" };
 }

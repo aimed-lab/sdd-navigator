@@ -29,7 +29,8 @@ export default function SectionHeader({ slug, view, isLead }: { slug: string; vi
   const { open } = useTeamPanel();
   const meta = VIEW_META[view];
 
-  const addLabel = view === "people" ? (isLead ? "Invite" : null) : meta.add;
+  // Learning pages are curated by leads: only they get "+ Add a page". People: only leads invite.
+  const addLabel = view === "people" ? (isLead ? "Invite" : null) : view === "learn" && !isLead ? null : meta.add;
   const onAdd = () => (view === "people" ? openInvite() : open(ADD_PANEL[view]));
   const addButton = addLabel ? (
     <button

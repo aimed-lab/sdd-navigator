@@ -12,7 +12,14 @@ export const ASSISTANT_EVENT = "sdd:assistant";
 
 /** A team the page the assistant makes should be added to ("Make learning
  *  material" on a team page). */
-export type AssistantTeam = { id: string; name: string; slug: string };
+export type AssistantTeam = {
+  id: string;
+  name: string;
+  slug: string;
+  /** false: the viewer is a member, not a lead. The assistant then never offers to make
+   *  or add a wiki page for the team (the server refuses it as well). Undefined: no limit. */
+  canCurate?: boolean;
+};
 
 // The team whose page is open. The team page registers it so the panel knows
 // the team even when the message is typed by hand (not sent from the tile).
@@ -61,7 +68,7 @@ function parseTeam(raw: unknown): AssistantTeam | undefined {
   const name = typeof t.name === "string" ? t.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
   const slug = typeof t.slug === "string" && /^[a-z0-9-]{1,200}$/.test(t.slug) ? t.slug : "";
   if (typeof t.id !== "string" || !UUID_RE.test(t.id) || !name || !slug) return undefined;
-  return { id: t.id.toLowerCase(), name, slug };
+  return { id: t.id.toLowerCase(), name, slug, ...(typeof t.canCurate === "boolean" ? { canCurate: t.canCurate } : {}) };
 }
 
 const MAX_TEXT = 500;
