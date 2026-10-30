@@ -11,17 +11,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { updateCommunityPublicPreviewAction } from "@/app/communities/actions";
+import { updateCommunityPublicPreviewAction, updateShowPinnedToPublicAction } from "@/app/communities/actions";
 import { PUBLIC_PREVIEW_LABEL, PUBLIC_PREVIEW_LEVELS, type PublicPreviewLevel } from "@/lib/communityTypes";
 
 export default function PublicPreviewEditor({
   communityId,
   slug,
   level,
+  showPinned = false,
 }: {
   communityId: string;
   slug: string;
   level: PublicPreviewLevel;
+  /** "Also show the pinned link to non-members" (communities.show_pinned_to_public). */
+  showPinned?: boolean;
 }) {
   const router = useRouter();
   const [local, setLocal] = useState<PublicPreviewLevel>(level);
@@ -29,12 +32,15 @@ export default function PublicPreviewEditor({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const dirty = local !== level;
+  const [pinnedLocal, setPinnedLocal] = useState(showPinned);
+  const dirty = local !== level || pinnedLocal !== showPinned;
 
   const save = async () => {
     setSaving(true);
     setError(null);
-    const res = await updateCommunityPublicPreviewAction(communityId, local, slug);
+    let res: { ok: true } | { ok: false; error: string } = { ok: true };
+    if (local !== level) res = await updateCommunityPublicPreviewAction(communityId, local, slug);
+    if (res.ok && pinnedLocal !== showPinned) res = await updateShowPinnedToPublicAction(communityId, pinnedLocal, slug);
     setSaving(false);
     if (res.ok) {
       setSaved(true);
@@ -82,6 +88,25 @@ export default function PublicPreviewEditor({
           </li>
         ))}
       </ul>
+
+      <label className="flex items-start gap-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={pinnedLocal}
+          onChange={(e) => {
+            setPinnedLocal(e.target.checked);
+            setSaved(false);
+          }}
+          className="mt-0.5 w-4 h-4 accent-primary cursor-pointer"
+        />
+        <span className="font-body-sm text-body-sm text-on-background">
+          Also show the pinned link to non-members
+          <span className="block text-secondary">
+            Works when the pinned resource is a link (not a file). Visitors see its title, description and an Open button,
+            nothing else.
+          </span>
+        </span>
+      </label>
 
       <div className="flex items-center gap-3">
         <button

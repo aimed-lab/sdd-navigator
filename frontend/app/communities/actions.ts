@@ -27,6 +27,7 @@ import {
   leaveCommunity,
   refreshCommunityFeed,
   rejectMembership,
+  setShowPinnedToPublic,
   removeCommunityMember,
   removeCommunityResourceFile,
   updateAnnouncement,
@@ -677,6 +678,26 @@ export async function updateCommunityPublicPreviewAction(
       return { ok: false, error: "Sign in first." };
     }
     console.error("updateCommunityPublicPreviewAction failed", e);
+    return { ok: false, error: "Couldn't save this setting. Please try again." };
+  }
+}
+
+/** "Also show the pinned link to non-members": admins only (re-checked in
+ *  setShowPinnedToPublic; the communities update policy is the real gate). */
+export async function updateShowPinnedToPublicAction(
+  communityId: string,
+  value: boolean,
+  slug: string
+): Promise<SimpleActionResult> {
+  if (!communityId) return { ok: false, error: "Missing community." };
+  try {
+    const result = await setShowPinnedToPublic(communityId, value);
+    if (result.status !== "ok") return { ok: false, error: result.error };
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in first." };
+    console.error("updateShowPinnedToPublicAction failed", e);
     return { ok: false, error: "Couldn't save this setting. Please try again." };
   }
 }

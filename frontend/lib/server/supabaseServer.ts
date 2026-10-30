@@ -32,9 +32,10 @@ export const getSessionClient = getRouteClient;
 // the departing user can no longer be scoped to.
 //
 // Rules: server-only (the key is read from process.env and must never reach the
-// browser), and the ONLY caller is lib/auth.ts's deleteAccount(). If a second
-// caller ever appears, that is the signal something is being done with the wrong
-// trust level. Returns null when unconfigured so the caller answers 500.
+// browser). Callers: lib/auth.ts's deleteAccount(), and getPublicPinnedLink() in
+// lib/server/communities.ts (one read-only select of a community's pinned LINK,
+// when an admin opted in). If another caller ever appears, that is the signal
+// something is being done with the wrong trust level. Returns null when unconfigured so the caller answers 500.
 export function getServiceRoleClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
