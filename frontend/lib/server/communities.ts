@@ -719,6 +719,9 @@ export type CommunityMember = {
    *  this from before signing in, and once signed in the real account name
    *  wins over it automatically. */
   display_name: string | null;
+  /** When they joined (approved_at, else joined_at): the "X joined" lines in Latest. */
+  joined_at: string | null;
+  approved_at: string | null;
 };
 
 /** The full member roster, WITH email — admin-only. "Community members:
@@ -738,7 +741,7 @@ export async function listCommunityMembers(communityId: string): Promise<Communi
 
   const { data, error } = await session.db
     .from("community_members")
-    .select("id, email, user_id, role, status, focus, hidden, display_name")
+    .select("id, email, user_id, role, status, focus, hidden, display_name, joined_at, approved_at")
     .eq("community_id", communityId)
     .eq("status", "active")
     .order("role", { ascending: true }); // 'admin' < 'lead' < 'member' alphabetically — admins first

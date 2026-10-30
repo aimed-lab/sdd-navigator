@@ -1,27 +1,16 @@
-// "PINNED BY ADMIN" card on the community Home tab: a thumbnail (the first
-// image file, else the resource type's icon), title, description and View /
-// Download. Files are short-lived signed URLs minted per request; a signed-out
-// visitor only gets any when the community is 'open' (see the pinned-resource
-// migration), otherwise the resource itself isn't returned at all.
+// "PINNED BY ADMIN" card on the community home: a white card with a 4px UAB Green
+// left border, the small label, the title and description on the left and an
+// "Open ↗" primary button on the right (stacked under the text on a phone). A
+// pinned file also gets a quiet Download link. Files are short-lived signed URLs
+// minted per request; a signed-out visitor only gets any when the community is
+// 'open' (see the pinned-resource migration), otherwise the resource itself isn't
+// returned at all.
 
 import TrackStepLink from "./TrackStepLink";
 import type { CommunityResource } from "@/lib/server/communities";
-import { downloadHref, isImageFile } from "@/lib/server/communityHome/communityHome";
+import { downloadHref } from "@/lib/server/communityHome/communityHome";
 
-const TYPE_ICON: Record<string, string> = {
-  tool: "build",
-  paper: "article",
-  dataset: "database",
-  slides: "slideshow",
-  notes: "sticky_note_2",
-  folder: "folder",
-  template: "description",
-  link: "link",
-  podcast: "podcasts",
-  other: "push_pin",
-};
-
-/** A View / Download link; records the checklist step when `trackCommunityId` is set. */
+/** An Open / Download link; records the checklist step when `trackCommunityId` is set. */
 function ActionLink({
   trackCommunityId,
   ...props
@@ -36,68 +25,50 @@ export default function PinnedResourceCard({
   trackCommunityId,
 }: {
   resource: CommunityResource;
-  /** Pass for an active member: View / Download tick "Open the pinned resource"
+  /** Pass for an active member: Open / Download tick "Open the pinned resource"
    *  on their welcome checklist. */
   trackCommunityId?: string;
 }) {
-  const image = resource.files.find((f) => isImageFile(f.filename));
   const first = resource.files[0];
   const viewHref = first?.url ?? resource.url;
-  const external = !first && !!resource.url;
 
   return (
-    <section id="pinned" aria-label="Pinned by admin" className="rounded-2xl glass-panel p-5 flex flex-col gap-3 scroll-mt-24">
-      <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm tracking-widest text-primary">
-        <span className="material-symbols-outlined text-[16px]">push_pin</span>
-        PINNED BY ADMIN
-      </span>
-
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="w-full sm:w-36 h-28 sm:h-auto sm:min-h-28 shrink-0 rounded-xl bg-surface-container-low border border-outline-variant/30 overflow-hidden flex items-center justify-center">
-          {image ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={image.url} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <span className="material-symbols-outlined text-primary text-5xl">
-              {TYPE_ICON[resource.resource_type] ?? "push_pin"}
-            </span>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1 flex flex-col gap-2">
-          <h2 className="font-headline-sm text-headline-sm text-on-background break-words">{resource.title}</h2>
-          {resource.description && (
-            <p className="font-body-md text-body-md text-secondary line-clamp-3">{resource.description}</p>
-          )}
-          <div className="flex flex-wrap items-center gap-3 mt-auto pt-1">
-            {viewHref && (
-              <ActionLink
-                trackCommunityId={trackCommunityId}
-                href={viewHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-primary px-4 py-2 rounded-lg font-label-sm text-label-sm inline-flex items-center gap-1.5"
-              >
-                <span className="material-symbols-outlined text-[18px]">{external ? "open_in_new" : "visibility"}</span>
-                View
-              </ActionLink>
-            )}
-            {first && (
-              <ActionLink
-                trackCommunityId={trackCommunityId}
-                href={downloadHref(first.url, first.filename)}
-                className="btn-outline px-4 py-2 rounded-lg font-label-sm text-label-sm inline-flex items-center gap-1.5"
-              >
-                <span className="material-symbols-outlined text-[18px]">download</span>
-                Download
-              </ActionLink>
-            )}
-            {resource.files.length > 1 && (
-              <span className="font-body-sm text-body-sm text-secondary">+{resource.files.length - 1} more file(s)</span>
-            )}
-          </div>
-        </div>
+    <section
+      id="pinned"
+      aria-label="Pinned by admin"
+      className="rounded-2xl bg-white border border-[#e8e4da] border-l-4 border-l-primary px-[18px] py-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 scroll-mt-24"
+    >
+      <div className="min-w-0 flex-1">
+        <span className="block text-[11px] leading-4 font-bold tracking-[0.08em] text-primary">PINNED BY ADMIN</span>
+        <h2 className="font-title text-[18px] leading-6 text-on-background break-words mt-1">{resource.title}</h2>
+        {resource.description && (
+          <p className="font-body-md text-[13px] leading-5 text-secondary line-clamp-3 mt-1">{resource.description}</p>
+        )}
+        {first && (
+          <p className="mt-1.5 text-[12.5px] leading-5 text-secondary">
+            <ActionLink
+              trackCommunityId={trackCommunityId}
+              href={downloadHref(first.url, first.filename)}
+              className="text-primary hover:underline underline-offset-4"
+            >
+              Download
+            </ActionLink>
+            {resource.files.length > 1 ? ` · +${resource.files.length - 1} more file(s)` : ""}
+          </p>
+        )}
       </div>
+      {viewHref && (
+        <ActionLink
+          trackCommunityId={trackCommunityId}
+          href={viewHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn-primary shrink-0 self-start sm:self-center whitespace-nowrap px-4 py-2.5 rounded-[10px] text-[13px] font-bold leading-5 inline-flex items-center gap-1.5"
+        >
+          Open
+          <span aria-hidden>↗</span>
+        </ActionLink>
+      )}
     </section>
   );
 }

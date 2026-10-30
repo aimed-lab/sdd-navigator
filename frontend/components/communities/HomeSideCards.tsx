@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { initials } from "@/lib/server/communityHome/communityHome";
+import { eventDay } from "@/lib/server/communityHome/tiles";
 import type { SimilarMember } from "@/lib/server/communityHome/similarMembers";
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
@@ -15,10 +16,21 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-export function UpcomingEventsCard() {
+export function UpcomingEventsCard({ events = [] }: { events?: { id: string; title: string; starts_at: string; location: string | null }[] }) {
   return (
     <Card title="Upcoming events">
-      <p className="font-body-md text-body-md text-secondary">No events yet. When an admin adds a talk or meetup, it shows up here.</p>
+      {events.length === 0 ? (
+        <p className="font-body-md text-body-md text-secondary">No events yet. When an admin adds a talk or meetup, it shows up here.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {events.slice(0, 3).map((e) => (
+            <li key={e.id} className="font-body-md text-body-md text-on-background">
+              <span className="font-label-md text-label-md">{eventDay(e.starts_at)}</span> · {e.title}
+              {e.location ? <span className="text-secondary"> · {e.location}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
     </Card>
   );
 }

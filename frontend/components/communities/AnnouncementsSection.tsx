@@ -309,6 +309,7 @@ export default function AnnouncementsSection({
   isAdmin,
   announcements,
   authorNames,
+  startCreating = false,
 }: {
   title: string;
   communityId: string;
@@ -322,8 +323,10 @@ export default function AnnouncementsSection({
   /** user_id -> display name, from listMemberRoster()/
    *  community_member_roster() (built in the page) — never an email. */
   authorNames: Record<string, string>;
+  /** Open the new-announcement form on arrival (the "Post announcement +" link). */
+  startCreating?: boolean;
 }) {
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(startCreating && isAdmin);
 
   // This component owns its own CollapsibleSection (rather than the page
   // wrapping it externally, like Members/the placeholder sections do)
