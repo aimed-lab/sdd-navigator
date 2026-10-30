@@ -10,6 +10,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { UnauthorizedError } from "@/lib/auth";
+import { createCommunityEvent, deleteCommunityEvent, updateCommunityEvent } from "@/lib/server/communityEvents";
 import {
   addCommunityMemberByEmail,
   addCommunityResourceFile,
@@ -855,4 +856,41 @@ export async function dismissChecklistAction(communityId: string, slug: string):
     console.error("dismissChecklistAction failed", e);
     return { ok: false, error: "Couldn't dismiss the checklist." };
   }
+}
+
+// ── events ────────────────────────────────────────────────────────────────
+
+export type EventInput = { title: string; date: string; time: string; location: string; link: string; description: string };
+
+async function eventResult(
+  slug: string,
+  what: string,
+  run: () => Promise<{ status: string; error?: string }>
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const r = await run();
+    if (r.status !== "ok") return { ok: false, error: r.error ?? "Something went wrong." };
+    revalidatePath(`/communities/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof UnauthorizedError) return { ok: false, error: "Sign in first." };
+    console.error(`${what} failed`, e);
+    return { ok: false, error: "Something went wrong. Please try again." };
+  }
+}
+
+/** Add an event. Admin-only: the database policy is the real gate. */
+export async function createEventAction(communityId: string, slug: string, input: EventInput) {
+  if (!communityId) return { ok: false as const, error: "Missing community." };
+  return eventResult(slug, "createEventAction", () => createCommunityEvent(communityId, input));
+}
+
+export async function updateEventAction(communityId: string, slug: string, eventId: string, input: EventInput) {
+  if (!communityId || !eventId) return { ok: false as const, error: "Missing event." };
+  return eventResult(slug, "updateEventAction", () => updateCommunityEvent(communityId, eventId, input));
+}
+
+export async function deleteEventAction(communityId: string, slug: string, eventId: string) {
+  if (!communityId || !eventId) return { ok: false as const, error: "Missing event." };
+  return eventResult(slug, "deleteEventAction", () => deleteCommunityEvent(communityId, eventId));
 }
