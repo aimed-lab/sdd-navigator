@@ -79,3 +79,20 @@ export const IconExternal = ({ size = 14 }: P) => (
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
   </Svg>
 );
+export const IconChecklist = ({ size = 22 }: P) => (
+  <Svg size={size}>
+    <path d="M9 11l3 3L22 4" />
+    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  </Svg>
+);
+export const IconFolder = ({ size = 22 }: P) => (
+  <Svg size={size}>
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+  </Svg>
+);
+export const IconClock = ({ size = 22 }: P) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 6v6l4 2" />
+  </Svg>
+);

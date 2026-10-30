@@ -36,6 +36,17 @@ import { parseTab, tabHref, TAB_LABEL } from "@/lib/server/projectWorkspace/work
 import { LIST_LABEL, todayIso, visibleLists } from "@/lib/server/projectWorkspace/status";
 import { COLABOFEST_CHALLENGE_KEY, COLABOFEST_PROGRAM } from "@/lib/projectTypes";
 import { listOpenHelp, listProjectUpdates } from "@/lib/server/projectWorkspace/updates";
+import {
+  canManageProject,
+  canMarkTask,
+  finalistTaskRows,
+  nextTimelineDate,
+  resolveManageSection,
+  resolveProjectView,
+  type ProjectView,
+} from "@/lib/server/projectWorkspace/finalistTasks";
+import { newCount } from "@/lib/server/communityHome/tiles";
+import ColabofestProject from "@/components/projects/workspace/ColabofestProject";
 import { getThread, listThreads } from "@/lib/server/projectWorkspace/discussions";
 import { isWelcomeDismissed } from "@/lib/server/projectWorkspace/welcome";
 import { viewerIsSiteAdmin } from "@/lib/server/projectWorkspace/colabofestOps";
@@ -70,6 +81,12 @@ import NewProjectWikiPage from "@/components/projects/workspace/NewProjectWikiPa
 export const dynamic = "force-dynamic"; // depends on the session
 // "New wiki page" researches the topic before it returns (about a minute).
 export const maxDuration = 300;
+
+/** The first non-empty line of the description, at most 80 characters, or null. */
+function heroLabel(description: string | null): string | null {
+  const line = (description ?? "").split(String.fromCharCode(10)).map((l) => l.trim()).find(Boolean) ?? "";
+  return line ? (line.length > 80 ? line.slice(0, 79).trimEnd() + "…" : line) : null;
+}
 
 export default async function ProjectDetailPage({
   params,
@@ -129,7 +146,26 @@ export default async function ProjectDetailPage({
   }
 
   const project = result.project;
-  const tab = parseTab(sp.tab, !!project.challenge_key);
+
+  // A ColaboFest project (projects.program) gets the minimal tile page: the views Tasks
+  // (finalists), Project files, Announcements, Team, Timeline and Manage (the SPARC
+  // team). Manage shows the sections this page used to show, one at a time
+  // (?view=manage&section=...). Every other project is exactly as before.
+  const isColabofest = project.program === COLABOFEST_PROGRAM;
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const colabAvailable: ProjectView[] = isColabofest
+    ? [
+        ...(project.finalist ? (["tasks"] as ProjectView[]) : []),
+        "files",
+        "announcements",
+        "team",
+        "timeline",
+        ...(canManageProject(project.viewer_role) ? (["manage"] as ProjectView[]) : []),
+      ]
+    : [];
+  const colabView = isColabofest ? resolveProjectView(one(sp.view), one(sp.tab), colabAvailable) : null;
+  const manageSection = resolveManageSection(one(sp.section), !!project.challenge_key);
+  const tab = isColabofest ? (colabView === "manage" ? manageSection : "overview") : parseTab(sp.tab, !!project.challenge_key);
 
   const chips = [
     project.target,
@@ -155,14 +191,15 @@ export default async function ProjectDetailPage({
     .filter((m): m is typeof m & { user_id: string } => !!m.user_id)
     .map((m) => ({ user_id: m.user_id, label: m.name || m.email }));
 
-  // The ColaboFest project home follows projects.program. Registration things
-  // (Proposal tab, submission, deadline, the registration checklist note) stay on
-  // projects.challenge_key.
-  const isColabofest = project.program === COLABOFEST_PROGRAM;
+  // (isColabofest, above: projects.program. Registration things (Proposal tab,
+  // submission, deadline, the registration checklist note) stay on projects.challenge_key.)
   const needsAdminFlag = tab === "team" || tab === "announcements" || tab === "discussions";
   const isSiteAdmin = needsAdminFlag && db ? await viewerIsSiteAdmin(db) : false;
 
-  if (tab === "overview") {
+  if (isColabofest && colabView !== "manage") {
+    // Rendered by ColabofestProject below.
+    content = null;
+  } else if (tab === "overview") {
     const [helpPosts, upd, thr, dismissed] = await Promise.all([
       listOpenHelp(project.id),
       listProjectUpdates(project.id),
@@ -347,6 +384,68 @@ export default async function ProjectDetailPage({
         deadlinePassed={deadlinePassed}
         fileUrl={fileUrl}
       />
+    );
+  }
+
+  if (isColabofest) {
+    const upd = await listProjectUpdates(project.id);
+    const all = upd.status === "ok" ? arrangeAnnouncements(upd.updates.filter((u) => u.kind === "announcement")) : [];
+    const taskRows = finalistTaskRows(project.checklist);
+    return (
+      <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-6 pb-16">
+        {community && (
+          <div className="mb-4">
+            <Link
+              href={`/communities/${community.slug}`}
+              className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
+            >
+              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+              {community.name}
+            </Link>
+          </div>
+        )}
+        <div className="mb-4">
+          <Link
+            href="/projects"
+            className="font-label-sm text-label-sm text-secondary hover:text-primary transition-colors inline-flex items-center gap-1"
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            My projects
+          </Link>
+        </div>
+        <ColabofestProject
+          projectId={project.id}
+          name={project.name}
+          label={heroLabel(project.description)}
+          finalist={project.finalist}
+          memberNames={project.members.map((m) => (m.user_id && m.name ? m.name : m.email))}
+          memberCount={project.members.length}
+          view={colabView}
+          today={today}
+          canMark={canMarkTask(project.viewer_role)}
+          showManage={canManageProject(project.viewer_role)}
+          taskRows={taskRows}
+          sharedFolderUrl={project.shared_folder?.url ?? null}
+          announcements={all.map((a) => ({ id: a.id, body: a.body, created_at: a.created_at, author_name: a.author_name, pinned: a.pinned }))}
+          announcementsNew={newCount(all, new Date())}
+          announcementsCount={all.length}
+          announcementsNode={
+            upd.status === "ok" ? (
+              <AnnouncementsTab projectId={project.id} role={project.viewer_role} isSiteAdmin={isSiteAdmin} updates={upd.updates} />
+            ) : (
+              <p className="font-body-md text-body-md text-error" role="alert">
+                {upd.error}
+              </p>
+            )
+          }
+          teamNode={<TeamSection projectId={project.id} members={project.members} isLead={false} viewerUserId={user.id} />}
+          manageNode={colabView === "manage" ? content : null}
+          manageSection={manageSection}
+          hasProposal={!!project.challenge_key}
+          nextDate={nextTimelineDate(today)}
+        />
+        {/* No floating chat button on ColaboFest project pages. */}
+      </div>
     );
   }
 
