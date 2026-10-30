@@ -21,6 +21,8 @@ import { notFound, redirect } from "next/navigation";
 import {
   claimPendingCommunityMemberships,
   getCommunityBySlug,
+  getPublicPinnedLink,
+  getShowPinnedToPublic,
   getCommunityFeedPreview,
   getCommunityStats,
   getMembership,
@@ -81,6 +83,7 @@ import CommunityPublicPreview from "@/components/communities/CommunityPublicPrev
 import CommunityHeader from "@/components/communities/CommunityHeader";
 import CommunityTabs from "@/components/communities/CommunityTabs";
 import PinnedResourceCard from "@/components/communities/PinnedResourceCard";
+import PublicPinnedCard from "@/components/communities/PublicPinnedCard";
 import IsOpenEditor from "@/components/communities/IsOpenEditor";
 import UpdatesList from "@/components/communities/UpdatesList";
 import LivingPagesList from "@/components/communities/LivingPagesList";
@@ -205,6 +208,9 @@ export default async function CommunityDetailPage({
 
   // The pinned resource, announcements and events, where this viewer may see them.
   const pinned = access.seesPinned ? await getPinnedResource(community.id) : null;
+  // A non-member (signed in or not): the pinned LINK, only when an admin opted in.
+  const publicPinned = !isMember ? await getPublicPinnedLink(community.id) : null;
+  const showPinnedFlag = view === "manage" && membership.isAdmin ? await getShowPinnedToPublic(community.id) : false;
   const wantAnnouncements = isMember || (tab === "home" && access.seesUpdates);
   const wantFeed = access.seesUpdates && (isMember ? view === "resources" : tab === "home" || tab === "resources");
   const wantResources = access.seesResources && (isMember ? sectionOn("resources") : tab === "resources");
@@ -350,6 +356,8 @@ export default async function CommunityDetailPage({
                 : "Use the button above to send a request to join."}
           </p>
         )}
+
+        {publicPinned && <PublicPinnedCard link={publicPinned} />}
 
         {/* ═══ A MEMBER: tiles and the section they opened ═══════════════ */}
         {isMember && (
@@ -512,7 +520,7 @@ export default async function CommunityDetailPage({
 
                 <IsOpenEditor communityId={community.id} slug={community.slug} isOpen={community.is_open} />
 
-                <PublicPreviewEditor communityId={community.id} slug={community.slug} level={community.public_preview} />
+                <PublicPreviewEditor communityId={community.id} slug={community.slug} level={community.public_preview} showPinned={showPinnedFlag} />
 
                 {sectionOn("explore") && (
                   <ExploreFeedEditor
@@ -577,7 +585,7 @@ export default async function CommunityDetailPage({
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 flex flex-col gap-6 min-w-0">
                   {showPublicPreview && <CommunityPublicPreview memberCount={stats.memberCount} feedPreview={feedPreview} />}
-                  {pinned && <PinnedResourceCard resource={pinned} />}
+                  {pinned && !publicPinned && <PinnedResourceCard resource={pinned} />}
                   {access.seesUpdates ? (
                     <UpdatesList updates={updates} linked={false} showJoinPrompt={access.joinPrompt} joinHref={joinHref} />
                   ) : (

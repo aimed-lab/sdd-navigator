@@ -46,7 +46,7 @@
 
 import { unstable_noStore as noStore } from "next/cache";
 import { getSession, requireCurrentUser, type Db } from "@/lib/auth";
-import { getAnonServerClient } from "./supabaseServer";
+import { getAnonServerClient, getServiceRoleClient } from "./supabaseServer";
 import {
   COMMUNITY_RESOURCE_TYPES,
   resolveExploreSources,
@@ -1610,6 +1610,83 @@ export async function getPinnedResource(communityId: string): Promise<PinnedReso
 
   const files = await listCommunityResourceFilesForCommunity(db, communityId, pinnedId);
   return { ...(data as Omit<CommunityResource, "files">), files: files.get(pinnedId) ?? [] };
+}
+
+export type PublicPinnedLink = { title: string; description: string | null; url: string };
+
+/** The community's pinned LINK for a visitor who is not a member, only when an admin
+ *  turned "show the pinned link to non-members" on (communities.show_pinned_to_public,
+ *  2026-11-05_public_pinned_resource.sql). Read on the server with the service role,
+ *  read-only, selecting just title, description and url of the one pinned resource;
+ *  nothing else of the community is read or returned. A pinned FILE (any uploaded
+ *  file on the resource), a resource with no http(s) link, the flag off, or the
+ *  migration not applied all come back as null. */
+export async function getPublicPinnedLink(communityId: string): Promise<PublicPinnedLink | null> {
+  noStore();
+  const db = getServiceRoleClient();
+  if (!db) return null;
+
+  const { data: c, error: cErr } = await db
+    .from("communities")
+    .select("show_pinned_to_public, pinned_resource_id")
+    .eq("id", communityId)
+    .maybeSingle();
+  if (cErr || !c) return null;
+  const row = c as { show_pinned_to_public?: boolean | null; pinned_resource_id?: string | null };
+  if (row.show_pinned_to_public !== true || !row.pinned_resource_id) return null;
+
+  const { data: r, error: rErr } = await db
+    .from("community_resources")
+    .select("title, description, url")
+    .eq("id", row.pinned_resource_id)
+    .eq("community_id", communityId)
+    .maybeSingle();
+  if (rErr || !r) return null;
+  const res = r as { title: string; description: string | null; url: string | null };
+  if (!res.url || !/^https?:\/\//i.test(res.url)) return null;
+
+  // "A link, not a file": a resource that carries an uploaded file is never shown.
+  const { count, error: fErr } = await db
+    .from("community_resource_files")
+    .select("id", { count: "exact", head: true })
+    .eq("resource_id", row.pinned_resource_id);
+  if (fErr || (count ?? 0) > 0) return null;
+
+  return { title: res.title, description: res.description?.trim() ? res.description : null, url: res.url };
+}
+
+/** The admin's current "show the pinned link to non-members" choice (false when unset
+ *  or the migration is not applied). */
+export async function getShowPinnedToPublic(communityId: string): Promise<boolean> {
+  noStore();
+  const db = getAnonServerClient();
+  if (!db) return false;
+  const { data, error } = await db.from("communities").select("show_pinned_to_public").eq("id", communityId).maybeSingle();
+  if (error || !data) return false;
+  return (data as { show_pinned_to_public?: boolean }).show_pinned_to_public === true;
+}
+
+/** Turn the public pinned link on or off: community admins only (re-checked here;
+ *  "Communities: admin update" is the real gate). */
+export async function setShowPinnedToPublic(communityId: string, value: boolean): Promise<UpdatePublicPreviewResult> {
+  const { db } = await requireCurrentUser();
+  if (!(await getMembership(communityId)).isAdmin) {
+    return { status: "error", error: "Only a community admin can change what non-members see." };
+  }
+  const { data, error } = await db
+    .from("communities")
+    .update({ show_pinned_to_public: value === true })
+    .eq("id", communityId)
+    .select("id");
+  if (error) {
+    console.error("setShowPinnedToPublic: update failed", error);
+    return {
+      status: "error",
+      error: "Couldn't save this setting. If it keeps happening, the public-pinned migration may not have been applied yet.",
+    };
+  }
+  if (!data || data.length === 0) return { status: "error", error: "Only a community admin can change what non-members see." };
+  return { status: "ok" };
 }
 
 export type PinResourceResult = { status: "ok" } | { status: "error"; error: string };

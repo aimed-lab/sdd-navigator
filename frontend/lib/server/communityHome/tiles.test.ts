@@ -193,3 +193,41 @@ test("manage hides the Explore feed settings when Explore is off; home links onl
   assert.match(pin, /PINNED BY ADMIN/);
   assert.match(pin, /btn-primary[^"]*"[\s\S]*Open/);
 });
+
+// ── the public pinned link ────────────────────────────────────────────────────
+
+test("public pinned link: migration, a narrow server read, the card, and the admin checkbox", () => {
+  const m = noComments(sql("2026-11-05_public_pinned_resource.sql"));
+  assert.match(m, /ADD COLUMN IF NOT EXISTS show_pinned_to_public BOOLEAN NOT NULL DEFAULT false/);
+  assert.doesNotMatch(m, /POLICY|GRANT|community_resources/i, "no RLS change, nothing on community_resources");
+
+  const c = src("lib/server/communities.ts");
+  const fn = c.slice(c.indexOf("export async function getPublicPinnedLink"), c.indexOf("export async function getShowPinnedToPublic"));
+  assert.match(fn, /getServiceRoleClient\(\)/);
+  assert.match(fn, /\.select\("title, description, url"\)/);
+  assert.match(fn, /show_pinned_to_public !== true/);
+  assert.match(fn, /community_resource_files/);
+  assert.match(fn, /\(count \?\? 0\) > 0\) return null/);
+  assert.match(fn, /\^https\?:/);
+  // it returns only title, description and url
+  assert.match(fn, /return \{ title: res\.title, description: [^}]*url: res\.url \}/);
+  assert.doesNotMatch(fn, /\.update\(|\.insert\(|\.delete\(|\.upsert\(/, "read-only");
+
+  const page = src("app/communities/[slug]/page.tsx");
+  assert.match(page, /const publicPinned = !isMember \? await getPublicPinnedLink\(community\.id\) : null;/);
+  assert.ok(page.indexOf("<PublicPinnedCard") > page.indexOf("<CommunityHeader") && page.indexOf("<PublicPinnedCard") < page.indexOf("<CommunityTabs"), "under the banner, above the tabs");
+  assert.match(page, /pinned && !publicPinned && <PinnedResourceCard/);
+
+  const card = src("components/communities/PublicPinnedCard.tsx");
+  for (const t of ["APPLY TO JOIN", "Open form", "After you submit, we&apos;ll add you to the community.", 'target="_blank"', "btn-primary"]) assert.ok(card.includes(t), t);
+  const cardCode = card.split(String.fromCharCode(10)).filter((l) => !l.trim().startsWith("//")).join(" ");
+  assert.doesNotMatch(cardCode, /files|members|roster/i);
+
+  const ed = src("components/communities/PublicPreviewEditor.tsx");
+  assert.match(ed, /Also show the pinned link to non-members/);
+  assert.match(ed, /updateShowPinnedToPublicAction/);
+  const act = src("app/communities/actions.ts");
+  assert.match(act, /export async function updateShowPinnedToPublicAction/);
+  const set = c.slice(c.indexOf("export async function setShowPinnedToPublic"));
+  assert.match(set.slice(0, 700), /getMembership\(communityId\)\)\.isAdmin/);
+});
