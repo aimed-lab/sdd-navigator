@@ -83,19 +83,19 @@ test("the ColaboFest page: finalists only for tasks, Discussions gone, access ch
   const page = src("app/projects/[id]/page.tsx");
   assert.match(page, /hasProjectMemberRow\(db, id, user\.id\)/);
   assert.match(page, /const isColabofest = project\.program === COLABOFEST_PROGRAM;/);
-  assert.match(page, /isColabofest && colabView !== "manage"/);
-  assert.match(page, /\.\.\.\(project\.finalist \? \(\["tasks"\] as ProjectView\[\]\) : \[\]\)/);
+  assert.match(page, /showTasksTile\(buildCfLists\(project\.checklist, project\.finalist\)/);
   // a project outside the program still goes through the old parseTab
   assert.match(page, /: parseTab\(sp\.tab, !!project\.challenge_key\)/);
   const colab = code(src("components/projects/workspace/ColabofestProject.tsx"));
   assert.doesNotMatch(colab, /DiscussionsList|ThreadView|listThreads|Discussions/);
-  assert.match(colab, /finalist && tiles\.push|if \(finalist\) tiles\.push/);
+  assert.match(colab, /if \(hasTasks\)/);
   assert.match(colab, /showManage/);
   assert.match(colab, /border-dashed/);
   assert.match(colab, /Open in Box/);
   assert.match(colab, /Your files will appear here soon\./);
   assert.match(colab, /Don&apos;t see the folder\? Accept the Box invite email, or email/);
   assert.match(colab, /announcements\.slice\(0, 3\)/);
+  assert.match(colab, /Complete your|ctaBanner/);
   assert.doesNotMatch(colab, /#(?:22c55e|16a34a|166534|dcfce7)|green-\d|emerald/);
   assert.match(src("app/projects/[id]/actions.ts"), /export async function setFinalistTaskAction/);
   const db = src("lib/server/projectWorkspace/finalistTasksDb.ts");
@@ -124,15 +124,13 @@ test("the hero's small label is the project's description line", () => {
   assert.match(colab, /\(label \|\| "ColaboFest 2026"\)\.toUpperCase\(\)/);
 });
 
-test("ColaboFest project page: a My projects link above the hero, no floating chat button; other projects keep it", () => {
+test("ColaboFest project page: My projects link in the top row, no floating chat button; other projects keep it", () => {
+  const colab = src("components/projects/workspace/ColabofestProject.tsx");
+  assert.match(colab, /href="\/projects"/);
+  assert.match(colab, /Welcome, \{firstName\}/);
   const page = src("app/projects/[id]/page.tsx");
-  const start = page.indexOf("if (isColabofest) {", page.indexOf("const taskRows") - 400);
-  const end = page.indexOf("<ColabofestProject", start);
-  const before = page.slice(start, end);
-  assert.match(before, /href="\/projects"/);
-  assert.match(before, /My projects/);
-  const colab = page.slice(start, page.indexOf("</ColabofestProject>", start) > 0 ? page.indexOf("</ColabofestProject>", start) : page.indexOf("max-w-container-max", end));
-  assert.doesNotMatch(code(colab.slice(0, colab.indexOf("manageSection") + 400)), /<ProjectChatbot/);
-  // an ordinary project still renders the chat button
-  assert.match(page.slice(page.lastIndexOf("</main>")), /<ProjectChatbot/);
+  const start = page.indexOf("<ColabofestProject");
+  const end = page.indexOf("max-w-container-max", start);
+  assert.doesNotMatch(code(page.slice(start, end > 0 ? end : start + 4000)), /<ProjectChatbot/);
+  assert.match(page.slice(page.lastIndexOf("</main>") > 0 ? page.lastIndexOf("</main>") : page.lastIndexOf("ProjectChatbot") - 50), /<ProjectChatbot/);
 });

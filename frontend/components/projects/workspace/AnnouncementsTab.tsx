@@ -183,16 +183,22 @@ export default function AnnouncementsTab({
   role,
   isSiteAdmin,
   updates,
+  simple = false,
+  startCreating = false,
 }: {
   projectId: string;
   /** The viewer's role on this project: lead, manager or member. */
   role: string;
   isSiteAdmin: boolean;
   updates: ProjectUpdate[];
+  /** ColaboFest: announcements only (no "Ask for help" and no help requests). */
+  simple?: boolean;
+  /** Open the announcement form on arrival ("Post announcement" from the "+" sheet). */
+  startCreating?: boolean;
 }) {
   const router = useRouter();
   const canManage = canManageAnnouncements({ role, isSiteAdmin });
-  const [form, setForm] = useState<null | "announcement" | "help">(null);
+  const [form, setForm] = useState<null | "announcement" | "help">(startCreating && canManage ? "announcement" : null);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -238,6 +244,7 @@ export default function AnnouncementsTab({
                 Post an announcement
               </button>
             )}
+            {!simple && (
             <button
               type="button"
               onClick={() => setForm("help")}
@@ -246,6 +253,7 @@ export default function AnnouncementsTab({
               <span className="material-symbols-outlined text-[20px]">support</span>
               Ask for help
             </button>
+            )}
           </div>
         ) : (
           <form onSubmit={submit} className="rounded-xl border border-outline-variant/40 bg-surface-container-lowest p-4 flex flex-col gap-3">
@@ -305,7 +313,7 @@ export default function AnnouncementsTab({
         )}
       </section>
 
-      {help.length > 0 && (
+      {!simple && help.length > 0 && (
         <section className="flex flex-col gap-3" aria-label="Help requests">
           <h2 className="font-headline-sm text-headline-sm text-on-background">Help requests</h2>
           {help.map((u) => (

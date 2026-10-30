@@ -42,6 +42,7 @@ import { dismissWelcome } from "@/lib/server/projectWorkspace/welcome";
 import { setFinalist, setMemberAffiliation } from "@/lib/server/projectWorkspace/colabofestOps";
 import { requireCurrentUser } from "@/lib/auth";
 import { setFinalistTask } from "@/lib/server/projectWorkspace/finalistTasksDb";
+import { cfAddItem, cfDeleteItem, cfEditItem, cfSetItemDone } from "@/lib/server/projectWorkspace/cfChecklist";
 import type { ListKey } from "@/lib/server/projectWorkspace/status";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -556,4 +557,27 @@ export async function setAffiliationAction(projectId: string, memberId: string, 
 /** Mark a ColaboFest finalist task done or not done: the project lead and the SPARC team only. */
 export async function setFinalistTaskAction(projectId: string, taskKey: string, done: boolean): Promise<ActionResult> {
   return run(projectId, "setFinalistTaskAction", () => setFinalistTask(projectId, taskKey, done === true));
+}
+
+// ── the ColaboFest Tasks view (roles are checked in lib/server/projectWorkspace/cfChecklist.ts) ──
+
+export type CfItemInput = { label: string; due: string; assigneeId: string };
+
+export async function cfSetItemDoneAction(projectId: string, itemId: string, done: boolean): Promise<ActionResult> {
+  if (!itemId) return { ok: false, error: "Missing task." };
+  return run(projectId, "cfSetItemDoneAction", () => cfSetItemDone(projectId, itemId, done === true));
+}
+
+export async function cfAddItemAction(projectId: string, listKey: string, input: CfItemInput): Promise<ActionResult> {
+  return run(projectId, "cfAddItemAction", () => cfAddItem(projectId, listKey, input));
+}
+
+export async function cfEditItemAction(projectId: string, itemId: string, input: CfItemInput): Promise<ActionResult> {
+  if (!itemId) return { ok: false, error: "Missing task." };
+  return run(projectId, "cfEditItemAction", () => cfEditItem(projectId, itemId, input));
+}
+
+export async function cfDeleteItemAction(projectId: string, itemId: string): Promise<ActionResult> {
+  if (!itemId) return { ok: false, error: "Missing task." };
+  return run(projectId, "cfDeleteItemAction", () => cfDeleteItem(projectId, itemId));
 }

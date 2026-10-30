@@ -362,7 +362,7 @@ export default async function CommunityDetailPage({
         {/* ═══ A MEMBER: tiles and the section they opened ═══════════════ */}
         {isMember && (
           <>
-            <CommunityTiles slug={slug} view={view} tiles={tiles} />
+            {!view && <CommunityTiles slug={slug} view={view} tiles={tiles} />}
 
             {view && (
               <div>

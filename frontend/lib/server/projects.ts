@@ -335,6 +335,18 @@ async function isCallerLead(db: Db, projectId: string, userId: string): Promise<
   return !!data;
 }
 
+/** The same for a manager (the SPARC team). */
+async function isCallerManager(db: Db, projectId: string, userId: string): Promise<boolean> {
+  const { data } = await db
+    .from("project_members")
+    .select("id")
+    .eq("project_id", projectId)
+    .eq("user_id", userId)
+    .eq("role", "manager")
+    .maybeSingle();
+  return !!data;
+}
+
 function deadlineHasPassed(deadline: string | null): boolean {
   return !!deadline && new Date(deadline).getTime() < Date.now();
 }
@@ -807,9 +819,14 @@ export async function addProjectMember(
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Project not found." };
-  if (!(await isCallerLead(db, projectId, user.id))) {
-    return { status: "forbidden", error: "Only a project lead can add members." };
+  // A lead adds anyone; a manager (the SPARC team) adds ordinary members only
+  // (2026-11-07_manager_add_members.sql).
+  const callerIsLead = await isCallerLead(db, projectId, user.id);
+  const callerIsManager = !callerIsLead && (await isCallerManager(db, projectId, user.id));
+  if (!callerIsLead && !callerIsManager) {
+    return { status: "forbidden", error: "Only a project lead or the SPARC team can add members." };
   }
+  if (callerIsManager) role = "member";
 
   const normalized = email.trim().toLowerCase();
   if (!normalized) return { status: "error", error: "An email address is required." };
@@ -890,8 +907,9 @@ export async function removeProjectMember(
 
   const gate = await loadProjectGate(db, projectId);
   if (!gate) return { status: "error", error: "Project not found." };
-  if (!(await isCallerLead(db, projectId, user.id))) {
-    return { status: "forbidden", error: "Only a project lead can remove members." };
+  const callerIsLead = await isCallerLead(db, projectId, user.id);
+  if (!callerIsLead && !(await isCallerManager(db, projectId, user.id))) {
+    return { status: "forbidden", error: "Only a project lead or the SPARC team can remove members." };
   }
 
   const { data: member, error: memberErr } = await db
@@ -909,6 +927,9 @@ export async function removeProjectMember(
 
   if (member.role === "lead") {
     return { status: "forbidden", error: "A lead can't be removed — they'd need to step down first." };
+  }
+  if (!callerIsLead && member.role !== "member") {
+    return { status: "forbidden", error: "The SPARC team can remove members, not leads or other SPARC team members." };
   }
 
   const { error } = await db
