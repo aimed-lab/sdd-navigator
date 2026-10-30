@@ -111,7 +111,7 @@ export default async function TeamPage({
       </div>
 
       {query.created === "1" && (
-        <p role="status" className="rounded-xl bg-primary/10 text-primary px-4 py-3 font-body-md text-body-md">
+        <p role="status" className="rounded-xl bg-surface-container-low text-primary px-4 py-3 font-body-md text-body-md">
           Team created. You are its Lead. Scan or share the QR code to bring people in.
           {skipped > 0 ? ` ${skipped} email${skipped === 1 ? "" : "s"} could not be added; try them again in Team settings.` : ""}
         </p>

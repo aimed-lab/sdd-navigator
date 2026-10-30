@@ -41,7 +41,7 @@ export default function ProjectSidebar({
       <div className="lg:sticky lg:top-24 flex flex-col gap-4">
         <div className="min-w-0">
           {label && (
-            <span className="inline-block px-3 py-1 mb-2 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
+            <span className="inline-block px-3 py-1 mb-2 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm">
               {label}
             </span>
           )}

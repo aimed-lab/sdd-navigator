@@ -29,7 +29,7 @@ function dateLabel(iso: string): string {
 }
 
 const TEXTAREA =
-  "w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30";
+  "w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary";
 
 function Announcement({
   u,
@@ -73,7 +73,7 @@ function Announcement({
     : [];
 
   return (
-    <article className={"rounded-xl border p-5 " + (u.pinned ? "bg-primary/5 border-primary/30" : "bg-white border-outline-variant/30")}>
+    <article className={"rounded-xl border p-5 " + (u.pinned ? "bg-surface-container-low border-outline-variant" : "bg-white border-outline-variant/30")}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 font-label-sm text-label-sm text-secondary">
           {u.pinned && (

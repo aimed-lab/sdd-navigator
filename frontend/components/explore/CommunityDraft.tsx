@@ -49,7 +49,7 @@ export default function CommunityDraft({
 
   if (typeof stage === "object" && "done" in stage) {
     return (
-      <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3" role="status">
+      <div className="rounded-xl border border-primary bg-surface-container-low p-4 flex flex-col gap-3" role="status">
         <p className="font-body-md text-body-md text-on-background">
           {kind === "team"
             ? "I created a team for you. You are its Lead."
@@ -75,7 +75,7 @@ export default function CommunityDraft({
 
   if (stage === "confirm" || (typeof stage === "object" && "error" in stage)) {
     return (
-      <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3">
+      <div className="rounded-xl border border-primary bg-surface-container-low p-4 flex flex-col gap-3">
         <p className="font-body-md text-body-md text-on-background">
           Create {noun} &lsquo;{draft.name}&rsquo;?
         </p>
@@ -161,7 +161,7 @@ export default function CommunityDraft({
           value={draft.name}
           maxLength={MAX_COMMUNITY_NAME_CHARS}
           onChange={(e) => onChange({ ...draft, name: e.target.value })}
-          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -171,7 +171,7 @@ export default function CommunityDraft({
           rows={2}
           maxLength={MAX_COMMUNITY_PURPOSE_CHARS}
           onChange={(e) => onChange({ ...draft, purpose: e.target.value })}
-          className="resize-none bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="resize-none bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </label>
       {problem && (

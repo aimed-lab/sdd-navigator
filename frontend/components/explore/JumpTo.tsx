@@ -14,7 +14,7 @@ export default function JumpTo({ episodeCount }: { episodeCount: number | null }
           <li key={t.key}>
             <Link
               href={t.href}
-              className="h-full rounded-xl bg-white border border-outline-variant/30 hover:border-primary/50 px-3.5 py-3 flex flex-col gap-1 transition-colors"
+              className="h-full rounded-xl bg-white border border-outline-variant/30 hover:border-primary px-3.5 py-3 flex flex-col gap-1 transition-colors"
             >
               <span className="material-symbols-outlined text-primary text-[22px]">{t.icon}</span>
               <span className="font-label-lg text-label-lg text-on-background leading-tight">{t.title}</span>

@@ -52,7 +52,7 @@ export default function ProjectCard({ project }: { project: MyProjectSummary }) 
 
       <div className="flex flex-wrap items-center gap-2 mt-auto pt-4 border-t border-outline-variant/30">
         {(inProgram || isColabofest) && (
-          <span className="px-3 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
+          <span className="px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm">
             {inProgram ? "ColaboFest 2026" : "ColaboFest"}
           </span>
         )}
@@ -64,7 +64,7 @@ export default function ProjectCard({ project }: { project: MyProjectSummary }) 
             className={
               "inline-flex items-center gap-1 px-3 py-1 rounded-full font-label-sm text-label-sm " +
               (project.proposal_submitted
-                ? "bg-primary-container/20 text-on-primary-container"
+                ? "bg-surface-container-low text-on-primary-container"
                 : "bg-surface-dim text-secondary")
             }
           >

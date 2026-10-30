@@ -110,14 +110,14 @@ export default function OverviewTab({
         </div>
 
         <section
-          className="order-2 rounded-2xl border border-[#9bd0a8] bg-[#e8f5ec] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+          className="order-2 rounded-2xl border border-[#d9d5c9] bg-[#f3f1ea] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
           aria-label={isColabofest ? "Your Box folder" : "Shared folder"}
         >
           <div className="min-w-0">
-            <h2 className="font-title text-[22px] leading-snug font-medium text-[#14532d]">
+            <h2 className="font-title text-[22px] leading-snug font-medium text-[#033319]">
               {isColabofest ? "Your Box folder" : "Shared folder"}
             </h2>
-            <p className="mt-1 font-body-md text-body-md text-[#1f5f36]">
+            <p className="mt-1 font-body-md text-body-md text-[#1A5632]">
               {sharedFolderUrl
                 ? isColabofest
                   ? "Proposal, data and results for your team"
@@ -136,14 +136,14 @@ export default function OverviewTab({
               href={sharedFolderUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 inline-flex items-center justify-center gap-1 rounded-xl bg-[#166534] hover:bg-[#14532d] text-white px-6 py-3 font-label-md text-label-md transition-colors"
+              className="shrink-0 inline-flex items-center justify-center gap-1 rounded-xl bg-[#1A5632] hover:bg-[#033319] text-white px-6 py-3 font-label-md text-label-md transition-colors"
             >
               {isColabofest ? "Open Box folder" : "Open folder"} ↗
             </a>
           ) : isLead ? (
             <Link
               href={tabHref(projectId, "files")}
-              className="shrink-0 inline-flex items-center justify-center rounded-xl bg-[#166534] hover:bg-[#14532d] text-white px-6 py-3 font-label-md text-label-md transition-colors"
+              className="shrink-0 inline-flex items-center justify-center rounded-xl bg-[#1A5632] hover:bg-[#033319] text-white px-6 py-3 font-label-md text-label-md transition-colors"
             >
               {isColabofest ? "Add your Box folder link" : "Add a folder link"}
             </Link>

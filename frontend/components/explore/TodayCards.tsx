@@ -34,7 +34,7 @@ export default function TodayCards({ cards }: { cards: TodayCard[] }) {
           const cls =
             "rounded-2xl bg-white border border-outline-variant/30 p-5 flex flex-col gap-3 min-w-0 transition-colors ";
           return c.url ? (
-            <a key={c.id} href={c.url} target="_blank" rel="noopener noreferrer" className={cls + "hover:border-primary/50"}>
+            <a key={c.id} href={c.url} target="_blank" rel="noopener noreferrer" className={cls + "hover:border-primary"}>
               {body}
             </a>
           ) : (

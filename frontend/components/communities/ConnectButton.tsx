@@ -50,7 +50,7 @@ export default function ConnectButton({
               if (res.ok) setEmail(res.email);
               else setError(res.error);
             }}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-secondary hover:bg-surface-container-low hover:text-primary disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-secondary hover:bg-surface-container-low hover:text-primary disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <span className="material-symbols-outlined text-[18px]">{loading ? "hourglass_empty" : "mail"}</span>
           </button>

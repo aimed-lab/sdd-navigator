@@ -225,7 +225,7 @@ export default function ShowcaseCard({
       <>
         <article
           className={`tile group relative flex flex-col gap-5 overflow-hidden p-6 md:p-8 text-white ${className}`}
-          style={{ background: "linear-gradient(135deg, #04361c 0%, #006e2f 100%)" }}
+          style={{ background: "linear-gradient(135deg, #033319 0%, #1A5632 100%)" }}
         >
           {ownerMenu}
           <div className="flex items-center gap-3">

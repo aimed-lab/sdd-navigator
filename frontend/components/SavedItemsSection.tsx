@@ -63,7 +63,7 @@ export default function SavedItemsSection({ resources }: { resources: ProjectRes
   if (resources.total === 0) {
     return (
       <div className="glass-card rounded-2xl p-12 flex flex-col items-center justify-center text-center">
-        <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-4">
+        <div className="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center text-primary mb-4">
           <span className="material-symbols-outlined text-[32px]">bookmark</span>
         </div>
         <h3 className="font-headline-md text-headline-md text-on-background mb-2">
@@ -95,7 +95,7 @@ export default function SavedItemsSection({ resources }: { resources: ProjectRes
               onClick={() => toggleKind(tile.kind)}
               aria-pressed={active}
               className={`bg-surface-container-lowest border rounded-xl p-4 flex-1 min-w-[120px] text-center shadow-sm hover:shadow-md transition-shadow ${
-                active ? "border-primary ring-2 ring-primary/30" : "border-outline-variant/30"
+                active ? "border-primary ring-2 ring-primary" : "border-outline-variant/30"
               }`}
             >
               <span className="material-symbols-outlined text-primary text-[20px] mb-1 block">

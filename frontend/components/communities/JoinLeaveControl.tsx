@@ -67,7 +67,7 @@ export default function JoinLeaveControl({
 
     return (
       <div className="flex items-center gap-3">
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm">
           <span className="material-symbols-outlined text-base">check_circle</span>
           {isAdmin ? "Admin" : membership.role === "lead" ? "Lead" : "Member"}
         </span>

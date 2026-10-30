@@ -1,7 +1,8 @@
 import type { Config } from "tailwindcss";
 
 // Tokens are the exact values from design/stitch/smartdrugdiscovery/DESIGN.md
-// (Research Green #006e2f / #22c55e, surface #f7f9fb) — the new three-pillar
+// (surface #f7f9fb), with the green switched to the official UAB brand colours:
+// UAB Green #1A5632 and Dragon's Lair Green #033319 — the new three-pillar
 // design system. Typography: Newsreader (serif) for display/headline, Geist for labels, Inter for body.
 const config: Config = {
   darkMode: "class",
@@ -26,12 +27,12 @@ const config: Config = {
         "inverse-on-surface": "#eff1f3",
         outline: "#6d7b6c",
         "outline-variant": "#bccbb9",
-        "surface-tint": "#006e2f",
-        primary: "#006e2f",
+        "surface-tint": "#1A5632",
+        primary: "#1A5632",
         "on-primary": "#ffffff",
-        "primary-container": "#22c55e",
-        "on-primary-container": "#004b1e",
-        "inverse-primary": "#4ae176",
+        "primary-container": "#1A5632",
+        "on-primary-container": "#ffffff",
+        "inverse-primary": "#1A5632",
         secondary: "#565e74",
         "on-secondary": "#ffffff",
         "secondary-container": "#dae2fd",
@@ -44,10 +45,10 @@ const config: Config = {
         "on-error": "#ffffff",
         "error-container": "#ffdad6",
         "on-error-container": "#93000a",
-        "primary-fixed": "#6bff8f",
-        "primary-fixed-dim": "#4ae176",
-        "on-primary-fixed": "#002109",
-        "on-primary-fixed-variant": "#005321",
+        "primary-fixed": "#1A5632",
+        "primary-fixed-dim": "#1A5632",
+        "on-primary-fixed": "#033319",
+        "on-primary-fixed-variant": "#033319",
         "secondary-fixed": "#dae2fd",
         "secondary-fixed-dim": "#bec6e0",
         "on-secondary-fixed": "#131b2e",

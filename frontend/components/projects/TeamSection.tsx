@@ -52,7 +52,7 @@ function MemberAvatar({ pending }: { pending: boolean }) {
         "w-10 h-10 rounded-full flex items-center justify-center shrink-0 " +
         (pending
           ? "bg-surface-container border border-outline-variant/30 border-dashed text-secondary"
-          : "bg-primary/10 text-primary")
+          : "bg-surface-container-low text-primary")
       }
     >
       <span className="material-symbols-outlined text-[20px]">person</span>
@@ -279,7 +279,7 @@ export default function TeamSection({
                       <span className="truncate">{primary}</span>
                     )}
                     {m.role === "lead" && (
-                      <span className="shrink-0 bg-primary/10 text-primary px-2 py-0.5 rounded-full font-label-sm text-[10px] uppercase tracking-wider">
+                      <span className="shrink-0 bg-surface-container-low text-primary px-2 py-0.5 rounded-full font-label-sm text-[10px] uppercase tracking-wider">
                         Lead
                       </span>
                     )}

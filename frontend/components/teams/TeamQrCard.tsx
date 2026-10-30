@@ -11,7 +11,7 @@ import { teamJoinUrl } from "@/lib/server/teams/teamRules";
 const INK = "#191c1e";
 
 const BTN =
-  "inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-[#d9d5c9] bg-white px-2.5 py-1.5 text-[12.5px] font-semibold leading-5 text-on-background hover:border-primary hover:text-primary disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+  "inline-flex items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-[#d9d5c9] bg-white px-2.5 py-1.5 text-[12.5px] font-semibold leading-5 text-on-background hover:border-primary hover:text-primary disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
 export default function TeamQrCard({ slug, name }: { slug: string; name: string }) {
   const [src, setSrc] = useState<string | null>(null);

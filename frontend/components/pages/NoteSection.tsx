@@ -88,7 +88,7 @@ export default function NoteSection({
             onChange={(e) => setT(e.target.value)}
             maxLength={120}
             disabled={busy}
-            className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-2 font-title text-[22px] text-on-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-2 font-title text-[22px] text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <label className="sr-only" htmlFor={`nb-${noteId}`}>
             Section text
@@ -99,7 +99,7 @@ export default function NoteSection({
             onChange={(e) => setB(e.target.value)}
             rows={Math.min(24, Math.max(8, b.split("\n").length + 2))}
             disabled={busy}
-            className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30"
+            className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <p className="font-body-sm text-body-sm text-secondary">
             Plain text or markdown. Write [[Another section title]] to link to a section on this page.
@@ -144,7 +144,7 @@ export default function NoteSection({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg font-label-sm text-label-sm text-primary hover:bg-primary/5"
+              className="inline-flex items-center gap-1 px-3 py-1 rounded-lg font-label-sm text-label-sm text-primary hover:bg-surface-container-low"
             >
               <span className="material-symbols-outlined text-base">edit</span>
               Edit

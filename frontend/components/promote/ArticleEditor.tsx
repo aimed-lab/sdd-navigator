@@ -48,7 +48,7 @@ import {
 } from "@/lib/showcaseTypes";
 
 const fieldClass =
-  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 export type ArticleEditorEntry = {
   id: string;
@@ -413,7 +413,7 @@ export default function ArticleEditor({
                     setDirty(true);
                   }}
                   className={
-                    "w-full bg-surface-container-lowest border rounded-xl px-5 py-4 font-body-md text-body-md leading-relaxed text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 whitespace-pre-wrap " +
+                    "w-full bg-surface-container-lowest border rounded-xl px-5 py-4 font-body-md text-body-md leading-relaxed text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary whitespace-pre-wrap " +
                     (platform === "linkedin" ? "resize-none overflow-hidden " : "") +
                     (over ? "border-error" : "border-outline-variant/40")
                   }
@@ -458,7 +458,7 @@ export default function ArticleEditor({
               className={
                 "px-3 py-1 rounded-full font-label-sm text-label-sm " +
                 (entry.published
-                  ? "bg-primary/10 text-primary"
+                  ? "bg-surface-container-low text-primary"
                   : "bg-surface-container-low text-secondary")
               }
             >

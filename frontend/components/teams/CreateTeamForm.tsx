@@ -11,7 +11,7 @@ import { createTeamAction } from "@/app/teams/actions";
 import { createTeamCallback, TEAM_NAME_MAX } from "@/lib/server/teams/teamRules";
 
 const INPUT =
-  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 export default function CreateTeamForm({ signedIn, initialName }: { signedIn: boolean; initialName: string }) {
   const router = useRouter();

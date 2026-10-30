@@ -71,7 +71,7 @@ export function buildChecklist(a: {
     },
     {
       key: "pinned",
-      label: "Open the pinned slides",
+      label: "Open the pinned resource",
       hint: "View or download the resource pinned by the admin.",
       done: a.progress.pinned_opened === true,
       href: "#pinned",

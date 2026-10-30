@@ -273,9 +273,9 @@ const TYPE_ICON: Record<CommunityResourceType, string> = {
 // ResourceItem's own comment on why), one flat colour per kind. `chipBg`/
 // `chipText` fill the icon's circle badge, same hue.
 const TYPE_COLOR: Record<CommunityResourceType, { bar: string; chipBg: string; chipText: string }> = {
-  paper: { bar: "border-l-primary", chipBg: "bg-primary/10", chipText: "text-primary" },
-  dataset: { bar: "border-l-primary", chipBg: "bg-primary/20", chipText: "text-primary" },
-  slides: { bar: "border-l-primary", chipBg: "bg-primary/15", chipText: "text-primary" },
+  paper: { bar: "border-l-primary", chipBg: "bg-surface-container-low", chipText: "text-primary" },
+  dataset: { bar: "border-l-primary", chipBg: "bg-surface-container", chipText: "text-primary" },
+  slides: { bar: "border-l-primary", chipBg: "bg-surface-container-low", chipText: "text-primary" },
   link: { bar: "border-l-secondary", chipBg: "bg-secondary/10", chipText: "text-secondary" },
   tool: {
     bar: "border-l-secondary",
@@ -458,13 +458,13 @@ function ResourceForm({
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title"
           aria-label="Resource title"
-          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
         />
         <select
           value={resourceType}
           onChange={(e) => setResourceType(e.target.value as CommunityResourceType)}
           aria-label="Resource type"
-          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         >
           {TYPE_ORDER.map((t) => (
             <option key={t} value={t}>
@@ -479,7 +479,7 @@ function ResourceForm({
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https:// link (optional)"
         aria-label="Resource URL"
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
       />
 
       <ResourceFilesField
@@ -497,7 +497,7 @@ function ResourceForm({
         placeholder="Description (optional)"
         aria-label="Resource description"
         rows={2}
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary resize-y"
       />
 
       {error && (

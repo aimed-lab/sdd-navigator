@@ -95,7 +95,7 @@ export default async function Home() {
               </Link>
               <a
                 href="#phgdh-route"
-                className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-primary/10 transition-colors"
+                className="px-8 py-3 rounded-lg font-label-md text-lg text-center border border-primary text-primary hover:bg-surface-container-low transition-colors"
               >
                 Follow the PHGDH case ↓
               </a>

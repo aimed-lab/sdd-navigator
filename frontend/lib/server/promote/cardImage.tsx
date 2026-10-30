@@ -32,8 +32,8 @@ import { cardLayout, cardText } from "@/lib/server/promote/cardLayout";
 
 export const CARD_SIZE = { width: 1200, height: 630 };
 
-const GREEN = "#006e2f";
-const DARK = "#04361c";
+const GREEN = "#1A5632";
+const DARK = "#033319";
 const INK = "#191c1e";
 const MUTED = "#5b6470";
 

@@ -32,7 +32,7 @@ export function TeamDraftCard({
 
   if (done) {
     return (
-      <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3" role="status">
+      <div className="rounded-xl border border-primary bg-surface-container-low p-4 flex flex-col gap-3" role="status">
         <p className="font-body-md text-body-md text-on-background">{TEAM_CREATED_LINE}</p>
         {done.problems.length > 0 && (
           <p className="font-body-sm text-body-sm text-secondary">{done.problems.join(" ")}</p>
@@ -76,7 +76,7 @@ export function TeamDraftCard({
           maxLength={TEAM_NAME_MAX}
           onChange={(e) => setName(e.target.value)}
           autoFocus={!initialName}
-          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </label>
       {signedIn && (
@@ -89,7 +89,7 @@ export function TeamDraftCard({
             rows={2}
             onChange={(e) => setEmails(e.target.value)}
             placeholder="name@example.com, another@example.com"
-            className="resize-none bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="resize-none bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </label>
       )}
@@ -162,7 +162,7 @@ export function TeamListCard({ state }: { state: TeamListState }) {
         <li key={t.slug}>
           <Link
             href={`/teams/${t.slug}`}
-            className="flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-primary/5 transition-colors font-label-md text-label-md text-on-background"
+            className="flex items-center justify-between gap-3 px-3.5 py-2.5 hover:bg-surface-container-low transition-colors font-label-md text-label-md text-on-background"
           >
             <span className="break-words min-w-0">{t.name}</span>
             <span className="material-symbols-outlined text-[18px] shrink-0">arrow_forward</span>

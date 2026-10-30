@@ -79,7 +79,7 @@ function RequestCard({ request }: { request: InboxRequest }) {
       className={
         "rounded-2xl border p-6 transition-colors " +
         (isNew
-          ? "border-primary/40 bg-primary/[0.03]"
+          ? "border-primary bg-primary/[0.03]"
           : "border-outline-variant/40 bg-surface-container-lowest")
       }
     >

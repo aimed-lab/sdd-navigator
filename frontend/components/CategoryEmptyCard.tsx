@@ -71,7 +71,7 @@ export default function CategoryEmptyCard({
 
   return (
     <div className="rounded-[14px] bg-[#eeece6] max-w-xl mx-auto text-center px-8 py-14">
-      <span className="material-symbols-outlined text-5xl text-primary/70">
+      <span className="material-symbols-outlined text-5xl text-primary">
         {internal ? "group_add" : "search_off"}
       </span>
 

@@ -19,7 +19,7 @@ export default function PanelFrame({
           type="button"
           onClick={onClose}
           aria-label="Close"
-          className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-secondary hover:bg-surface-container-low hover:text-on-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+          className="w-9 h-9 shrink-0 rounded-lg flex items-center justify-center text-secondary hover:bg-surface-container-low hover:text-on-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <span className="material-symbols-outlined text-[20px]">close</span>
         </button>

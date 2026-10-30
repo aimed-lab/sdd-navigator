@@ -11,7 +11,7 @@ export default function DeletedNotice({ show }: { show: boolean }) {
   return (
     <p
       role="status"
-      className="mb-6 inline-flex items-center gap-2 rounded-lg bg-primary/10 text-primary px-4 py-2 font-label-md text-label-md"
+      className="mb-6 inline-flex items-center gap-2 rounded-lg bg-surface-container-low text-primary px-4 py-2 font-label-md text-label-md"
     >
       <span className="material-symbols-outlined text-base">check_circle</span>
       Deleted

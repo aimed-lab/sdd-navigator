@@ -42,7 +42,7 @@ export default function WelcomeCard({ projectId, firstName, today }: { projectId
   };
 
   return (
-    <section className="rounded-2xl border border-primary/20 bg-primary/5 p-5 sm:p-6 flex flex-col gap-4" aria-label="Welcome">
+    <section className="rounded-2xl border border-outline-variant bg-surface-container-low p-5 sm:p-6 flex flex-col gap-4" aria-label="Welcome">
       <div className="flex items-start justify-between gap-3">
         <h2 className="font-title text-[22px] leading-snug font-medium text-on-background">
           Welcome to your ColaboFest project, {firstName}
@@ -77,7 +77,7 @@ export default function WelcomeCard({ projectId, firstName, today }: { projectId
           const on = i === current;
           return (
             <li key={st.key} className="flex flex-col items-center text-center gap-1 shrink-0 w-[112px] md:w-auto" aria-current={on ? "step" : undefined}>
-              <span className={"w-3 h-3 rounded-full " + (on ? "bg-primary ring-4 ring-primary/20" : i < current ? "bg-primary/50" : "bg-outline-variant")} />
+              <span className={"w-3 h-3 rounded-full " + (on ? "bg-primary ring-4 ring-primary" : i < current ? "bg-primary" : "bg-outline-variant")} />
               <span className={"font-label-sm text-label-sm leading-tight " + (on ? "text-primary font-semibold" : "text-secondary")}>{st.label}</span>
               <span className={"font-body-sm text-body-sm " + (on ? "text-primary" : "text-secondary")}>{st.shown}</span>
             </li>

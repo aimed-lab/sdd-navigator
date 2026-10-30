@@ -55,7 +55,7 @@ const NON_PAPER_TYPES = SHOWCASE_TYPES.filter(
 );
 
 const fieldClass =
-  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 type PaperInfo = {
   title: string;

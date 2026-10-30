@@ -27,7 +27,7 @@ export default function LivingPagesList({ pages }: { pages: MemberLivingPage[] }
         <li key={p.slug}>
           <Link
             href={`/pages/${p.slug}`}
-            className="h-full rounded-2xl glass-panel p-5 flex flex-col gap-2 hover:border-primary/50 transition-colors"
+            className="h-full rounded-2xl glass-panel p-5 flex flex-col gap-2 hover:border-primary transition-colors"
           >
             <span className="inline-flex items-center gap-1.5 font-label-sm text-label-sm text-secondary">
               <span className="material-symbols-outlined text-[16px]">{p.visibility === "public" ? "public" : "group"}</span>

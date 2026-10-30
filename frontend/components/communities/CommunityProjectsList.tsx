@@ -22,7 +22,7 @@ export default function CommunityProjectsList({ projects }: { projects: Communit
         <li key={p.id}>
           <Link
             href={`/projects/${p.id}`}
-            className="glass-card rounded-lg p-4 flex flex-col gap-1 hover:border-primary/40 transition-colors h-full"
+            className="glass-card rounded-lg p-4 flex flex-col gap-1 hover:border-primary transition-colors h-full"
           >
             <span className="font-label-md text-label-md text-on-background">{p.name}</span>
             {p.description && (

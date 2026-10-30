@@ -110,11 +110,11 @@ export default function AnswerCard({
               key={f.kind}
               type="button"
               onClick={() => onOpenTab(f.kind)}
-              className="text-left rounded-xl bg-white border border-outline-variant/30 hover:border-primary/50 px-4 py-3 transition-colors min-w-0"
+              className="text-left rounded-xl bg-white border border-outline-variant/30 hover:border-primary px-4 py-3 transition-colors min-w-0"
             >
               <span className="flex items-center justify-between gap-2">
                 <span className="font-label-md text-label-md text-on-background">{f.label}</span>
-                <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-label-sm text-[11px]">{f.count}</span>
+                <span className="px-2 py-0.5 rounded-full bg-surface-container-low text-primary font-label-sm text-[11px]">{f.count}</span>
               </span>
               <span className="block mt-1 font-body-sm text-body-sm text-secondary line-clamp-2">{f.text}</span>
             </button>

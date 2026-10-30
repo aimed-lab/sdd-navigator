@@ -7,8 +7,8 @@ const ICON: Record<PageVisibility, string> = { private: "lock", team: "group", p
 
 const TONE: Record<PageVisibility, string> = {
   private: "bg-surface-container text-secondary",
-  team: "bg-primary/10 text-primary",
-  public: "bg-primary/10 text-primary",
+  team: "bg-surface-container-low text-primary",
+  public: "bg-surface-container-low text-primary",
 };
 
 export default function VisibilityBadge({ visibility }: { visibility: PageVisibility }) {

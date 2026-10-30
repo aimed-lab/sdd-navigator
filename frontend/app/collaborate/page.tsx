@@ -159,18 +159,18 @@ export default async function CollaboratePage({
                 <li key={t.slug} className="min-w-0">
                   <Link
                     href={`/teams/${t.slug}`}
-                    className="font-body-md text-[14px] leading-6 text-[#166534] hover:underline underline-offset-4 break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded"
+                    className="font-body-md text-[14px] leading-6 text-[#1A5632] hover:underline underline-offset-4 break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A5632] rounded"
                   >
                     {t.name}
                   </Link>
                 </li>
               ))}
             </ul>
-            <span className="mt-auto pt-1 flex flex-wrap gap-x-5 gap-y-1 text-[13.5px] font-semibold leading-6 text-[#166534]">
-              <Link href="/teams" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded">
+            <span className="mt-auto pt-1 flex flex-wrap gap-x-5 gap-y-1 text-[13.5px] font-semibold leading-6 text-[#1A5632]">
+              <Link href="/teams" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A5632] rounded">
                 See all
               </Link>
-              <Link href="/teams/new" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#166534] rounded">
+              <Link href="/teams/new" className="hover:underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1A5632] rounded">
                 Create a team
               </Link>
             </span>
@@ -236,7 +236,7 @@ export default async function CollaboratePage({
             defaultValue={q}
             placeholder="Search posts, resources and people…"
             aria-label="Search the collaboration board"
-            className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+            className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
           />
         </div>
       </form>

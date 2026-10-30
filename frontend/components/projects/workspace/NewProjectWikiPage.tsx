@@ -76,7 +76,7 @@ export default function NewProjectWikiPage({
         disabled={busy}
         maxLength={120}
         placeholder="e.g. PHGDH inhibitors in Alzheimer's disease"
-        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary/60 focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary/60 focus:outline-none focus:ring-2 focus:ring-primary"
       />
       {busy && (
         <p className="font-body-sm text-body-sm text-secondary" role="status">

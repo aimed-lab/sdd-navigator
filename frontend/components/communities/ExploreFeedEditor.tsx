@@ -185,7 +185,7 @@ export default function ExploreFeedEditor({
           }}
           rows={3}
           placeholder={"e.g. PHGDH\nglioblastoma metabolism"}
-          className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 
@@ -229,7 +229,7 @@ export default function ExploreFeedEditor({
             setSaved(false);
           }}
           placeholder="e.g. K99, R00, K23, K01, R03"
-          className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full rounded-lg border border-outline-variant/30 px-3 py-2 font-body-sm text-body-sm text-on-background bg-surface-container-lowest focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </div>
 

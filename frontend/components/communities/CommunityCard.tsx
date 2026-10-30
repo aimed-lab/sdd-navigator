@@ -18,7 +18,7 @@ function membershipBadge(
     return {
       label: role === "admin" ? "Admin" : "Member",
       icon: "check_circle",
-      className: "bg-primary/10 text-primary",
+      className: "bg-surface-container-low text-primary",
     };
   }
   if (pending) {
@@ -57,7 +57,7 @@ export default function CommunityCard({
   return (
     <Link
       href={`/communities/${community.slug}`}
-      className="group rounded-2xl overflow-hidden bg-surface-container-lowest border border-outline-variant/30 hover:border-primary/50 hover:shadow-sm transition-all flex flex-col"
+      className="group rounded-2xl overflow-hidden bg-surface-container-lowest border border-outline-variant/30 hover:border-primary hover:shadow-sm transition-all flex flex-col"
     >
       <div className="bg-primary text-on-primary px-5 py-4 flex items-start justify-between gap-3">
         <h3 className="font-headline-sm text-headline-sm text-on-primary break-words min-w-0">{community.name}</h3>
@@ -83,7 +83,7 @@ export default function CommunityCard({
             className={
               "px-2.5 py-1 rounded-full font-label-sm text-label-sm " +
               (member || community.is_open
-                ? "bg-primary/10 text-primary"
+                ? "bg-surface-container-low text-primary"
                 : "border border-outline-variant/50 text-secondary")
             }
           >

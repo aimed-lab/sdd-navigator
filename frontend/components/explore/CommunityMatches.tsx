@@ -128,7 +128,7 @@ export default function CommunityMatches({
         <p className="font-body-sm text-body-sm text-secondary">Sign in to join or create a community.</p>
       )}
 
-      <div className="rounded-xl border border-dashed border-primary/50 bg-primary/5 p-3.5 flex items-center gap-3">
+      <div className="rounded-xl border border-dashed border-primary bg-surface-container-low p-3.5 flex items-center gap-3">
         <p className="flex-1 font-body-sm text-body-sm text-on-background">
           <strong className="font-semibold">Different focus?</strong> Create a new community.
         </p>

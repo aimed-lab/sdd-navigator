@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "ColaboFest 2026 projects | SmartDrugDiscovery", robots: { index: false } };
 
 const PILL_CLASS: Record<StatusPill, string> = {
-  on_track: "bg-primary/10 text-primary",
+  on_track: "bg-surface-container-low text-primary",
   needs_help: "bg-error/10 text-error",
   quiet: "bg-amber-100 text-amber-800",
 };

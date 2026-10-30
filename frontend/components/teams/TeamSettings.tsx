@@ -20,7 +20,7 @@ import type { CommunityMember } from "@/lib/server/communities";
 import type { LinkedCommunity } from "@/lib/server/teams/teams";
 
 const INPUT =
-  "bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 function Block({ title, id, children }: { title: string; id?: string; children: React.ReactNode }) {
   return (

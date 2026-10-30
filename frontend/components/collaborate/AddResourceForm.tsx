@@ -95,7 +95,7 @@ export default function AddResourceForm({
             onChange={(e) => setName(e.target.value)}
             required
             placeholder="e.g. Orthotopic PDX implantation protocol"
-            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
 
@@ -111,7 +111,7 @@ export default function AddResourceForm({
               setFields({}); // switching category drops the previous category's fields
             }}
             required
-            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
           >
             <option value="" disabled>
               Choose a category…
@@ -134,7 +134,7 @@ export default function AddResourceForm({
             value={lab}
             onChange={(e) => setLab(e.target.value)}
             placeholder="e.g. Nabors Lab"
-            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
       </section>
@@ -173,7 +173,7 @@ export default function AddResourceForm({
                   value={(fields[spec.key] as string) ?? ""}
                   onChange={(e) => setField(spec.key, e.target.value)}
                   placeholder={spec.placeholder}
-                  className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>
             )
@@ -192,7 +192,7 @@ export default function AddResourceForm({
           value={contact}
           onChange={(e) => setContact(e.target.value)}
           placeholder="An email, a handle, or leave blank"
-          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
         />
       </section>
 

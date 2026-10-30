@@ -36,7 +36,7 @@ export default function PinnedResourceCard({
   trackCommunityId,
 }: {
   resource: CommunityResource;
-  /** Pass for an active member: View / Download tick "Open the pinned slides"
+  /** Pass for an active member: View / Download tick "Open the pinned resource"
    *  on their welcome checklist. */
   trackCommunityId?: string;
 }) {
@@ -58,7 +58,7 @@ export default function PinnedResourceCard({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={image.url} alt="" className="w-full h-full object-cover" />
           ) : (
-            <span className="material-symbols-outlined text-primary/60 text-5xl">
+            <span className="material-symbols-outlined text-primary text-5xl">
               {TYPE_ICON[resource.resource_type] ?? "push_pin"}
             </span>
           )}

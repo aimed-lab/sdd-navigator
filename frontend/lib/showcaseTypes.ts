@@ -62,15 +62,15 @@ export const DEFAULT_SHOWCASE_TYPE_ICON = "auto_awesome";
  *  tailwind.config.ts, kept muted. The icon carries the rest of the
  *  distinction between types that share a hue. */
 export const SHOWCASE_TYPE_COVER: Record<ShowcaseType, { bg: string; text: string }> = {
-  paper: { bg: "bg-primary/10", text: "text-primary" },
-  preprint: { bg: "bg-primary/10", text: "text-primary" },
+  paper: { bg: "bg-surface-container-low", text: "text-primary" },
+  preprint: { bg: "bg-surface-container-low", text: "text-primary" },
   talk: { bg: "bg-secondary/10", text: "text-secondary" },
   poster: { bg: "bg-tertiary/10", text: "text-tertiary" },
   event: { bg: "bg-tertiary/20", text: "text-tertiary" },
-  achievement: { bg: "bg-primary/20", text: "text-primary" },
-  breakthrough: { bg: "bg-primary/20", text: "text-primary" },
+  achievement: { bg: "bg-surface-container", text: "text-primary" },
+  breakthrough: { bg: "bg-surface-container", text: "text-primary" },
   partnership: { bg: "bg-secondary/10", text: "text-secondary" },
-  funding: { bg: "bg-primary/10", text: "text-primary" },
+  funding: { bg: "bg-surface-container-low", text: "text-primary" },
   tool: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
   service: { bg: "bg-secondary-container/60", text: "text-on-secondary-container" },
   dataset: { bg: "bg-tertiary/10", text: "text-tertiary" },

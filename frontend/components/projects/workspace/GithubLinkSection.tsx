@@ -88,7 +88,7 @@ export default function GithubLinkSection({ projectId, githubUrl }: { projectId:
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://github.com/your-team/your-repo"
               aria-label="GitHub link"
-              className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+              className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
             />
             <div className="flex items-center gap-3 shrink-0">
               <button type="submit" disabled={saving} className="btn-outline px-5 py-2.5 rounded-lg font-label-md text-label-md disabled:opacity-50">

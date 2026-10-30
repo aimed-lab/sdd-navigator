@@ -53,7 +53,7 @@ export default function YourLivingPages() {
           <Link
             key={p.slug}
             href={`/pages/${p.slug}`}
-            className="rounded-2xl bg-white border border-outline-variant/30 hover:border-primary/50 p-5 flex flex-col gap-2 transition-colors"
+            className="rounded-2xl bg-white border border-outline-variant/30 hover:border-primary p-5 flex flex-col gap-2 transition-colors"
           >
             <span className="font-label-sm text-label-sm text-secondary">{VISIBILITY_LABEL[p.visibility]}</span>
             <h3 className="font-title text-[20px] leading-tight font-medium text-on-background line-clamp-2">{p.title}</h3>
@@ -65,7 +65,7 @@ export default function YourLivingPages() {
         <button
           type="button"
           onClick={() => openAssistant({ text: START_LIVING_PAGE_MESSAGE, mode: "send" })}
-          className="rounded-2xl border-2 border-dashed border-primary/50 bg-primary/5 hover:bg-primary/10 p-5 flex flex-col items-center justify-center gap-1 text-primary transition-colors min-h-[7.5rem]"
+          className="rounded-2xl border-2 border-dashed border-primary bg-surface-container-low hover:bg-surface-container-low p-5 flex flex-col items-center justify-center gap-1 text-primary transition-colors min-h-[7.5rem]"
         >
           <span className="material-symbols-outlined">add</span>
           <span className="font-label-lg text-label-lg">New wiki page</span>
