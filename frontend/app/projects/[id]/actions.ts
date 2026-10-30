@@ -41,6 +41,7 @@ import { addReply, createThread, deleteReply, deleteThread } from "@/lib/server/
 import { dismissWelcome } from "@/lib/server/projectWorkspace/welcome";
 import { setFinalist, setMemberAffiliation } from "@/lib/server/projectWorkspace/colabofestOps";
 import { requireCurrentUser } from "@/lib/auth";
+import { setFinalistTask } from "@/lib/server/projectWorkspace/finalistTasksDb";
 import type { ListKey } from "@/lib/server/projectWorkspace/status";
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -550,4 +551,9 @@ export async function setFinalistAction(projectId: string, finalist: boolean): P
 export async function setAffiliationAction(projectId: string, memberId: string, affiliation: string | null): Promise<ActionResult> {
   if (!memberId) return { ok: false, error: "Missing member." };
   return run(projectId, "setAffiliationAction", () => setMemberAffiliation(projectId, memberId, affiliation));
+}
+
+/** Mark a ColaboFest finalist task done or not done: the project lead and the SPARC team only. */
+export async function setFinalistTaskAction(projectId: string, taskKey: string, done: boolean): Promise<ActionResult> {
+  return run(projectId, "setFinalistTaskAction", () => setFinalistTask(projectId, taskKey, done === true));
 }

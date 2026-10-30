@@ -22,6 +22,40 @@ export const COLABOFEST_CONTACT_EMAIL = "smartdrugdiscovery@gmail.com";
 /** The name of the program as shown in the Welcome card. */
 export const COLABOFEST_SHOWCASE_NAME = "May showcase";
 
+// ── finalist tasks ───────────────────────────────────────────────────────────
+// The three things each finalist team does. The status of each lives in the project's
+// checklist_items (one item per task, found by its label), and
+// database/migrations/2026-11-06_colabofest_finalist_tasks.sql inserts them for every
+// finalist: keep the labels here and there identical.
+
+/** When the finalist tasks are due. */
+export const FINALIST_DUE = { from: "2026-11-11", shown: "Nov 11", long: "Nov 11, 2026" } as const;
+
+export const FINALIST_TASKS = [
+  {
+    key: "readiness",
+    label: "Finalize your readiness checklist",
+    description:
+      "Confirm what SPARC will provide within the $20K service award. Mark anything beyond it as a future or fee-based service. Your submitted checklist is the draft.",
+  },
+  {
+    key: "workplan",
+    label: "Write your 6-week work plan",
+    description:
+      "Week by week, what your team and SPARC will do between mid-November and December 22. We'll agree on it together.",
+  },
+  {
+    key: "kickoff",
+    label: "Schedule your kickoff meeting",
+    description: `Meet with Dr. Chen, the SPARC team and Southern Research. Email ${COLABOFEST_CONTACT_EMAIL} with 3 times that work for you.`,
+  },
+] as const;
+
+export type FinalistTaskKey = (typeof FINALIST_TASKS)[number]["key"];
+
+/** The note under the tasks. */
+export const FINALIST_FILES_NOTE = "Upload your updated files to your project's Box folder.";
+
 /** The index (0-5) of the current stage on `today` (an ISO day, YYYY-MM-DD).
  *  Before the kickoff date it is still the first stage. */
 export function currentStageIndex(today: string): number {
