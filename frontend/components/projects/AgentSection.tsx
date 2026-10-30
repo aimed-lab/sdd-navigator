@@ -306,7 +306,7 @@ function MarkdownView({ markdown }: { markdown: string }) {
       blocks.push(
         <blockquote
           key={key++}
-          className="border-l-4 border-primary/40 pl-3 my-2 italic text-on-background font-body-sm text-body-sm"
+          className="border-l-4 border-primary pl-3 my-2 italic text-on-background font-body-sm text-body-sm"
         >
           {renderInline(line.slice(2), `bq-${key}`)}
         </blockquote>
@@ -865,7 +865,7 @@ export default function AgentSection({
                       }
                     }}
                     placeholder={VERDICT_FOLLOWUP[verdict]}
-                    className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <button
                     type="button"

@@ -28,7 +28,7 @@ type Field = {
 };
 
 const INPUT =
-  "w-full glass-panel rounded-xl p-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "w-full glass-panel rounded-xl p-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 function Dialog({
   title,

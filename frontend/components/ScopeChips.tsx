@@ -39,7 +39,7 @@ export default function ScopeChips({
             type="button"
             onClick={() => onEdit(terms.filter((t) => t !== term))}
             aria-label={`Remove ${term} from this feed`}
-            className="flex items-center rounded-full hover:bg-primary/10 transition-colors"
+            className="flex items-center rounded-full hover:bg-surface-container-low transition-colors"
           >
             <span className="material-symbols-outlined text-base leading-none">close</span>
           </button>

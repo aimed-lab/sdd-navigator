@@ -51,7 +51,7 @@ export function MembersWorkingOnCard({
               <li key={m.id} className="flex items-start gap-3 min-w-0">
                 <span
                   aria-hidden
-                  className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-label-sm text-[11px] font-semibold shrink-0"
+                  className="w-8 h-8 rounded-full bg-surface-container-low text-primary flex items-center justify-center font-label-sm text-[11px] font-semibold shrink-0"
                 >
                   {initials(m.name)}
                 </span>
@@ -90,7 +90,7 @@ export function MembersWorkingOnCard({
             <li key={m.id} className="flex items-start gap-3 min-w-0">
               <span
                 aria-hidden
-                className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-label-sm text-[11px] font-semibold shrink-0"
+                className="w-8 h-8 rounded-full bg-surface-container-low text-primary flex items-center justify-center font-label-sm text-[11px] font-semibold shrink-0"
               >
                 {initials(m.name)}
               </span>

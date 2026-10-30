@@ -12,7 +12,7 @@ import { useState } from "react";
 export const inputCls =
   "w-full px-4 py-3 rounded-lg bg-surface-container-lowest border border-outline-variant " +
   "font-body-md text-body-md text-on-surface outline-none transition-all " +
-  "focus:border-primary focus:ring-2 focus:ring-primary/20 " +
+  "focus:border-primary focus:ring-2 focus:ring-primary " +
   "placeholder:text-on-surface-variant/40";
 
 export const labelCls = "block font-label-sm text-label-sm text-on-surface mb-2";
@@ -79,7 +79,7 @@ export function Banner({
         "flex items-start gap-2 p-3 rounded-lg border font-body-md text-body-md " +
         (error
           ? "bg-error-container border-error/20 text-on-error-container"
-          : "bg-secondary-container border-primary/20 text-on-secondary-container")
+          : "bg-secondary-container border-outline-variant text-on-secondary-container")
       }
     >
       <span className="material-symbols-outlined text-[20px]">
@@ -170,7 +170,7 @@ export function ChipInput({
         {values.map((v) => (
           <span
             key={v}
-            className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm"
+            className="inline-flex items-center gap-1.5 pl-3 pr-2 py-1.5 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm"
           >
             {v}
             <button

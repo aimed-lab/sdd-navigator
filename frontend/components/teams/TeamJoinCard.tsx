@@ -120,7 +120,7 @@ export default function TeamJoinCard({
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@example.com"
-                    className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2.5 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2.5 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
                   />
                   <button
                     type="submit"
@@ -139,7 +139,7 @@ export default function TeamJoinCard({
           )}
 
           {done && (
-            <p role="status" className="rounded-lg bg-primary/10 text-primary px-3 py-2.5 font-body-sm text-body-sm">
+            <p role="status" className="rounded-lg bg-surface-container-low text-primary px-3 py-2.5 font-body-sm text-body-sm">
               {done}{" "}
               <Link href={signIn} className="underline underline-offset-4">
                 Sign in

@@ -16,7 +16,7 @@ import { tabHref } from "@/lib/server/projectWorkspace/workspace";
 import type { Reply, Thread } from "@/lib/server/projectWorkspace/discussions";
 
 const INPUT =
-  "w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/30";
+  "w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary";
 
 function replyWord(n: number): string {
   return `${n} ${n === 1 ? "reply" : "replies"}`;
@@ -126,7 +126,7 @@ export function DiscussionsList({
             <li key={t.id}>
               <Link
                 href={`${tabHref(projectId, "discussions")}&thread=${t.id}`}
-                className="block rounded-xl border border-outline-variant/30 bg-white p-5 hover:border-primary/40 transition-colors"
+                className="block rounded-xl border border-outline-variant/30 bg-white p-5 hover:border-primary transition-colors"
               >
                 <span className="block font-label-lg text-[17px] text-on-background break-words">{t.title}</span>
                 <span className="mt-1 block font-body-sm text-body-sm text-secondary">

@@ -19,7 +19,7 @@ export const TONES: Record<Tone, { bg: string; fg: string }> = {
   blue: { bg: "#e6ecfb", fg: "#2c4a9a" },
   amber: { bg: "#fef3c7", fg: "#b45309" },
   rose: { bg: "#fde8e6", fg: "#b42318" },
-  green: { bg: "#d6efdc", fg: "#166534" },
+  green: { bg: "#eeece6", fg: "#1A5632" },
 };
 
 export default function ActionTile({
@@ -58,7 +58,7 @@ export default function ActionTile({
   const { bg, fg } = TONES[tone];
   const style = {
     "--tone": fg,
-    ...(featured && !active ? { background: "#e9f5ec", borderColor: "#cfe6d5" } : {}),
+    ...(featured && !active ? { background: "#f3f1ea", borderColor: "#e0dcd0" } : {}),
     ...(active ? { borderColor: fg, borderWidth: 2, padding: 19 } : {}),
   } as CSSProperties;
 
@@ -71,7 +71,7 @@ export default function ActionTile({
     <>
       <span
         className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
-        style={{ background: featured ? "#cfe6d5" : bg, color: fg }}
+        style={{ background: featured ? "#e0dcd0" : bg, color: fg }}
         aria-hidden
       >
         <span className="material-symbols-outlined text-[24px]">{icon}</span>

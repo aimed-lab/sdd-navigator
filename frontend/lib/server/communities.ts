@@ -2529,7 +2529,7 @@ export type MemberLivingPage = {
  *  "Pages: read", is the real gate — a private page never comes back, and a
  *  team page only to its team). `ownerIds` are the members' user ids; the
  *  owner id itself is never sent to the browser. */
-export async function listMemberLivingPages(ownerIds: string[]): Promise<MemberLivingPage[]> {
+export async function listMemberLivingPages(ownerIds: string[], since?: string | null): Promise<MemberLivingPage[]> {
   noStore();
   const ids = Array.from(new Set(ownerIds.filter(Boolean)));
   if (ids.length === 0) return [];
@@ -2538,15 +2538,28 @@ export async function listMemberLivingPages(ownerIds: string[]): Promise<MemberL
   const db = session ? session.db : getAnonServerClient();
   if (!db) return [];
 
-  const { data, error } = await db
+  let query = db
     .from("pages")
     .select("owner_id, slug, title, seed_input, visibility, updated_at, last_refreshed_at")
     .in("owner_id", ids)
-    .in("visibility", ["public", "team"])
-    .order("updated_at", { ascending: false })
-    .limit(60);
+    .in("visibility", ["public", "team"]);
+  // A community's wiki pages are the ones its members made while it exists. Without
+  // this, a brand-new community counted every public page its members had ever made
+  // anywhere (the "7 wiki pages" on an empty community).
+  if (since) query = query.gte("created_at", since);
+  const { data, error } = await query.order("updated_at", { ascending: false }).limit(60);
   if (error || !data) return [];
   return data as MemberLivingPage[];
+}
+
+/** When a community was created (communities.created_at), or null. */
+export async function getCommunityCreatedAt(communityId: string): Promise<string | null> {
+  noStore();
+  const session = await getSession();
+  const db = session ? session.db : getAnonServerClient();
+  if (!db) return null;
+  const { data } = await db.from("communities").select("created_at").eq("id", communityId).maybeSingle();
+  return ((data as { created_at?: string } | null)?.created_at as string | undefined) ?? null;
 }
 
 /** Titles and seed topics of EVERY wiki page the signed-in viewer owns

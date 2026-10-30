@@ -63,7 +63,7 @@ export default async function ProviderPage({ params }: { params: Promise<{ slug:
       {/* Hero */}
       <section
         className={"text-white " + (facts.length > 0 ? "pb-24" : "pb-12")}
-        style={{ backgroundImage: "linear-gradient(135deg, #04361c 0%, #006e2f 100%)" }}
+        style={{ backgroundImage: "linear-gradient(135deg, #033319 0%, #1A5632 100%)" }}
       >
         <div className="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop pt-8">
           <Link

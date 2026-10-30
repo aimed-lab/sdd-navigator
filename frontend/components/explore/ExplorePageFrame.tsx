@@ -49,7 +49,7 @@ export default function ExplorePageFrame({
               onChange={(e) => search.onChange(e.target.value)}
               type="text"
               placeholder={search.placeholder}
-              className="w-full h-14 px-5 pr-16 bg-white border border-outline-variant/40 rounded-[14px] focus:ring-2 focus:ring-primary/20 focus:border-primary text-body-md font-body-md placeholder:text-secondary/50 transition-all"
+              className="w-full h-14 px-5 pr-16 bg-white border border-outline-variant/40 rounded-[14px] focus:ring-2 focus:ring-primary focus:border-primary text-body-md font-body-md placeholder:text-secondary/50 transition-all"
             />
             <button
               type="submit"

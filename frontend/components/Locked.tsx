@@ -9,8 +9,8 @@ export default function Locked({ className = "" }: { className?: string }) {
     <Link
       href="/invite"
       className={
-        "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary " +
-        "font-label-sm text-label-sm hover:bg-primary/20 transition-colors whitespace-nowrap " +
+        "inline-flex items-center gap-1 px-3 py-1 rounded-full bg-surface-container-low text-primary " +
+        "font-label-sm text-label-sm hover:bg-surface-container transition-colors whitespace-nowrap " +
         className
       }
     >

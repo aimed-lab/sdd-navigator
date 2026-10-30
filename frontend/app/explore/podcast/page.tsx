@@ -14,7 +14,7 @@
 //
 // Layout STRUCTURE follows design/podcast-list.html (intro, search, episode
 // cards with number badge + title + snippet). The VISUAL style is the current
-// design system, not that file's older palette: forest-green #006e2f primary,
+// design system, not that file's older palette: forest-green #1A5632 primary,
 // glass cards, Nav/Footer from the root layout.
 //
 // Server Component for the data fetch (+ the static intro and a back link to Explore);
@@ -50,7 +50,7 @@ export default async function PodcastPage({
 
       {/* Intro */}
       <div className="max-w-3xl space-y-4">
-        <span className="inline-block px-4 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm uppercase">
+        <span className="inline-block px-4 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm uppercase">
           Podcast
         </span>
         <h1 className="font-display-lg text-display-lg text-on-background">

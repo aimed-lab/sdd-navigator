@@ -57,7 +57,7 @@ function Marked({ text, terms }: { text: string; terms: string[] }) {
     <>
       {highlightParts(text, terms).map((p, i) =>
         p.hit ? (
-          <mark key={i} className="bg-primary/15 text-on-background rounded-sm px-0.5">
+          <mark key={i} className="bg-surface-container-low text-on-background rounded-sm px-0.5">
             {p.text}
           </mark>
         ) : (
@@ -220,7 +220,7 @@ export default function PodcastGrid({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search titles, guests, topics and transcripts…"
             aria-label="Search episodes"
-            className="w-full glass-panel rounded-full pl-12 pr-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full glass-panel rounded-full pl-12 pr-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
         {!failed && (
@@ -269,7 +269,7 @@ export default function PodcastGrid({
               <li key={h.id || h.slug}>
                 <Link
                   href={`/explore/podcast/${h.slug}`}
-                  className="glass-card group flex flex-col gap-2 rounded-xl p-5 hover:border-primary/40 transition-colors"
+                  className="glass-card group flex flex-col gap-2 rounded-xl p-5 hover:border-primary transition-colors"
                 >
                   <span className="flex items-center gap-2">
                     {episodeLabel(h.episode_number) && (

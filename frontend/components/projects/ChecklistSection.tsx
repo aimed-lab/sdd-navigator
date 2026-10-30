@@ -448,7 +448,7 @@ export default function ChecklistSection({
                           setEditingId(null);
                         }
                       }}
-                      className="w-full bg-surface-container-low border border-outline-variant/40 rounded-lg px-3 py-1.5 font-body-md text-body-md text-on-background outline-none focus:ring-2 focus:ring-primary/40"
+                      className="w-full bg-surface-container-low border border-outline-variant/40 rounded-lg px-3 py-1.5 font-body-md text-body-md text-on-background outline-none focus:ring-2 focus:ring-primary"
                     />
                   ) : (
                     <button

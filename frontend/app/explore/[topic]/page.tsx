@@ -469,7 +469,7 @@ function SearchResults() {
         {/* Saving-to-project indicator: a save from this page must never go
             somewhere the visitor didn't expect, so this is not subtle. */}
         <div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary font-label-md text-label-md">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-surface-container-low text-primary font-label-md text-label-md">
             <span className="material-symbols-outlined text-[18px]">bookmark_added</span>
             Saving to <strong>{projectName}</strong>
           </div>

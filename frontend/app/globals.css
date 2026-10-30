@@ -10,7 +10,7 @@
   --type-tool-bg: #eeeaf6;      --type-tool-fg: #5e4596;
   --type-news-bg: #f8ecdd;      --type-news-fg: #9a4c0e;
   --type-podcast-bg: #f3efdd;   --type-podcast-fg: #6a5c1e;
-  --type-community-bg: #e4f0e6; --type-community-fg: #1f6b3a;
+  --type-community-bg: #eeece6; --type-community-fg: #1A5632;
   --type-other-bg: #eeece6;     --type-other-fg: #4a4740;
 }
 
@@ -88,14 +88,14 @@
     line-height: 1.2;
   }
 
-  /* Primary CTA — Research Green */
+  /* Primary CTA — UAB Green (hover: Dragon's Lair Green) */
   .btn-primary {
-    background-color: #22c55e;
+    background-color: #1A5632;
     color: #ffffff;
     transition: all 0.2s ease;
   }
   .btn-primary:hover {
-    opacity: 0.9;
+    background-color: #033319;
     transform: scale(0.98);
   }
 

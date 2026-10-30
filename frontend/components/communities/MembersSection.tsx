@@ -208,7 +208,7 @@ export default function MembersSection({
               className={
                 "px-3 py-1 rounded-full border " +
                 (order === o
-                  ? "border-primary bg-primary/10 text-primary"
+                  ? "border-primary bg-surface-container-low text-primary"
                   : "border-outline-variant/40 text-secondary hover:text-primary")
               }
             >

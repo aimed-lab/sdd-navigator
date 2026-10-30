@@ -14,7 +14,7 @@ export const TILE_GRID = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 i
 
 // Status colors for a trial's own ClinicalTrials.gov status text.
 function statusColor(status: string): string {
-  if (status === "RECRUITING") return "#1F6B3A";
+  if (status === "RECRUITING") return "#1A5632";
   if (status === "TERMINATED" || status === "WITHDRAWN" || status === "SUSPENDED") return "#B3261E";
   return "inherit";
 }

@@ -194,7 +194,7 @@ export default function ProjectChatbot({
                       key={s}
                       type="button"
                       onClick={() => ask(s)}
-                      className="text-left px-4 py-2.5 rounded-xl border border-primary/30 bg-primary/5 text-primary font-label-sm text-label-sm hover:bg-primary/10 transition-colors"
+                      className="text-left px-4 py-2.5 rounded-xl border border-outline-variant bg-surface-container-low text-primary font-label-sm text-label-sm hover:bg-surface-container-low transition-colors"
                     >
                       {s}
                     </button>
@@ -207,7 +207,7 @@ export default function ProjectChatbot({
               if (t.role === "user") {
                 return (
                   <div key={i} className="flex justify-end">
-                    <div className="max-w-[85%] bg-primary/15 text-on-background rounded-2xl rounded-br-sm px-4 py-2.5">
+                    <div className="max-w-[85%] bg-surface-container-low text-on-background rounded-2xl rounded-br-sm px-4 py-2.5">
                       <p className="font-body-sm text-body-sm whitespace-pre-wrap">{t.content}</p>
                     </div>
                   </div>
@@ -254,7 +254,7 @@ export default function ProjectChatbot({
                 onKeyDown={onKeyDown}
                 placeholder="Ask a question…"
                 rows={1}
-                className="flex-1 resize-none max-h-28 px-3.5 py-2.5 rounded-xl border border-outline-variant/40 bg-surface-container-lowest font-body-sm text-body-sm text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="flex-1 resize-none max-h-28 px-3.5 py-2.5 rounded-xl border border-outline-variant/40 bg-surface-container-lowest font-body-sm text-body-sm text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <button
                 type="button"

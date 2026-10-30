@@ -76,7 +76,7 @@ export default async function ResearcherProfilePage({
                 {profile.interests.map((i) => (
                   <span
                     key={i}
-                    className="px-3 py-1 rounded-full bg-primary/5 text-primary font-label-sm text-label-sm"
+                    className="px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm"
                   >
                     {i}
                   </span>

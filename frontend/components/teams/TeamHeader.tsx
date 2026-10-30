@@ -28,7 +28,7 @@ export default function TeamHeader({
   return (
     <header
       className="relative rounded-[20px] text-white overflow-hidden"
-      style={{ background: "linear-gradient(135deg, #0b3d22, #0f6b33 60%, #1f8a4a)" }}
+      style={{ background: "linear-gradient(135deg, #033319, #1A5632 60%, #1A5632)" }}
     >
       <div className="flex flex-col lg:flex-row lg:items-center gap-6 p-5 sm:p-7">
         <div className="flex-1 min-w-0 flex flex-col gap-3">
@@ -52,13 +52,13 @@ export default function TeamHeader({
                 {shown.map((n, i) => (
                   <span
                     key={i}
-                    className="w-8 h-8 rounded-full bg-white text-[#0f6b33] border-2 border-[#0f6b33] flex items-center justify-center text-[11px] font-semibold"
+                    className="w-8 h-8 rounded-full bg-white text-[#1A5632] border-2 border-[#1A5632] flex items-center justify-center text-[11px] font-semibold"
                   >
                     {initials(n)}
                   </span>
                 ))}
                 {more && (
-                  <span className="w-8 h-8 rounded-full bg-[#0b3d22] text-white border-2 border-[#0f6b33] flex items-center justify-center text-[11px] font-semibold">
+                  <span className="w-8 h-8 rounded-full bg-[#033319] text-white border-2 border-[#1A5632] flex items-center justify-center text-[11px] font-semibold">
                     {more}
                   </span>
                 )}

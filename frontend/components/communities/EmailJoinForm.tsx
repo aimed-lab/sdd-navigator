@@ -21,7 +21,7 @@ export default function EmailJoinForm({ slug, autoOpen }: { slug: string; autoOp
 
   if (done) {
     return (
-      <p role="status" className="rounded-lg bg-primary/10 text-primary px-3 py-2.5 font-body-sm text-body-sm">
+      <p role="status" className="rounded-lg bg-surface-container-low text-primary px-3 py-2.5 font-body-sm text-body-sm">
         {done}
       </p>
     );
@@ -70,7 +70,7 @@ export default function EmailJoinForm({ slug, autoOpen }: { slug: string; autoOp
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         placeholder="name@example.com"
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2.5 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-3 py-2.5 font-body-sm text-body-sm text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
       />
       <button
         type="submit"

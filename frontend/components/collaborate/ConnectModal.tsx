@@ -175,7 +175,7 @@ export default function ConnectModal({
                     className={
                       "flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-all " +
                       (active
-                        ? "border-primary bg-primary/5"
+                        ? "border-primary bg-surface-container-low"
                         : "border-outline-variant/40 hover:bg-surface-container-low")
                     }
                   >
@@ -221,7 +221,7 @@ export default function ConnectModal({
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 placeholder="Briefly say what you'd bring or what you're after…"
-                className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
 
@@ -242,7 +242,7 @@ export default function ConnectModal({
                 onChange={(e) => setContact(e.target.value)}
                 maxLength={CONTACT_MAX}
                 placeholder="e.g. j.smith@uab.edu, or a lab phone, or @handle"
-                className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full glass-panel rounded-xl p-4 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <p className="mt-2 font-body-sm text-body-sm text-secondary">
                 Shared only with this post&apos;s owner. We never share your

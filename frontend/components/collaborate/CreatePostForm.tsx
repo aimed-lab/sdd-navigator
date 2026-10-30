@@ -61,7 +61,7 @@ function PillInput({
   const [draft, setDraft] = useState("");
   const pill =
     tone === "offer"
-      ? "bg-primary/5 text-on-surface-variant"
+      ? "bg-surface-container-low text-on-surface-variant"
       : "bg-secondary-container/40 text-on-surface-variant";
 
   const add = () => {
@@ -90,7 +90,7 @@ function PillInput({
           }}
           placeholder={placeholder}
           aria-label={label}
-          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
         />
         <button
           type="button"
@@ -216,7 +216,7 @@ export default function CreatePostForm({
             onChange={(e) => setTitle(e.target.value)}
             required
             placeholder="e.g. AI-driven PHGDH inhibitor discovery for glioblastoma"
-            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
 
@@ -233,7 +233,7 @@ export default function CreatePostForm({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Describe your goal or approach in a few sentences"
-            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
       </section>
@@ -275,7 +275,7 @@ export default function CreatePostForm({
           id="stage"
           value={stage}
           onChange={(e) => setStage(e.target.value as Stage)}
-          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         >
           {STAGES.map((s) => (
             <option key={s} value={s}>
@@ -299,7 +299,7 @@ export default function CreatePostForm({
           onChange={(e) =>
             setFundingStatus(e.target.value as FundingStatus | typeof UNSPECIFIED)
           }
-          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/40"
+          className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <option value={UNSPECIFIED}>Prefer not to say</option>
           {FUNDING_STATUSES.map((f) => (

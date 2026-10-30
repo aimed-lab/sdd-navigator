@@ -103,7 +103,7 @@ function AnnouncementForm({
         onChange={(e) => setTitle(e.target.value)}
         placeholder="Title"
         aria-label="Announcement title"
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
       />
       <textarea
         value={body}
@@ -111,7 +111,7 @@ function AnnouncementForm({
         placeholder="Details (optional)"
         aria-label="Announcement body"
         rows={4}
-        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y"
+        className="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary resize-y"
       />
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">

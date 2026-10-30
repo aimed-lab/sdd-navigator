@@ -74,18 +74,18 @@ const KIND_ACCENT: Record<string, string> = {
   tool: "border-l-blue-500",
   trial: "border-l-purple-500",
   grant: "border-l-amber-500",
-  dataset: "border-l-emerald-500",
+  dataset: "border-l-cyan-600",
   geneset: "border-l-fuchsia-500",
   compound: "border-l-rose-500",
   target: "border-l-indigo-500",
   episode: "border-l-primary-container",
-  resource: "border-l-teal-500",
+  resource: "border-l-slate-500",
   person: "border-l-secondary",
 };
 
 const NOTE_TYPE_COLOR: Record<string, { fill: string; label: string }> = {
   concept: { fill: "#6366f1", label: "Concept" }, // indigo-500
-  entity: { fill: "#10b981", label: "Entity" }, // emerald-500
+  entity: { fill: "#0891b2", label: "Entity" }, // emerald-500
   question: { fill: "#f59e0b", label: "Open question" }, // amber-500
 };
 
@@ -572,7 +572,7 @@ function ListView({
                 onClick={() => onSelect({ type: "note", id: note.id })}
                 className={`w-full text-left flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
                   selected?.id === note.id
-                    ? "border-primary bg-primary/5"
+                    ? "border-primary bg-surface-container-low"
                     : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
                 }`}
               >
@@ -621,7 +621,7 @@ function ListView({
                 onClick={() => onSelect({ type: "unfiled", id: "unfiled" })}
                 className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors ${
                   selected?.id === "unfiled"
-                    ? "border-primary bg-primary/5"
+                    ? "border-primary bg-surface-container-low"
                     : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
                 }`}
               >
@@ -637,7 +637,7 @@ function ListView({
                 onClick={() => onSelect({ type: "projectLevel", id: "projectLevel" })}
                 className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-4 py-3 transition-colors ${
                   selected?.id === "projectLevel"
-                    ? "border-primary bg-primary/5"
+                    ? "border-primary bg-surface-container-low"
                     : "border-outline-variant/30 bg-surface-container-lowest hover:bg-surface-container-low"
                 }`}
               >
@@ -930,7 +930,7 @@ function SidePanel({
               {NOTE_TYPE_COLOR[note.note_type]?.label}
             </span>
             {note.is_human_edited && (
-              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm">
+              <span className="px-2 py-0.5 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm">
                 Edited by a teammate — the agent won&apos;t overwrite this
               </span>
             )}

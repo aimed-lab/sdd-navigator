@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { createAnnouncementAction } from "@/app/communities/actions";
 
 const INPUT =
-  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40";
+  "w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary";
 
 export default function NewsPanel({
   teamId,

@@ -102,7 +102,7 @@ const LINES: MapLine[] = [
   {
     id: "tools",
     name: "Tools",
-    color: "#16a34a",
+    color: "#1A5632",
     path: "M735 110 V180 L655 260 V540 L735 620 V690",
     stations: [
       { label: ["RDKit"], x: 735, y: 110, side: "right", href: TOOLS_HREF },
@@ -456,7 +456,7 @@ export default function DiscoveryMap() {
               height={90}
               rx={45}
               fill="#fff"
-              stroke="#002109"
+              stroke="#033319"
               strokeWidth={7}
             />
             <text
@@ -466,7 +466,7 @@ export default function DiscoveryMap() {
               className="font-headline-md"
               fontSize={22}
               fontWeight={700}
-              fill="#002109"
+              fill="#033319"
               style={{ pointerEvents: "none" }}
             >
               SmartDrugDiscovery

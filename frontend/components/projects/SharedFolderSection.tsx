@@ -70,7 +70,7 @@ export default function SharedFolderSection({
 
       {!editing && current ? (
         <div className="inline-flex items-center gap-6 p-4 pr-6 bg-surface-container-lowest border border-outline-variant/40 rounded-xl shadow-sm hover:shadow-md transition-shadow group">
-          <div className="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center text-primary group-hover:bg-primary/5 transition-colors shrink-0">
+          <div className="w-12 h-12 bg-surface-container-low rounded-lg flex items-center justify-center text-primary group-hover:bg-surface-container-low transition-colors shrink-0">
             <span
               className="material-symbols-outlined text-[28px]"
               style={{ fontVariationSettings: "'FILL' 1" }}
@@ -118,7 +118,7 @@ export default function SharedFolderSection({
             onChange={(e) => setUrl(e.target.value)}
             placeholder="Paste a link to your team's Box or Drive folder"
             aria-label="Shared folder link"
-            className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+            className="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
           />
           <div className="flex items-center gap-3 shrink-0">
             <button

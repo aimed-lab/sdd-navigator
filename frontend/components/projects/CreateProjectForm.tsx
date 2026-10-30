@@ -133,7 +133,7 @@ export default function CreateProjectForm({
   };
 
   const inputClass =
-    "w-full bg-surface-container-low border border-surface-dim rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all outline-none";
+    "w-full bg-surface-container-low border border-surface-dim rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:border-primary focus:ring-2 focus:ring-primary transition-all outline-none";
 
   return (
     <form
@@ -145,7 +145,7 @@ export default function CreateProjectForm({
           Create a project
         </h1>
         {colabofest && (
-          <span className="inline-flex items-center px-3 py-1 rounded-full bg-primary-container/20 text-primary font-label-sm text-label-sm mt-2">
+          <span className="inline-flex items-center px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm mt-2">
             ColaboFest
           </span>
         )}

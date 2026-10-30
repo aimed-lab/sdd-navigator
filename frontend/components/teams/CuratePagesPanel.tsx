@@ -61,7 +61,7 @@ export default function CuratePagesPanel({
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search your pages and public pages"
         aria-label="Search wiki pages"
-        className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary/40"
+        className="w-full bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-4 py-2.5 font-body-md text-body-md text-on-background placeholder:text-secondary focus:outline-none focus:ring-2 focus:ring-primary"
       />
 
       {Object.values(added).map((p) => (

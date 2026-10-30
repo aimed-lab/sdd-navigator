@@ -168,7 +168,7 @@ export default function ProposalSection({
           )}
 
           <div className="flex items-center gap-3 pt-4 border-t border-outline-variant/30 mt-2">
-            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary-container/20 text-on-primary-container font-label-sm text-label-sm">
+            <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-surface-container-low text-on-primary-container font-label-sm text-label-sm">
               <span className="material-symbols-outlined text-[14px]">check_circle</span>
               Submitted
             </span>
@@ -258,7 +258,7 @@ export default function ProposalSection({
                   type="button"
                   onClick={submit}
                   disabled={submitting || locked}
-                  className="px-6 py-3 rounded-lg font-label-md text-label-md border border-primary text-primary hover:bg-primary/5 disabled:opacity-50 flex items-center gap-2 transition-colors"
+                  className="px-6 py-3 rounded-lg font-label-md text-label-md border border-primary text-primary hover:bg-surface-container-low disabled:opacity-50 flex items-center gap-2 transition-colors"
                 >
                   {submitting ? "Submitting…" : "Submit proposal"}
                   {!submitting && (
@@ -310,7 +310,7 @@ export default function ProposalSection({
                 (locked ? "opacity-60" : "hover:bg-surface-container-low/50 transition-colors cursor-pointer group")
               }
             >
-              <div className="w-16 h-16 rounded-full bg-primary/5 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
+              <div className="w-16 h-16 rounded-full bg-surface-container-low flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
                 <span className="material-symbols-outlined text-[32px]">cloud_upload</span>
               </div>
               <p className="font-label-md text-on-background mb-1">Click to upload or drag and drop</p>

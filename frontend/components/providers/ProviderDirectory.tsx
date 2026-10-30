@@ -37,7 +37,7 @@ export default function ProviderDirectory({ providers }: { providers: Provider[]
           onChange={(e) => setQuery(e.target.value)}
           placeholder="What do you need done? e.g. synthesis, antibodies, docking"
           aria-label="What do you need done?"
-          className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+          className="w-full h-14 bg-white border border-outline-variant/40 rounded-[14px] pl-12 pr-4 font-body-md text-body-md text-on-background placeholder:text-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary transition-all"
         />
       </div>
 

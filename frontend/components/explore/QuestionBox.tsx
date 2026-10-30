@@ -43,7 +43,7 @@ export default function QuestionBox({
           type="text"
           aria-label="Your question"
           placeholder={placeholder}
-          className="w-full h-16 px-6 pr-16 sm:pr-48 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary/20 focus:border-primary text-body-lg font-body-lg placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
+          className="w-full h-16 px-6 pr-16 sm:pr-48 bg-white border border-outline-variant/40 rounded-[16px] focus:ring-2 focus:ring-primary focus:border-primary text-body-lg font-body-lg placeholder:text-secondary/50 transition-all shadow-[0_1px_2px_rgba(25,28,30,0.04)]"
         />
         <button
           type="submit"
@@ -62,7 +62,7 @@ export default function QuestionBox({
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value as ScopeKey)}
-              className="bg-white border border-outline-variant/40 rounded-lg px-3 py-1.5 font-label-md text-label-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+              className="bg-white border border-outline-variant/40 rounded-lg px-3 py-1.5 font-label-md text-label-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
             >
               {SCOPES.map((s) => (
                 <option key={s.key} value={s.key}>

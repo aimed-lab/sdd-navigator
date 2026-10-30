@@ -44,7 +44,7 @@ export default function CreateCommunityForm({ onCancel }: { onCancel: () => void
   };
 
   const inputClass =
-    "w-full bg-surface-container-low border border-surface-dim rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all outline-none";
+    "w-full bg-surface-container-low border border-surface-dim rounded-lg px-4 py-3 font-body-md text-body-md text-on-background focus:border-primary focus:ring-2 focus:ring-primary transition-all outline-none";
 
   return (
     <form onSubmit={submit} className="glass-card rounded-xl p-6 md:p-8 flex flex-col gap-6">

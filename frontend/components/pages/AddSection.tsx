@@ -38,7 +38,7 @@ export default function AddSection({ pageId, pageSlug }: { pageId: string; pageS
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 self-start px-4 py-2 rounded-lg font-label-md text-label-md text-primary hover:bg-primary/5"
+        className="inline-flex items-center gap-1 self-start px-4 py-2 rounded-lg font-label-md text-label-md text-primary hover:bg-surface-container-low"
       >
         <span className="material-symbols-outlined text-base">add</span>
         Add section
@@ -58,7 +58,7 @@ export default function AddSection({ pageId, pageSlug }: { pageId: string; pageS
         onChange={(e) => setTitle(e.target.value)}
         maxLength={120}
         disabled={busy}
-        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-2 font-body-md text-body-md text-on-background focus:outline-none focus:ring-2 focus:ring-primary"
       />
       <label className="font-label-md text-label-md text-on-background" htmlFor="new-section-body">
         Text
@@ -69,7 +69,7 @@ export default function AddSection({ pageId, pageSlug }: { pageId: string; pageS
         onChange={(e) => setBody(e.target.value)}
         rows={8}
         disabled={busy}
-        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary/30"
+        className="w-full bg-white border border-outline-variant/40 rounded-lg px-4 py-3 font-body-md text-body-md text-on-background leading-relaxed focus:outline-none focus:ring-2 focus:ring-primary"
       />
       {error && (
         <p className="font-body-sm text-body-sm text-error" role="alert">

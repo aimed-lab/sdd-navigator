@@ -27,6 +27,7 @@ import {
   listCommunityMembers,
   listCommunityProjects,
   listCommunityResources,
+  getCommunityCreatedAt,
   listMemberLivingPages,
   listMyLivingPageTexts,
   listMemberRoster,
@@ -148,7 +149,10 @@ export default async function CommunityDetailPage({
   // Wiki pages made by members (public ones, plus team pages this viewer can
   // read — the pages table's own RLS decides). Only where the roster is visible.
   const livingPages = access.seesMembers
-    ? await listMemberLivingPages(memberRoster.flatMap((m) => (m.user_id ? [m.user_id] : [])))
+    ? await listMemberLivingPages(
+        memberRoster.flatMap((m) => (m.user_id ? [m.user_id] : [])),
+        await getCommunityCreatedAt(community.id)
+      )
     : [];
 
   // Members working on similar things: only for an active member who has set
@@ -244,7 +248,7 @@ export default async function CommunityDetailPage({
         />
 
         {showJoinNotice && (
-          <p className="rounded-xl bg-primary/10 text-primary px-4 py-3 font-body-md text-body-md">
+          <p className="rounded-xl bg-surface-container-low text-primary px-4 py-3 font-body-md text-body-md">
             You opened a join link.{" "}
             {membership.state === "signed_out"
               ? "Sign in to join this community."

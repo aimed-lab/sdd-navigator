@@ -11,7 +11,7 @@ import {
 
 const INPUT =
   "w-full rounded-[14px] border border-outline-variant/40 bg-white px-4 py-3 font-body-md text-body-md text-on-background " +
-  "focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary";
+  "focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary";
 const LABEL = "block font-label-md text-label-md text-on-background mb-1.5";
 
 function FieldError({ id, text }: { id: string; text?: string }) {

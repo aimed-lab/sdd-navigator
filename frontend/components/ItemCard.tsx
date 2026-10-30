@@ -223,7 +223,7 @@ function signalBadge(item: ExploreItem, variant: "default" | "key" = "default"):
 // etc.) falls back to the neutral surface-container-low/secondary pairing
 // used for the plain date badge below.
 function trialStatusClasses(status: string): string {
-  if (status === "RECRUITING") return "bg-primary/10 text-primary";
+  if (status === "RECRUITING") return "bg-surface-container-low text-primary";
   if (status === "TERMINATED" || status === "WITHDRAWN" || status === "SUSPENDED") {
     return "bg-error-container text-on-error-container";
   }
@@ -430,12 +430,12 @@ export default function ItemCard({
           {geo && (geo.organism || geo.sample_count != null) && (
             <div className="flex items-center gap-2 flex-wrap mb-3">
               {geo.organism && (
-                <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 font-label-md text-label-md font-semibold">
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-md text-label-md font-semibold">
                   {geo.organism}
                 </span>
               )}
               {geo.sample_count != null && (
-                <span className="inline-flex items-center px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 font-label-md text-label-md font-semibold">
+                <span className="inline-flex items-center px-3 py-1 rounded-full bg-surface-container-low text-primary font-label-md text-label-md font-semibold">
                   {geo.sample_count.toLocaleString()} sample{geo.sample_count === 1 ? "" : "s"}
                 </span>
               )}

@@ -27,7 +27,7 @@ import { useTeamPanel } from "./TeamPanelContext";
 
 const CARD = "rounded-2xl border border-[#e8e4da] bg-white p-5 flex flex-col gap-4 shadow-[0_1px_2px_rgba(40,36,28,0.05)] min-w-0";
 const SMALL_BTN =
-  "inline-flex items-center gap-1 rounded-lg border border-[#d9d5c9] bg-white px-2.5 py-1.5 text-[12.5px] font-semibold leading-5 text-on-background hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50";
+  "inline-flex items-center gap-1 rounded-lg border border-[#d9d5c9] bg-white px-2.5 py-1.5 text-[12.5px] font-semibold leading-5 text-on-background hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 const ROW = "flex items-center gap-3 min-w-0 py-3 border-t border-[#efece3] first:border-t-0 first:pt-0 last:pb-0";
 
 function Card({
@@ -173,7 +173,7 @@ export function PagesShelf({
                     </Link>
                     <span
                       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11.5px] font-semibold leading-4 ${
-                        made ? "bg-[#dcfce7] text-[#166534]" : "bg-[#fef3c7] text-[#b45309]"
+                        made ? "bg-[#f3f1ea] text-[#1A5632]" : "bg-[#fef3c7] text-[#b45309]"
                       }`}
                     >
                       {made && <span className="material-symbols-outlined text-[13px]">auto_awesome</span>}
@@ -346,7 +346,7 @@ export function PeopleShelf({
           return (
             <li key={m.member_id} className={ROW}>
               <span
-                className="w-9 h-9 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[12px] font-semibold"
+                className="w-9 h-9 shrink-0 rounded-full bg-surface-container-low text-primary flex items-center justify-center text-[12px] font-semibold"
                 aria-hidden
               >
                 {initials(m.display_name)}
@@ -356,7 +356,7 @@ export function PeopleShelf({
                   {m.display_name}
                 </span>
                 {lead && (
-                  <span className="rounded-full bg-[#dcfce7] text-[#166534] px-2 py-0.5 text-[11.5px] font-semibold leading-4">Lead</span>
+                  <span className="rounded-full bg-[#f3f1ea] text-[#1A5632] px-2 py-0.5 text-[11.5px] font-semibold leading-4">Lead</span>
                 )}
                 {!m.signed_up && <span className="text-[12px] leading-5 text-secondary">invited</span>}
               </div>

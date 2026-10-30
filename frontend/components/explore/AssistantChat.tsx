@@ -135,7 +135,7 @@ export function Inlines({ items, maxCite }: { items: Inline[]; maxCite: number }
             <span
               key={i}
               title={`Source ${n.n}`}
-              className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 mx-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold align-text-top"
+              className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 mx-0.5 rounded-full bg-surface-container-low text-primary text-[10px] font-semibold align-text-top"
             >
               {n.n}
             </span>
@@ -235,7 +235,7 @@ function SourceCards({
             target="_blank"
             rel="noopener noreferrer"
             title={c.detail || c.title}
-            className={cls + "hover:border-primary/60 hover:-translate-y-px transition-all"}
+            className={cls + "hover:border-primary hover:-translate-y-px transition-all"}
           >
             {body}
           </a>
@@ -249,7 +249,7 @@ function SourceCards({
         <button
           type="button"
           onClick={onSeeAll}
-          className="flex flex-col items-start justify-center gap-0.5 p-2.5 min-w-0 rounded-xl border border-dashed border-primary/50 bg-primary/5 text-primary hover:bg-primary/10 transition-colors text-left"
+          className="flex flex-col items-start justify-center gap-0.5 p-2.5 min-w-0 rounded-xl border border-dashed border-primary bg-surface-container-low text-primary hover:bg-surface-container-low transition-colors text-left"
         >
           {more !== null && more > 0 && <span className="font-title text-[22px] leading-none">+{more}</span>}
           <span className="font-label-sm text-label-sm">See all results</span>
@@ -271,7 +271,7 @@ function Picker({ onPick, busy }: { onPick: (v: Visibility) => void; busy: boole
           className={
             "text-left px-4 py-3 rounded-xl border transition-all disabled:opacity-50 " +
             (v === "private"
-              ? "border-primary bg-primary/5"
+              ? "border-primary bg-surface-container-low"
               : "border-outline-variant/40 bg-white hover:border-primary")
           }
         >
@@ -897,13 +897,13 @@ export default function AssistantChat() {
               aria-orientation="vertical"
               aria-label="Resize assistant"
               onPointerDown={dragStart}
-              className="hidden sm:block absolute left-0 top-0 bottom-0 w-2 -ml-1 cursor-col-resize z-10 hover:bg-primary/20 active:bg-primary/30 transition-colors"
+              className="hidden sm:block absolute left-0 top-0 bottom-0 w-2 -ml-1 cursor-col-resize z-10 hover:bg-surface-container active:bg-surface-container transition-colors"
             />
           )}
 
           <div className="flex items-center justify-between gap-3 px-5 py-3 bg-white border-b border-outline-variant/30">
             <div className="flex items-center gap-2.5 min-w-0 flex-1">
-              <span className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              <span className="w-9 h-9 rounded-full bg-surface-container-low text-primary flex items-center justify-center shrink-0">
                 <span className="material-symbols-outlined text-[20px]">auto_awesome</span>
               </span>
               {/* flex-1 + min-w-0 + truncate: the text takes whatever room the
@@ -924,7 +924,7 @@ export default function AssistantChat() {
                 onClick={() => setExpanded((v) => !v)}
                 aria-pressed={expanded}
                 aria-label={expanded ? "Collapse" : "Expand"}
-                className="hidden sm:inline-flex items-center gap-1 px-2 py-1.5 rounded-lg font-label-sm text-label-sm text-secondary hover:text-primary hover:bg-primary/5"
+                className="hidden sm:inline-flex items-center gap-1 px-2 py-1.5 rounded-lg font-label-sm text-label-sm text-secondary hover:text-primary hover:bg-surface-container-low"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   {expanded ? "close_fullscreen" : "open_in_full"}
@@ -936,7 +936,7 @@ export default function AssistantChat() {
                 onClick={reset}
                 disabled={messages.length === 0}
                 aria-label="New chat"
-                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg font-label-sm text-label-sm text-secondary hover:text-primary hover:bg-primary/5 disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-secondary"
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg font-label-sm text-label-sm text-secondary hover:text-primary hover:bg-surface-container-low disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-secondary"
               >
                 <span className="material-symbols-outlined text-[18px]">edit_square</span>
                 {roomy && "New chat"}
@@ -945,7 +945,7 @@ export default function AssistantChat() {
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close assistant"
-                className="p-1.5 rounded-lg text-secondary hover:text-primary hover:bg-primary/5"
+                className="p-1.5 rounded-lg text-secondary hover:text-primary hover:bg-surface-container-low"
               >
                 <span className="material-symbols-outlined text-[20px]">close</span>
               </button>
@@ -1006,7 +1006,7 @@ export default function AssistantChat() {
                 return isPagePick(m.content) || detectTeamIntent(m.content) ? (
                   <div
                     key={i}
-                    className="self-end px-4 py-2 rounded-2xl rounded-br-md bg-primary/10 text-on-background font-body-md text-body-md"
+                    className="self-end px-4 py-2 rounded-2xl rounded-br-md bg-surface-container-low text-on-background font-body-md text-body-md"
                   >
                     {m.content}
                   </div>
@@ -1024,7 +1024,7 @@ export default function AssistantChat() {
                       {ex.chips.map((c) => (
                         <span
                           key={c.kind}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary font-label-sm text-label-sm"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-surface-container-low text-primary font-label-sm text-label-sm"
                         >
                           <span aria-hidden="true">✓</span>
                           {c.text}
@@ -1085,7 +1085,7 @@ export default function AssistantChat() {
                             <Link
                               href={`/explore/${encodeURIComponent(ex.query)}?category=${f.kind}`}
                               onClick={closeOnPhone}
-                              className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-primary/5 transition-colors"
+                              className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-surface-container-low transition-colors"
                             >
                               <span className="w-[84px] shrink-0 font-label-md text-label-md text-on-background">
                                 {f.label}
@@ -1093,7 +1093,7 @@ export default function AssistantChat() {
                               <span className="flex-1 min-w-0 font-body-sm text-body-sm text-secondary line-clamp-2">
                                 {f.text}
                               </span>
-                              <span className="shrink-0 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-label-sm text-[11px]">
+                              <span className="shrink-0 px-2 py-0.5 rounded-full bg-surface-container-low text-primary font-label-sm text-[11px]">
                                 {f.count}
                               </span>
                               <span className="material-symbols-outlined text-[16px] text-secondary">chevron_right</span>
@@ -1108,7 +1108,7 @@ export default function AssistantChat() {
                     <Picker onPick={(v) => send(CHOICE_INFO[v].label)} busy={busy} />
                   )}
                   {ex && ex.offerSave && pickerAt !== i && !pageCreated && (
-                    <div className="rounded-xl border border-primary/30 bg-primary/5 p-3.5 flex items-center gap-3">
+                    <div className="rounded-xl border border-outline-variant bg-surface-container-low p-3.5 flex items-center gap-3">
                       <p className="flex-1 font-body-sm text-body-sm text-on-background">
                         <strong className="font-semibold">Working on this?</strong> Save it as a wiki page that
                         collects new papers and trials daily.
@@ -1170,7 +1170,7 @@ export default function AssistantChat() {
             )}
 
             {action && phase.kind === "idle" && !typing && (
-              <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3">
+              <div className="rounded-xl border border-primary bg-surface-container-low p-4 flex flex-col gap-3">
                 <p className="font-body-md text-body-md text-on-background">
                   Create {action.visibility} page &lsquo;{action.title}&rsquo;?
                 </p>
@@ -1262,7 +1262,7 @@ export default function AssistantChat() {
             )}
 
             {phase.kind === "done" && (
-              <div className="rounded-xl border border-primary/40 bg-primary/5 p-4 flex flex-col gap-3" role="status">
+              <div className="rounded-xl border border-primary bg-surface-container-low p-4 flex flex-col gap-3" role="status">
                 <p className="font-body-md text-body-md text-on-background">
                   {shownTeam && teamAdded === true
                     ? `Your page is ready and added to ${shownTeam.name}.`
@@ -1318,7 +1318,7 @@ export default function AssistantChat() {
                 e.preventDefault();
                 void send(input);
               }}
-              className="flex items-end gap-2 rounded-2xl border border-outline-variant/40 bg-white pl-4 pr-2 py-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 transition-all"
+              className="flex items-end gap-2 rounded-2xl border border-outline-variant/40 bg-white pl-4 pr-2 py-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary transition-all"
             >
               <textarea
                 ref={inputRef}
